@@ -9,13 +9,21 @@ import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const LOGO = require("../../assets/images/e3logo.png");
 
-const ITEMS = [
+const ITEMS_BASE = [
   { key: "batches", label: "All Batches", icon: "package-variant-closed", route: "/batches", color: "#2E7D32" },
   { key: "payments", label: "Payments", icon: "cash-multiple", route: "/payments", color: "#43A047" },
   { key: "expenses", label: "Expenses", icon: "cash-minus", route: "/expenses", color: "#F57C00" },
   { key: "reports", label: "Reports", icon: "chart-bar", route: "/reports", color: "#1565C0" },
   { key: "maintenance", label: "Maintenance", icon: "wrench", route: "/maintenance", color: "#7B1FA2" },
   { key: "search", label: "Global Search", icon: "magnify", route: "/search", color: "#455A64" },
+];
+
+const ADMIN_ITEMS = [
+  { key: "users", label: "Users", icon: "account-multiple", route: "/users-admin", color: "#0288D1" },
+  { key: "branches", label: "Branches", icon: "office-building", route: "/branches-admin", color: "#6A1B9A" },
+];
+
+const AUDIT_ITEMS = [
   { key: "audit", label: "Audit Trail", icon: "history", route: "/audit", color: "#5D4037" },
   { key: "settings", label: "Settings", icon: "cog", route: "/settings", color: "#607D8B" },
 ];
@@ -51,7 +59,44 @@ export default function MoreScreen() {
         </View>
 
         <View style={styles.grid}>
-          {ITEMS.map(item => (
+          {ITEMS_BASE.map(item => (
+            <TouchableOpacity
+              key={item.key}
+              testID={`more-${item.key}`}
+              style={styles.item}
+              onPress={() => router.push(item.route as any)}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.itemIcon, { backgroundColor: `${item.color}18` }]}>
+                <MaterialCommunityIcons name={item.icon as any} size={22} color={item.color} />
+              </View>
+              <Text style={styles.itemLabel}>{item.label}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
+            </TouchableOpacity>
+          ))}
+
+          {user?.role === "Admin" && (
+            <>
+              <Text style={styles.groupLabel}>Administration</Text>
+              {ADMIN_ITEMS.map(item => (
+                <TouchableOpacity
+                  key={item.key}
+                  testID={`more-${item.key}`}
+                  style={styles.item}
+                  onPress={() => router.push(item.route as any)}
+                  activeOpacity={0.85}
+                >
+                  <View style={[styles.itemIcon, { backgroundColor: `${item.color}18` }]}>
+                    <MaterialCommunityIcons name={item.icon as any} size={22} color={item.color} />
+                  </View>
+                  <Text style={styles.itemLabel}>{item.label}</Text>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
+
+          {AUDIT_ITEMS.map(item => (
             <TouchableOpacity
               key={item.key}
               testID={`more-${item.key}`}
@@ -95,5 +140,6 @@ const styles = StyleSheet.create({
   itemLabel: { flex: 1, fontSize: 15, fontWeight: "700", color: colors.text },
   logoutBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: spacing.xl, marginHorizontal: spacing.xl, paddingVertical: 14, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.danger + "40", backgroundColor: colors.danger + "10" },
   logoutText: { fontSize: 15, fontWeight: "700", color: colors.danger },
+  groupLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.6, textTransform: "uppercase", marginTop: spacing.lg, marginBottom: 4, paddingHorizontal: 4 },
   footer: { textAlign: "center", fontSize: 11, color: colors.textLight, marginTop: spacing.xl },
 });

@@ -13,7 +13,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.cardamombatchpro.h3n1hn",
-      "icon": "./assets/images/icon.png"
+      "icon": "./assets/images/icon.png",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Attach produce photos to arrival entries",
+        "NSCameraUsageDescription": "Capture arrival and delivery photos"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -21,7 +25,8 @@
         "backgroundColor": "#E8F5E9"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.cardamombatchpro.h3n1hn"
+      "package": "com.emergent.cardamombatchpro.h3n1hn",
+      "permissions": ["READ_EXTERNAL_STORAGE", "CAMERA"]
     },
     "web": {
       "bundler": "metro",

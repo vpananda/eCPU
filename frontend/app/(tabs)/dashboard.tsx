@@ -148,7 +148,7 @@ export default function Dashboard() {
           <View style={{ paddingVertical: 60, alignItems: "center" }}><ActivityIndicator color={colors.primary} /></View>
         ) : (
           <>
-            {/* Today's Arrival of Spices — replaces profit hero */}
+            {/* Processing hero — replaces "Today's Arrival of Spices" */}
             <TouchableOpacity
               testID="dashboard-arrival-card"
               activeOpacity={0.9}
@@ -157,7 +157,7 @@ export default function Dashboard() {
             >
               <View style={styles.arrivalTopRow}>
                 <View>
-                  <Text style={styles.arrivalTitle}>{"Today's Arrival of Spices"}</Text>
+                  <Text style={styles.arrivalTitle}>Processing</Text>
                   <Text style={styles.arrivalSub}>Tap to view customer-wise details</Text>
                 </View>
                 <View style={styles.arrivalIcon}>

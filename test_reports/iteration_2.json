@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration-2 (Processing/Quick-Actions/Admin/Branch-Scoping) tested end-to-end. Backend: 24/24 pytest tests pass in /app/backend/tests/test_ethree_iter2.py covering — Processing dashboard fields (today_arrival.in/out/processing_weight+count, period_*, machines_*, range), /dashboard/arrivals returning in/out/processing rows with branch_name+customer+product+arrival_date, /api/arrivals simplified form (creates batch with machine_id=null, status Received, bill=raw*rate), PUT /batches/{id}/status requires machine_id for Loaded (400 without / 200 with, machine flipped to Running), delivery with inline payment (rate override, weight_loss, balance_amount recompute, payment persisted), /branches Admin create+update + Manager 403, /auth/users Admin create/update-password/delete + Manager can list (200) + Store Incharge 403, branch scoping (new manager sees own-branch customer + legacy; no foreign-branch leak), Google /auth/google invalid session returns 401, seeded logins regression (Admin/Manager/Store) all OK. Frontend (mobile viewport 390x844): Login shows E3 logo + mobile/password + demo autofill + Continue with Google, admin login navigates to dashboard, hero card titled 'Processing' with subtitle 'Tap to view customer-wise details', tapping opens Arrivals screen with 3 tabs (Arrivals/Processing/Delivered), date-range pill opens picker sheet with Apply/Cancel, +tab opens Quick Actions bottom sheet with 4 tiles (Arrival/Deliver/Expense/Payment), tapping Arrival navigates to /arrival-form with default RATE PER KG=12 pre-filled (visually confirmed in screenshot), Admin sees Users & Branches admin links under More, Manager login does NOT see Users/Branches (RBAC guard works), Users admin & Branches admin screens open with + button. No red screens, no crashes, no deprecated Expo packages (expo-av/expo-barcode-scanner/expo-background-fetch not present).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": [
+        "Console warnings: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' — non-blocking but noisy in web console; consider migrating StyleSheet shadow* → boxShadow.",
+        "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — coming from a library or our own View; consider updating.",
+        "Console warning: 'Animated: useNativeDriver is not supported' — expected on web preview; safe to ignore for web but harmless."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ethree_iter2.py",
+    "/app/backend/tests/test_ethree_api.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [
+    "(Optional cosmetic) Migrate deprecated RN Web style props: shadow* → boxShadow and pointerEvents prop → style.pointerEvents to silence console warnings.",
+    "(Optional) Add a `data-testid` on the New Arrival rate input's raw value to make automated regression assertions on 'default rate = 12' easier (currently the value is only in the input's value attribute, not innerText)."
+  ],
+  "critical_code_review_comments": [
+    "server.py has grown to 1353 lines. Recommend splitting into routers (auth, branches, users, batches, arrivals, delivery, payments, dashboard) — maintainability only.",
+    "branch_query() intentionally lets Managers see legacy records with branch_id in (None, ''). This is by-design backward-compat, but users should be aware — every historic customer/batch/expense without branch_id is visible to every branch's Manager/Store Incharge. If strict branch isolation is required for legacy data, add a data migration that assigns a default branch_id.",
+    "PUT /branches/{id} no longer allows unsetting fields to null (they get coerced to \"\"); acceptable.",
+    "DELETE /auth/users/{uid} only deletes the user + sessions but keeps their created records (customers/batches/expenses) referencing a now-missing created_by user_id — expected for audit purposes, but the UI should handle missing user names gracefully."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ethree_iter2.py (new)",
+    "/app/test_reports/pytest/iter2_results.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (24/24)", "frontend": "~93% (14/15 UI checks; 1 false-negative on 'default rate 12' visually confirmed present)"},
+  "seed_data_creation": "Created via tests: 1 arrival batch (TEST customer, Cardamom, 50kg → processed 40kg → Delivered w/ ₹200 UPI payment), 1 TEST branch (TEST-Branch-xxx-upd) + 1 TEST-ScopeBranch-xxx (scoping fixture, mgr user deleted at end), 1 TEST customer under scope branch, 1 TEST-Mgr user (created then password-updated then deleted). All test data prefixed TEST for cleanup traceability.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Preview URL: https://cardamom-batch-pro.preview.emergentagent.com. Use EXPO_PUBLIC_BACKEND_URL from frontend/.env for backend base. Regression suites: /app/backend/tests/test_ethree_api.py (iter1 = 29 tests) + /app/backend/tests/test_ethree_iter2.py (iter2 = 24 tests). Login mobile 9999999999/admin123 (Admin), 8888888888/manager123 (Manager), 7777777777/store123 (Store). All lifecycle & branch-scoping asserts pass. Note: PUT /batches/{id}/status with status=Loaded now REQUIRES machine_id when batch has none. Managers see own-branch data + legacy null-branch data (by design). New-entry route renders as a modal on focus; navigating directly to /new-entry works.",
+  "rca_of_issue": "Initial branch-scoping test asserted every Manager-visible customer must have branch_id == manager's branch_id, but branch_query() OR-includes {branch_id: null/''} for backward compat with pre-migration records. Corrected assertion to allow (null, '', own-branch) and fail only on foreign-branch leak — now passes and matches the documented backward-compat design."
+}

@@ -720,55 +720,170 @@ def _today_range():
     return start.isoformat(), end.isoformat()
 
 
-@api.get("/dashboard")
-async def dashboard(user: dict = Depends(get_current_user)):
-    tstart, tend = _today_range()
+def _parse_range(start: Optional[str], end: Optional[str]):
+    """Parse YYYY-MM-DD strings into UTC isoformat range. Default: this month → today."""
+    now = now_utc()
+    if start:
+        try:
+            sd = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid start date")
+    else:
+        sd = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if end:
+        try:
+            ed = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid end date")
+    else:
+        ed = now
+    # inclusive end
+    ed = ed.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    sd = sd.replace(hour=0, minute=0, second=0, microsecond=0)
+    return sd.isoformat(), ed.isoformat()
 
+
+@api.get("/dashboard")
+async def dashboard(
+    user: dict = Depends(get_current_user),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    tstart, tend = _today_range()
+    pstart, pend = _parse_range(start, end)
+
+    # Period-scoped
+    period_batches = await db.batches.find(
+        {"created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).to_list(2000)
+    period_customers = len({b["customer_id"] for b in period_batches})
+    period_received_weight = round(sum(b.get("raw_weight", 0) for b in period_batches), 2)
+
+    period_deliveries_docs = await db.batches.find(
+        {"status": "Delivered", "delivery.delivery_date": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).to_list(2000)
+    period_deliveries = len(period_deliveries_docs)
+    period_delivered_weight = round(
+        sum(b.get("actual_dry_weight") or 0 for b in period_deliveries_docs), 2
+    )
+
+    period_payments = await db.payments.find(
+        {"created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).to_list(2000)
+    period_collection = round(sum(p["amount"] for p in period_payments), 2)
+
+    period_expenses = await db.expenses.find(
+        {"created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).to_list(2000)
+    period_expense = round(sum(e["amount"] for e in period_expenses), 2)
+
+    # Today (for the "Today's Arrival of Spices" card)
     today_batches = await db.batches.find(
         {"created_at": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
     ).to_list(1000)
-    today_customers = len({b["customer_id"] for b in today_batches})
-    today_received_weight = round(sum(b.get("raw_weight", 0) for b in today_batches), 2)
+    today_in_weight = round(sum(b.get("raw_weight", 0) for b in today_batches), 2)
+    today_in_count = len(today_batches)
 
-    today_deliveries = await db.batches.count_documents(
-        {"status": "Delivered", "delivery.delivery_date": {"$gte": tstart, "$lt": tend}}
+    today_deliveries_docs = await db.batches.find(
+        {"status": "Delivered", "delivery.delivery_date": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
+    ).to_list(1000)
+    today_out_weight = round(sum(b.get("actual_dry_weight") or 0 for b in today_deliveries_docs), 2)
+    today_out_count = len(today_deliveries_docs)
+
+    # Pending payments (all-time)
+    all_batches = await db.batches.find({}, {"_id": 0}).to_list(3000)
+    pending_payments = round(
+        sum(b.get("balance_amount", 0) for b in all_batches if b.get("balance_amount", 0) > 0), 2
     )
-
-    today_payments = await db.payments.find(
-        {"created_at": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
-    ).to_list(1000)
-    today_collection = round(sum(p["amount"] for p in today_payments), 2)
-
-    today_expenses = await db.expenses.find(
-        {"created_at": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
-    ).to_list(1000)
-    today_expense = round(sum(e["amount"] for e in today_expenses), 2)
-
-    # Pending payments
-    all_batches = await db.batches.find({}, {"_id": 0}).to_list(2000)
-    pending_payments = round(sum(b.get("balance_amount", 0) for b in all_batches if b.get("balance_amount", 0) > 0), 2)
 
     machines = await db.machines.find({}, {"_id": 0}).to_list(50)
     machines_running = sum(1 for m in machines if m["status"] == "Running")
     machines_available = sum(1 for m in machines if m["status"] == "Available")
     machines_maintenance = sum(1 for m in machines if m["status"] in ("Maintenance", "Cleaning"))
 
-    # Recent activities from audit log
     recent = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15)
 
     return {
-        "today_customers": today_customers,
-        "today_received_weight": today_received_weight,
-        "today_deliveries": today_deliveries,
-        "today_collection": today_collection,
-        "today_expenses": today_expense,
-        "today_profit": round(today_collection - today_expense, 2),
+        # Date range echo
+        "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
+
+        # Today's Arrival of Spices (replaces profit hero)
+        "today_arrival": {
+            "in_weight": today_in_weight,
+            "in_count": today_in_count,
+            "out_weight": today_out_weight,
+            "out_count": today_out_count,
+        },
+
+        # Period metrics (respect selected date range)
+        "period_customers": period_customers,
+        "period_received_weight": period_received_weight,
+        "period_deliveries": period_deliveries,
+        "period_delivered_weight": period_delivered_weight,
+        "period_collection": period_collection,
+        "period_expenses": period_expense,
+        "period_profit": round(period_collection - period_expense, 2),
+
+        # All-time
         "pending_payments": pending_payments,
+
+        # Machines
         "machines_running": machines_running,
         "machines_available": machines_available,
         "machines_maintenance": machines_maintenance,
         "total_machines": len(machines),
+
         "recent_activities": recent,
+    }
+
+
+@api.get("/dashboard/arrivals")
+async def dashboard_arrivals(
+    user: dict = Depends(get_current_user),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    """List all arrivals (batch entries) + deliveries within a date range with customer + weights."""
+    pstart, pend = _parse_range(start, end)
+
+    # Batches created in range (arrivals IN)
+    ins = await db.batches.find(
+        {"created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
+
+    # Batches delivered in range (arrivals OUT)
+    outs = await db.batches.find(
+        {"status": "Delivered", "delivery.delivery_date": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).sort("delivery.delivery_date", -1).to_list(1000)
+
+    async def enrich(b: dict):
+        cust = await db.customers.find_one({"id": b["customer_id"]}, {"_id": 0, "name": 1, "code": 1, "mobile": 1})
+        prod = await db.products.find_one({"id": b["product_id"]}, {"_id": 0, "name": 1})
+        return {
+            "batch_id": b["id"],
+            "batch_no": b["batch_no"],
+            "customer_name": cust["name"] if cust else "",
+            "customer_code": cust["code"] if cust else "",
+            "customer_mobile": cust["mobile"] if cust else "",
+            "product": prod["name"] if prod else "",
+            "arrival_date": b["created_at"],
+            "raw_weight": b.get("raw_weight", 0),
+            "actual_dry_weight": b.get("actual_dry_weight"),
+            "delivery_date": (b.get("delivery") or {}).get("delivery_date"),
+            "status": b["status"],
+        }
+
+    in_rows = [await enrich(b) for b in ins]
+    out_rows = [await enrich(b) for b in outs]
+
+    total_in = round(sum(r["raw_weight"] for r in in_rows), 2)
+    total_out = round(sum((r["actual_dry_weight"] or 0) for r in out_rows), 2)
+
+    return {
+        "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
+        "totals": {"in_weight": total_in, "out_weight": total_out, "in_count": len(in_rows), "out_count": len(out_rows)},
+        "in": in_rows,
+        "out": out_rows,
     }
 
 

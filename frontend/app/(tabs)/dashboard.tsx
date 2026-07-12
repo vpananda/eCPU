@@ -1,20 +1,22 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
-import { Card } from "@/src/components/ui";
 
 type Dash = {
-  today_customers: number;
-  today_received_weight: number;
-  today_deliveries: number;
-  today_collection: number;
-  today_expenses: number;
-  today_profit: number;
+  range: { start: string; end: string };
+  today_arrival: { in_weight: number; in_count: number; out_weight: number; out_count: number };
+  period_customers: number;
+  period_received_weight: number;
+  period_deliveries: number;
+  period_delivered_weight: number;
+  period_collection: number;
+  period_expenses: number;
+  period_profit: number;
   pending_payments: number;
   machines_running: number;
   machines_available: number;
@@ -23,57 +25,89 @@ type Dash = {
   recent_activities: any[];
 };
 
-const METRICS: { key: keyof Dash; label: string; icon: any; color: string; prefix?: string; suffix?: string }[] = [
-  { key: "today_customers", label: "Customers Today", icon: "account-multiple-plus", color: "#2E7D32" },
-  { key: "today_received_weight", label: "Received (kg)", icon: "weight-kilogram", color: "#1565C0", suffix: " kg" },
-  { key: "today_deliveries", label: "Deliveries", icon: "truck-check", color: "#7B1FA2" },
-  { key: "today_collection", label: "Collection", icon: "cash-multiple", color: "#43A047", prefix: "₹" },
-  { key: "today_expenses", label: "Expenses", icon: "cash-minus", color: "#F57C00", prefix: "₹" },
-  { key: "pending_payments", label: "Pending Dues", icon: "clock-alert-outline", color: "#C62828", prefix: "₹" },
-];
-
-function fmt(v: any, prefix = "", suffix = "") {
-  if (typeof v !== "number") return `${prefix}${v ?? 0}${suffix}`;
-  return `${prefix}${v.toLocaleString("en-IN", { maximumFractionDigits: 2 })}${suffix}`;
+function fmtNum(v: number, prefix = "", suffix = "") {
+  return `${prefix}${(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}${suffix}`;
 }
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function monthStartISO() {
+  const d = new Date(); d.setDate(1);
+  return d.toISOString().slice(0, 10);
+}
+function fmtDate(iso: string) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
+
+const PRESETS = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "Last 7 days" },
+  { key: "month", label: "This Month" },
+  { key: "30d", label: "Last 30 days" },
+];
 
 function activityText(a: any): string {
   const parts: Record<string, string> = {
-    create_batch: "New batch created",
-    create_customer: "New customer added",
-    create_payment: "Payment recorded",
-    create_expense: "Expense recorded",
-    update_status_batch: "Batch status updated",
-    update_status_machine: "Machine status changed",
-    delivery_batch: "Batch delivered",
-    create_maintenance: "Maintenance logged",
+    create_batch: "New batch created", create_customer: "New customer added",
+    create_payment: "Payment recorded", create_expense: "Expense recorded",
+    update_status_batch: "Batch status updated", update_status_machine: "Machine status changed",
+    delivery_batch: "Batch delivered", create_maintenance: "Maintenance logged",
   };
-  const key = `${a.action}_${a.entity}`;
-  return parts[key] || `${a.action} ${a.entity}`;
+  return parts[`${a.action}_${a.entity}`] || `${a.action} ${a.entity}`;
 }
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const router = useRouter();
   const [data, setData] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const [start, setStart] = useState(monthStartISO());
+  const [end, setEnd] = useState(todayISO());
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [draftStart, setDraftStart] = useState(start);
+  const [draftEnd, setDraftEnd] = useState(end);
+
+  const load = useCallback(async (s = start, e = end) => {
     try {
-      const d = await api<Dash>("/dashboard");
+      const d = await api<Dash>(`/dashboard?start=${s}&end=${e}`);
       setData(d);
-    } catch (e) {
-      // ignore
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [start, end]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = () => { setRefreshing(true); load(); };
+
+  const applyPreset = (key: string) => {
+    const today = new Date();
+    let s = todayISO();
+    if (key === "week") {
+      const d = new Date(); d.setDate(d.getDate() - 6); s = d.toISOString().slice(0, 10);
+    } else if (key === "month") {
+      s = monthStartISO();
+    } else if (key === "30d") {
+      const d = new Date(); d.setDate(d.getDate() - 29); s = d.toISOString().slice(0, 10);
+    }
+    setDraftStart(s);
+    setDraftEnd(todayISO());
+  };
+
+  const applyRange = () => {
+    setStart(draftStart);
+    setEnd(draftEnd);
+    setPickerOpen(false);
+    setLoading(true);
+    load(draftStart, draftEnd);
+  };
+
+  const rangeLabel = useMemo(() => `${fmtDate(start)} — ${fmtDate(end)}`, [start, end]);
+
+  const arrival = data?.today_arrival;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -95,44 +129,77 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
+        {/* Date range selector */}
+        <TouchableOpacity
+          testID="dashboard-daterange"
+          style={styles.rangePill}
+          onPress={() => { setDraftStart(start); setDraftEnd(end); setPickerOpen(true); }}
+          activeOpacity={0.85}
+        >
+          <MaterialCommunityIcons name="calendar-range" size={18} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rangeLabel}>Report period</Text>
+            <Text style={styles.rangeValue}>{rangeLabel}</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-down" size={20} color={colors.primary} />
+        </TouchableOpacity>
+
         {loading && !data ? (
           <View style={{ paddingVertical: 60, alignItems: "center" }}><ActivityIndicator color={colors.primary} /></View>
         ) : (
           <>
-            {/* Profit hero */}
-            <View style={styles.profitCard} testID="dashboard-profit-card">
-              <View style={{ flex: 1 }}>
-                <Text style={styles.profitLabel}>{"Today's Profit"}</Text>
-                <Text style={styles.profitValue}>
-                  ₹{(data?.today_profit || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
-                </Text>
-                <View style={{ flexDirection: "row", gap: spacing.md, marginTop: spacing.sm }}>
-                  <View style={styles.profitStat}>
-                    <MaterialCommunityIcons name="arrow-up-bold" size={14} color="#B9F6CA" />
-                    <Text style={styles.profitStatText}>₹{data?.today_collection.toFixed(0)} in</Text>
-                  </View>
-                  <View style={styles.profitStat}>
-                    <MaterialCommunityIcons name="arrow-down-bold" size={14} color="#FFCDD2" />
-                    <Text style={styles.profitStatText}>₹{data?.today_expenses.toFixed(0)} out</Text>
-                  </View>
+            {/* Today's Arrival of Spices — replaces profit hero */}
+            <TouchableOpacity
+              testID="dashboard-arrival-card"
+              activeOpacity={0.9}
+              onPress={() => router.push(`/arrivals?start=${start}&end=${end}`)}
+              style={styles.arrivalCard}
+            >
+              <View style={styles.arrivalTopRow}>
+                <View>
+                  <Text style={styles.arrivalTitle}>{"Today's Arrival of Spices"}</Text>
+                  <Text style={styles.arrivalSub}>Tap to view customer-wise details</Text>
+                </View>
+                <View style={styles.arrivalIcon}>
+                  <MaterialCommunityIcons name="basket-fill" size={30} color="#fff" />
                 </View>
               </View>
-              <View style={styles.profitIcon}>
-                <MaterialCommunityIcons name="chart-line" size={36} color="#fff" />
-              </View>
-            </View>
 
-            {/* Metric grid */}
-            <View style={styles.grid}>
-              {METRICS.map(m => (
-                <View key={String(m.key)} style={styles.metric} testID={`metric-${String(m.key)}`}>
-                  <View style={[styles.metricIcon, { backgroundColor: `${m.color}18` }]}>
-                    <MaterialCommunityIcons name={m.icon} size={20} color={m.color} />
+              <View style={styles.arrivalGrid}>
+                <View style={styles.arrivalStat}>
+                  <View style={styles.arrivalBadge}>
+                    <MaterialCommunityIcons name="arrow-down-bold" size={16} color="#fff" />
+                    <Text style={styles.arrivalBadgeText}>IN</Text>
                   </View>
-                  <Text style={styles.metricValue}>{fmt(data?.[m.key] as any, m.prefix, m.suffix)}</Text>
-                  <Text style={styles.metricLabel}>{m.label}</Text>
+                  <Text style={styles.arrivalValue}>{fmtNum(arrival?.in_weight || 0, "", " kg")}</Text>
+                  <Text style={styles.arrivalMeta}>{arrival?.in_count || 0} arrivals</Text>
                 </View>
-              ))}
+
+                <View style={styles.arrivalDivider} />
+
+                <View style={styles.arrivalStat}>
+                  <View style={[styles.arrivalBadge, { backgroundColor: "rgba(255,255,255,0.28)" }]}>
+                    <MaterialCommunityIcons name="arrow-up-bold" size={16} color="#fff" />
+                    <Text style={styles.arrivalBadgeText}>OUT</Text>
+                  </View>
+                  <Text style={styles.arrivalValue}>{fmtNum(arrival?.out_weight || 0, "", " kg")}</Text>
+                  <Text style={styles.arrivalMeta}>{arrival?.out_count || 0} deliveries</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+
+            {/* Period-based metric grid */}
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionHeader}>Overview</Text>
+              <Text style={styles.sectionHint}>{rangeLabel}</Text>
+            </View>
+            <View style={styles.grid}>
+              <Metric icon="account-multiple-plus" color="#2E7D32" label="Customers" value={fmtNum(data?.period_customers || 0)} testID="metric-customers" />
+              <Metric icon="weight-kilogram" color="#1565C0" label="Received" value={fmtNum(data?.period_received_weight || 0, "", " kg")} testID="metric-received" />
+              <Metric icon="truck-check" color="#7B1FA2" label="Deliveries" value={fmtNum(data?.period_deliveries || 0)} testID="metric-deliveries" />
+              <Metric icon="cash-multiple" color="#43A047" label="Collection" value={fmtNum(data?.period_collection || 0, "₹")} testID="metric-collection" />
+              <Metric icon="cash-minus" color="#F57C00" label="Expenses" value={fmtNum(data?.period_expenses || 0, "₹")} testID="metric-expenses" />
+              <Metric icon="clock-alert-outline" color="#C62828" label="Pending Dues" value={fmtNum(data?.pending_payments || 0, "₹")} testID="metric-pending" />
             </View>
 
             {/* Machines snapshot */}
@@ -172,7 +239,77 @@ export default function Dashboard() {
           </>
         )}
       </ScrollView>
+
+      {/* Date range picker modal */}
+      <Modal visible={pickerOpen} animationType="slide" transparent onRequestClose={() => setPickerOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Select Date Range</Text>
+
+            <View style={styles.presetsRow}>
+              {PRESETS.map(p => (
+                <TouchableOpacity
+                  key={p.key}
+                  testID={`preset-${p.key}`}
+                  style={styles.preset}
+                  onPress={() => applyPreset(p.key)}
+                >
+                  <Text style={styles.presetText}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.dateRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dateLabel}>From</Text>
+                <TextInput
+                  testID="dashboard-start-date"
+                  style={styles.dateInput}
+                  value={draftStart}
+                  onChangeText={setDraftStart}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+              <MaterialCommunityIcons name="arrow-right" size={18} color={colors.textMuted} style={{ marginTop: 18 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dateLabel}>To</Text>
+                <TextInput
+                  testID="dashboard-end-date"
+                  style={styles.dateInput}
+                  value={draftEnd}
+                  onChangeText={setDraftEnd}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+            </View>
+
+            <View style={styles.sheetActions}>
+              <TouchableOpacity testID="range-cancel" style={styles.sheetCancel} onPress={() => setPickerOpen(false)}>
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="range-apply" style={styles.sheetApply} onPress={applyRange}>
+                <Text style={styles.sheetApplyText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function Metric({ icon, color, label, value, testID }: any) {
+  return (
+    <View style={styles.metric} testID={testID}>
+      <View style={[styles.metricIcon, { backgroundColor: `${color}18` }]}>
+        <MaterialCommunityIcons name={icon} size={20} color={color} />
+      </View>
+      <Text style={styles.metricValue}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -197,21 +334,40 @@ const styles = StyleSheet.create({
   roleText: { fontSize: 11, color: colors.primaryDark, fontWeight: "700", letterSpacing: 0.3 },
   iconBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary50, alignItems: "center", justifyContent: "center" },
 
-  profitCard: {
+  rangePill: {
+    flexDirection: "row", alignItems: "center", gap: spacing.sm,
+    marginHorizontal: spacing.xl, marginBottom: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: 10,
+    backgroundColor: colors.card, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+    ...shadow.card,
+  },
+  rangeLabel: { fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.5, textTransform: "uppercase" },
+  rangeValue: { fontSize: 14, fontWeight: "800", color: colors.text, marginTop: 1 },
+
+  arrivalCard: {
     marginHorizontal: spacing.xl,
     backgroundColor: colors.primary,
     padding: spacing.xl,
     borderRadius: radius.xxl,
-    flexDirection: "row",
-    alignItems: "center",
     marginBottom: spacing.lg,
     ...shadow.card,
   },
-  profitLabel: { color: "#B9F6CA", fontSize: 13, fontWeight: "600", letterSpacing: 0.4, textTransform: "uppercase" },
-  profitValue: { color: "#fff", fontSize: 30, fontWeight: "800", marginTop: 6, letterSpacing: -0.5 },
-  profitStat: { flexDirection: "row", alignItems: "center", gap: 4 },
-  profitStatText: { color: "#E8F5E9", fontSize: 12, fontWeight: "600" },
-  profitIcon: { width: 62, height: 62, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  arrivalTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
+  arrivalTitle: { color: "#fff", fontSize: 17, fontWeight: "800", letterSpacing: -0.3 },
+  arrivalSub: { color: "#B9F6CA", fontSize: 12, marginTop: 2, fontWeight: "500" },
+  arrivalIcon: { width: 56, height: 56, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.15)", alignItems: "center", justifyContent: "center" },
+  arrivalGrid: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
+  arrivalStat: { flex: 1 },
+  arrivalDivider: { width: 1, height: 60, backgroundColor: "rgba(255,255,255,0.25)", marginHorizontal: spacing.md },
+  arrivalBadge: { flexDirection: "row", alignItems: "center", gap: 3, alignSelf: "flex-start", backgroundColor: colors.accent, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
+  arrivalBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+  arrivalValue: { color: "#fff", fontSize: 26, fontWeight: "800", marginTop: 8, letterSpacing: -0.5 },
+  arrivalMeta: { color: "#E8F5E9", fontSize: 11, marginTop: 2, fontWeight: "600" },
+
+  sectionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, marginBottom: spacing.sm },
+  sectionHeader: { fontSize: 15, fontWeight: "800", color: colors.text },
+  sectionHint: { fontSize: 11, fontWeight: "700", color: colors.textMuted, letterSpacing: 0.3 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.xl, gap: spacing.md, marginBottom: spacing.lg },
   metric: {
@@ -240,4 +396,20 @@ const styles = StyleSheet.create({
   actText: { fontSize: 13, color: colors.text, fontWeight: "600" },
   actMeta: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   emptyText: { fontSize: 13, color: colors.textMuted, paddingVertical: spacing.md, textAlign: "center" },
+
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: colors.card, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.xl, paddingBottom: spacing.xxl },
+  sheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: spacing.md },
+  sheetTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  presetsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: spacing.lg },
+  preset: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.primary50 },
+  presetText: { fontSize: 12, fontWeight: "700", color: colors.primary },
+  dateRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.lg },
+  dateLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
+  dateInput: { backgroundColor: colors.bg, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: colors.text, borderWidth: 1, borderColor: colors.border },
+  sheetActions: { flexDirection: "row", gap: spacing.md },
+  sheetCancel: { flex: 1, paddingVertical: 12, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.border, alignItems: "center" },
+  sheetCancelText: { color: colors.textMuted, fontWeight: "700" },
+  sheetApply: { flex: 2, paddingVertical: 12, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: "center" },
+  sheetApplyText: { color: "#fff", fontWeight: "800" },
 });

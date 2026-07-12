@@ -97,6 +97,9 @@ export default function BatchDetail() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Details</Text>
           <Row label="Customer" value={data.customer?.name || "-"} sub={data.customer?.mobile} />
+          {data.received_from && data.received_from !== data.customer?.name ? (
+            <Row label="Received From" value={data.received_from} />
+          ) : null}
           <Row label="Product" value={data.product?.name || "-"} />
           <Row label="Machine" value={data.machine?.name || "-"} />
           <Row label="Raw Weight" value={`${data.raw_weight} kg`} />

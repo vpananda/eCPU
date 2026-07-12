@@ -233,6 +233,7 @@ class ArrivalIn(BaseModel):
     remarks: Optional[str] = ""
     photos: List[str] = []
     branch_id: Optional[str] = None
+    received_from: Optional[str] = ""  # Who physically brought the produce
 
 
 class BatchIn(BaseModel):
@@ -804,6 +805,7 @@ async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)
         "expected_delivery_date": None,
         "remarks": body.remarks or "",
         "photos": body.photos or [],
+        "received_from": body.received_from or "",
         "branch_id": branch_id,
         "arrival_date": arrival_date,
         "status": "Received",

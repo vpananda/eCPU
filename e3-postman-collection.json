@@ -1,0 +1,465 @@
+{
+  "info": {
+    "name": "E3 — Post Harvest Processing Unit",
+    "_postman_id": "e3-agro-2026-01",
+    "description": "Complete API collection for the E3 drying plant management app. Login first — the token is auto-captured into the `token` collection variable and used by all subsequent requests.\n\n**Base URL:** set the `baseUrl` variable to your backend origin (e.g. `https://cardamom-batch-pro.preview.emergentagent.com` for the Emergent preview, or `http://localhost:8001` locally).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://cardamom-batch-pro.preview.emergentagent.com", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "customerId", "value": "", "type": "string" },
+    { "key": "productId", "value": "", "type": "string" },
+    { "key": "machineId", "value": "", "type": "string" },
+    { "key": "branchId", "value": "", "type": "string" },
+    { "key": "batchId", "value": "", "type": "string" },
+    { "key": "userId", "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (Admin)",
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "const j = pm.response.json();",
+              "if (j.token) pm.collectionVariables.set('token', j.token);",
+              "pm.test('Login OK', () => pm.expect(pm.response.code).to.eql(200));"
+            ]}}
+          ],
+          "request": {
+            "method": "POST", "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"9999999999\",\n  \"password\": \"admin123\"\n}" }
+          }
+        },
+        {
+          "name": "Login (Manager)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json(); if (j.token) pm.collectionVariables.set('token', j.token);"
+          ]}}],
+          "request": {
+            "method": "POST", "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"8888888888\",\n  \"password\": \"manager123\"\n}" }
+          }
+        },
+        {
+          "name": "Login (Store Incharge)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json(); if (j.token) pm.collectionVariables.set('token', j.token);"
+          ]}}],
+          "request": {
+            "method": "POST", "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"7777777777\",\n  \"password\": \"store123\"\n}" }
+          }
+        },
+        {
+          "name": "Google — Complete Sign-In",
+          "request": {
+            "method": "POST", "auth": { "type": "noauth" },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/google",
+            "body": { "mode": "raw", "raw": "{\n  \"session_token\": \"<emergent-session-token-from-frontend>\"\n}" },
+            "description": "The frontend fetches the session_token from the Emergent OAuth callback and posts it here. Backend verifies with Emergent then upserts the user."
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/api/auth/me"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/auth/logout" }
+        }
+      ]
+    },
+    {
+      "name": "Users (Admin)",
+      "item": [
+        {
+          "name": "List Users",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json();",
+            "if (Array.isArray(j) && j[0]) pm.collectionVariables.set('userId', j[0].id);"
+          ]}}],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/auth/users" }
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/users",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Priya M.\",\n  \"mobile\": \"9012345678\",\n  \"password\": \"priya123\",\n  \"role\": \"Manager\",\n  \"branch_id\": \"{{branchId}}\"\n}" }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/auth/users/{{userId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Priya Manager\",\n  \"role\": \"Manager\",\n  \"branch_id\": \"{{branchId}}\",\n  \"password\": \"newpass456\"\n}" }
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/auth/users/{{userId}}" }
+        }
+      ]
+    },
+    {
+      "name": "Branches",
+      "item": [
+        {
+          "name": "List Branches",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json();",
+            "if (Array.isArray(j) && j[0]) pm.collectionVariables.set('branchId', j[0].id);"
+          ]}}],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/branches" }
+        },
+        {
+          "name": "Create Branch (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/branches",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Sakleshpur Unit\",\n  \"address\": \"Malnad Road, Hassan\",\n  \"phone\": \"9445566778\"\n}" }
+          }
+        },
+        {
+          "name": "Update Branch (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/branches/{{branchId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Sakleshpur Main\",\n  \"address\": \"Malnad Road\",\n  \"phone\": \"9445566778\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "List Products",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json();",
+            "if (Array.isArray(j) && j[0]) pm.collectionVariables.set('productId', j[0].id);"
+          ]}}],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/products" }
+        },
+        {
+          "name": "Create Product (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/products",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Nutmeg\",\n  \"default_rate\": 22\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Machines",
+      "item": [
+        {
+          "name": "List Machines",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json();",
+            "if (Array.isArray(j) && j[0]) pm.collectionVariables.set('machineId', j[0].id);"
+          ]}}],
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/machines" }
+        },
+        {
+          "name": "Create Machine (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/machines",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Dryer 5\",\n  \"capacity\": 1200,\n  \"status\": \"Available\",\n  \"branch_id\": \"{{branchId}}\"\n}" }
+          }
+        },
+        {
+          "name": "Update Machine Status",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/machines/{{machineId}}/status",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"Maintenance\"\n}" },
+            "description": "status ∈ {Available, Running, Maintenance, Cleaning}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "List Customers (search optional)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json();",
+            "if (Array.isArray(j) && j[0]) pm.collectionVariables.set('customerId', j[0].id);"
+          ]}}],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers?q=",
+              "host": ["{{baseUrl}}"], "path": ["api","customers"],
+              "query": [{ "key": "q", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Get Customer (with stats + history)",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/customers/{{customerId}}" }
+        },
+        {
+          "name": "Create Customer",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json(); if (j.id) pm.collectionVariables.set('customerId', j.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/customers",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Suresh Naik\",\n  \"mobile\": \"9820011223\",\n  \"alt_mobile\": \"\",\n  \"village\": \"Sakleshpur\",\n  \"taluk\": \"Sakleshpur\",\n  \"district\": \"Hassan\",\n  \"address\": \"Estate #12\",\n  \"gst\": \"\",\n  \"remarks\": \"Regular grower\"\n}" }
+          }
+        },
+        {
+          "name": "Update Customer",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/customers/{{customerId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Suresh Naik\",\n  \"mobile\": \"9820011223\",\n  \"village\": \"Sakleshpur\",\n  \"remarks\": \"Premium grower\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Arrivals & Batches",
+      "item": [
+        {
+          "name": "Create Arrival (simplified)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json(); if (j.id) pm.collectionVariables.set('batchId', j.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/arrivals",
+            "body": { "mode": "raw", "raw": "{\n  \"customer_id\": \"{{customerId}}\",\n  \"product_id\": \"{{productId}}\",\n  \"raw_weight\": 250,\n  \"bags\": 12,\n  \"arrival_date\": \"2026-07-12\",\n  \"rate_per_kg\": 15,\n  \"received_from\": \"Ravi (driver)\",\n  \"branch_id\": \"{{branchId}}\",\n  \"remarks\": \"Freshly harvested\",\n  \"photos\": []\n}" }
+          }
+        },
+        {
+          "name": "Create Full Batch (advance + charges)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "const j = pm.response.json(); if (j.id) pm.collectionVariables.set('batchId', j.id);"
+          ]}}],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/batches",
+            "body": { "mode": "raw", "raw": "{\n  \"customer_id\": \"{{customerId}}\",\n  \"product_id\": \"{{productId}}\",\n  \"raw_weight\": 300,\n  \"estimated_dry_weight\": 220,\n  \"moisture\": 25,\n  \"bags\": 15,\n  \"bag_weight\": 20,\n  \"machine_id\": \"{{machineId}}\",\n  \"rate_per_kg\": 15,\n  \"loading_charges\": 100,\n  \"discount\": 0,\n  \"advance_paid\": 500,\n  \"remarks\": \"With advance\",\n  \"photos\": [],\n  \"branch_id\": \"{{branchId}}\"\n}" }
+          }
+        },
+        {
+          "name": "List Batches",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/batches?status=",
+              "host": ["{{baseUrl}}"], "path": ["api","batches"],
+              "query": [
+                { "key": "status", "value": "", "description": "Received | Loaded | Drying | Completed | Delivered" },
+                { "key": "q", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Batch",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/batches/{{batchId}}" }
+        },
+        {
+          "name": "Advance Status → Loaded (requires machine_id)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/batches/{{batchId}}/status",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"Loaded\",\n  \"machine_id\": \"{{machineId}}\",\n  \"remarks\": \"Loaded into Dryer 1\"\n}" }
+          }
+        },
+        {
+          "name": "Advance Status → Drying",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/batches/{{batchId}}/status",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"Drying\"\n}" }
+          }
+        },
+        {
+          "name": "Advance Status → Completed",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/batches/{{batchId}}/status",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"Completed\"\n}" }
+          }
+        },
+        {
+          "name": "Delivery",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/batches/{{batchId}}/delivery",
+            "body": { "mode": "raw", "raw": "{\n  \"actual_dry_weight\": 210,\n  \"processed_bags\": 12,\n  \"rate_per_kg\": 15,\n  \"received_by\": \"Suresh Naik\",\n  \"received_by_phone\": \"9820011223\",\n  \"amount_received\": 1500,\n  \"payment_mode\": \"UPI\",\n  \"remarks\": \"Handed over in good condition\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "List Payments",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/payments" }
+        },
+        {
+          "name": "Record Payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/payments",
+            "body": { "mode": "raw", "raw": "{\n  \"batch_id\": \"{{batchId}}\",\n  \"amount\": 800,\n  \"mode\": \"Cash\",\n  \"remarks\": \"Balance settlement\"\n}" },
+            "description": "mode ∈ {Cash, UPI, Bank, Credit}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Expenses",
+      "item": [
+        {
+          "name": "Categories",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/expense-categories" }
+        },
+        {
+          "name": "List Expenses",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/expenses" }
+        },
+        {
+          "name": "Add Expense",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/expenses",
+            "body": { "mode": "raw", "raw": "{\n  \"category\": \"Diesel\",\n  \"amount\": 3200,\n  \"vendor\": \"IOCL Bunk\",\n  \"remarks\": \"Weekly refill\",\n  \"expense_date\": \"2026-07-12\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Maintenance",
+      "item": [
+        {
+          "name": "List Maintenance",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/maintenance" }
+        },
+        {
+          "name": "Log Maintenance",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/api/maintenance",
+            "body": { "mode": "raw", "raw": "{\n  \"machine_id\": \"{{machineId}}\",\n  \"complaint\": \"Belt worn out\",\n  \"description\": \"Replace drive belt\",\n  \"cost\": 850,\n  \"technician\": \"Mahesh\",\n  \"next_service_date\": \"2026-10-01\",\n  \"status\": \"Open\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard & Reports",
+      "item": [
+        {
+          "name": "Dashboard (date range optional)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard?start=&end=",
+              "host": ["{{baseUrl}}"], "path": ["api","dashboard"],
+              "query": [
+                { "key": "start", "value": "", "description": "YYYY-MM-DD (default: month start)" },
+                { "key": "end", "value": "", "description": "YYYY-MM-DD (default: today)" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dashboard Arrivals (Processing details)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/dashboard/arrivals?start=&end=",
+              "host": ["{{baseUrl}}"], "path": ["api","dashboard","arrivals"],
+              "query": [
+                { "key": "start", "value": "" },
+                { "key": "end", "value": "" }
+              ]
+            },
+            "description": "Returns {range, totals, in[], out[], processing[]} with branch_name enriched on each row."
+          }
+        },
+        {
+          "name": "Reports Summary",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/reports/summary" }
+        },
+        {
+          "name": "Global Search",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/search?q=suresh",
+              "host": ["{{baseUrl}}"], "path": ["api","search"],
+              "query": [{ "key": "q", "value": "suresh" }]
+            }
+          }
+        },
+        {
+          "name": "Audit Log (Admin/Manager)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/audit?limit=100",
+              "host": ["{{baseUrl}}"], "path": ["api","audit"],
+              "query": [{ "key": "limit", "value": "100" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "Company Info",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/settings/company" }
+        }
+      ]
+    }
+  ]
+}

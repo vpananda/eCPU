@@ -278,9 +278,10 @@ async def seed():
     await db.settings.update_one(
         {"key": "company"},
         {"$set": {"value": {
-            "name": "E3 - Energy Efficient Environment", "address": "",
+            "name": "E3", "address": "",
             "gst": "", "phone": "", "default_rate": 12,
-            "tagline": "Smart Drying Plant Management",
+            "tagline": "Post Harvest Processing Unit",
+            "meaning": "Energy, Efficient, Environment",
         }}},
         upsert=True,
     )

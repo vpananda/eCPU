@@ -54,8 +54,12 @@ export default function LoginScreen() {
               <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
             </View>
             <Text style={styles.brand}>E3</Text>
-            <Text style={styles.tag}>Energy · Efficient · Environment</Text>
-            <Text style={styles.subTag}>Smart Drying Plant Management</Text>
+            <Text style={styles.tag}>Energy, Efficient, Environment</Text>
+            <View style={styles.subTagRow}>
+              <View style={styles.subTagLine} />
+              <Text style={styles.subTag}>Post Harvest Processing Unit</Text>
+              <View style={styles.subTagLine} />
+            </View>
           </View>
 
           <View style={styles.card}>
@@ -131,9 +135,36 @@ const styles = StyleSheet.create({
     shadowColor: "#2E7D32", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 6,
   },
   logoImg: { width: 78, height: 78 },
-  brand: { fontSize: 44, fontWeight: "900", color: colors.primary, letterSpacing: -1.5, marginTop: 2 },
-  tag: { fontSize: 13, color: colors.primary, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
-  subTag: { fontSize: 12, color: colors.textMuted, fontWeight: "500", marginTop: 2 },
+  brand: {
+    fontFamily: "Poppins-Black",
+    fontSize: 72,
+    color: colors.primary,
+    letterSpacing: -4,
+    marginTop: 6,
+    lineHeight: 78,
+  },
+  tag: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 13,
+    color: colors.primary,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    marginTop: 2,
+  },
+  subTagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    gap: 8,
+  },
+  subTagLine: { flex: 1, maxWidth: 32, height: 1, backgroundColor: colors.primaryLight },
+  subTag: {
+    fontFamily: "Poppins-SemiBold",
+    fontSize: 11,
+    color: colors.textMuted,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.xxl,

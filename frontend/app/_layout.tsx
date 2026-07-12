@@ -5,6 +5,7 @@ import { LogBox, StatusBar } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
+import { useBrandFonts } from "@/src/hooks/use-brand-fonts";
 import { AuthProvider, useAuth } from "@/src/auth";
 import { ToastProvider } from "@/src/components/Toast";
 import { colors } from "@/src/theme";
@@ -32,7 +33,10 @@ function RouteGuard() {
 }
 
 export default function RootLayout() {
-  const [loaded, error] = useIconFonts();
+  const [iconsLoaded, iconError] = useIconFonts();
+  const [brandLoaded, brandError] = useBrandFonts();
+  const loaded = iconsLoaded && brandLoaded;
+  const error = iconError || brandError;
 
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync();

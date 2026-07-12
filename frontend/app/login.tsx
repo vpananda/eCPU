@@ -17,11 +17,12 @@ const DEMO = [
 ];
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const toast = useToast();
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [gLoading, setGLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
 
   const onLogin = async () => {
@@ -37,6 +38,18 @@ export default function LoginScreen() {
       toast.show(e.message || "Login failed", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onGoogleLogin = async () => {
+    setGLoading(true);
+    try {
+      await loginWithGoogle();
+      // Web: page navigates away; the state update happens on remount
+    } catch (e: any) {
+      toast.show(e.message || "Google sign-in failed", "error");
+    } finally {
+      setGLoading(false);
     }
   };
 
@@ -95,6 +108,27 @@ export default function LoginScreen() {
             </TouchableOpacity>
 
             <Button testID="login-submit-button" title="Sign In" onPress={onLogin} loading={loading} />
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              testID="google-signin-button"
+              style={styles.googleBtn}
+              onPress={onGoogleLogin}
+              disabled={gLoading}
+              activeOpacity={0.85}
+            >
+              <View style={styles.googleIcon}>
+                <Text style={styles.googleG}>G</Text>
+              </View>
+              <Text style={styles.googleText}>
+                {gLoading ? "Opening Google…" : "Continue with Google"}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.demoBox}>
@@ -175,6 +209,28 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   showPw: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", marginBottom: spacing.lg, marginTop: -4 },
   showPwText: { fontSize: 12, color: colors.primary, fontWeight: "600" },
+  divider: { flexDirection: "row", alignItems: "center", marginVertical: spacing.lg, gap: 10 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  dividerText: { fontSize: 11, fontWeight: "800", color: colors.textLight, letterSpacing: 0.5 },
+  googleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: "#fff",
+  },
+  googleIcon: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: "#fff",
+    borderWidth: 1.5, borderColor: "#4285F4",
+    alignItems: "center", justifyContent: "center",
+  },
+  googleG: { color: "#4285F4", fontWeight: "900", fontSize: 14, lineHeight: 16 },
+  googleText: { fontSize: 15, fontWeight: "700", color: colors.text },
   demoBox: { marginTop: spacing.xl, backgroundColor: colors.primary50, borderRadius: radius.xl, padding: spacing.lg },
   demoTitle: { fontSize: 12, fontWeight: "800", color: colors.primaryDark, letterSpacing: 0.5, marginBottom: spacing.md, textTransform: "uppercase" },
   demoRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: "#ffffff90" },

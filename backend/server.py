@@ -12,6 +12,7 @@ from pathlib import Path
 import os
 import uuid
 import jwt
+import httpx
 import logging
 
 ROOT_DIR = Path(__file__).parent
@@ -65,14 +66,34 @@ def make_token(user: dict) -> str:
 async def get_current_user(cred: HTTPAuthorizationCredentials = Security(security)) -> dict:
     if not cred:
         raise HTTPException(status_code=401, detail="Missing token")
+    token = cred.credentials
+
+    # 1) Try JWT (mobile+password login)
     try:
-        payload = jwt.decode(cred.credentials, JWT_SECRET, algorithms=[JWT_ALGO])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password": 0})
+        if user:
+            return user
     except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+        pass
+
+    # 2) Fallback: Google-issued session_token stored in user_sessions
+    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if session:
+        exp = session.get("expires_at")
+        if isinstance(exp, str):
+            try:
+                exp = datetime.fromisoformat(exp)
+            except Exception:
+                exp = None
+        if exp and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp and exp > now_utc():
+            user = await db.users.find_one({"id": session["user_id"]}, {"_id": 0, "password": 0})
+            if user:
+                return user
+
+    raise HTTPException(status_code=401, detail="Invalid token")
 
 
 def require_roles(*roles):
@@ -231,10 +252,21 @@ DEFAULT_USERS = [
 
 
 async def seed():
+    # Drop any pre-existing unique mobile index so Google users (no mobile) can coexist
+    try:
+        await db.users.drop_index("mobile_1")
+    except Exception:
+        pass
     # Indexes
-    await db.users.create_index("mobile", unique=True)
+    await db.users.create_index("mobile", sparse=True)
+    await db.users.create_index("email", unique=True, sparse=True)
     await db.customers.create_index("code", unique=True)
     await db.batches.create_index("batch_no", unique=True)
+    await db.user_sessions.create_index("session_token", unique=True)
+    try:
+        await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+    except Exception:
+        pass
 
     # Default branch
     if not await db.branches.find_one({}):
@@ -302,12 +334,92 @@ async def shutdown():
 @api.post("/auth/login")
 async def login(body: LoginIn):
     u = await db.users.find_one({"mobile": body.mobile})
-    if not u or not verify_pw(body.password, u["password"]):
+    if not u or not u.get("password") or not verify_pw(body.password, u["password"]):
         raise HTTPException(status_code=400, detail="Invalid credentials")
     user = clean(dict(u))
     user.pop("password", None)
     token = make_token(user)
     return {"token": token, "user": user}
+
+
+class GoogleSessionIn(BaseModel):
+    session_id: Optional[str] = None
+    session_token: Optional[str] = None
+
+
+@api.post("/auth/google")
+async def google_auth(body: GoogleSessionIn):
+    """Complete Google sign-in by verifying the session_id/session_token with Emergent
+    and creating/linking a local user. Returns bearer token for subsequent API calls."""
+    key = body.session_token or body.session_id
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing session identifier")
+
+    # Verify with Emergent OAuth service
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                headers={"X-Session-ID": key},
+            )
+    except Exception as e:
+        logger.exception("Google session-data call failed")
+        raise HTTPException(status_code=502, detail="Auth provider unavailable")
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google session")
+
+    data = r.json()
+    email = (data.get("email") or "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="No email from Google")
+    name = data.get("name") or email.split("@")[0]
+    picture = data.get("picture") or ""
+    session_token = data.get("session_token") or key
+
+    # Upsert user by email
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        user_id = existing["id"]
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"name": name, "picture": picture, "google_linked": True,
+                      "updated_at": now_utc().isoformat()}},
+        )
+    else:
+        user_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": user_id,
+            "name": name,
+            "email": email,
+            "mobile": "",
+            "picture": picture,
+            "role": "Store Incharge",   # default role for new Google sign-ups
+            "google_linked": True,
+            "created_at": now_utc().isoformat(),
+        })
+
+    # Store session (dedupe on session_token)
+    await db.user_sessions.delete_many({"session_token": session_token})
+    await db.user_sessions.insert_one({
+        "session_token": session_token,
+        "user_id": user_id,
+        "created_at": now_utc().isoformat(),
+        "expires_at": now_utc() + timedelta(days=7),
+    })
+
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    await audit("google_login", "user", user_id,
+                {"id": user_id, "mobile": user.get("mobile", ""), "role": user["role"]},
+                None, {"email": email})
+    return {"token": session_token, "user": user}
+
+
+@api.post("/auth/logout")
+async def logout(cred: HTTPAuthorizationCredentials = Security(security)):
+    if cred:
+        await db.user_sessions.delete_one({"session_token": cred.credentials})
+    return {"ok": True}
 
 
 @api.get("/auth/me")

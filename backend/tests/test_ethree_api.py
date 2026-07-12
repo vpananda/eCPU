@@ -97,9 +97,9 @@ class TestSeeded:
         r = requests.get(f"{API}/dashboard", headers=H(admin_token))
         assert r.status_code == 200
         d = r.json()
-        for k in ["today_customers", "today_received_weight", "today_deliveries", "today_collection",
-                  "today_expenses", "today_profit", "pending_payments", "machines_running",
-                  "machines_available", "total_machines", "recent_activities"]:
+        for k in ["today_arrival", "period_customers", "period_received_weight", "period_deliveries",
+                  "period_collection", "period_expenses", "period_profit", "pending_payments",
+                  "machines_running", "machines_available", "total_machines", "recent_activities", "range"]:
             assert k in d, f"Missing dashboard field {k}"
 
 

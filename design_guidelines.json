@@ -1,0 +1,148 @@
+{
+  "theme_and_concept": {
+    "app_name": "EThree Agro Solutions",
+    "description": "Professional Android-first mobile application (implemented as a responsive web app) for managing agricultural drying plants.",
+    "theme": "Professional Agriculture Theme, Material Design 3",
+    "color_archetype": "Organic & Earthy / Tactical Minimalism",
+    "mode": "Light mode by default with Dark mode support."
+  },
+  "typography": {
+    "font_families": {
+      "headings": "Work Sans",
+      "body": "IBM Plex Sans"
+    },
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight text-primary-900 dark:text-primary-50",
+      "h2": "text-xl sm:text-2xl font-semibold text-primary-800 dark:text-primary-100",
+      "h3": "text-lg font-medium text-gray-800 dark:text-gray-100",
+      "body": "text-base text-gray-600 dark:text-gray-300",
+      "small": "text-sm text-gray-500 dark:text-gray-400",
+      "label": "text-xs font-bold uppercase tracking-[0.2em] text-gray-500"
+    },
+    "rules": [
+      "No generic sans fonts for headings. Use Work Sans for an industrial yet accessible feel.",
+      "Never center align body text.",
+      "Ensure minimum 4.5:1 contrast ratio."
+    ]
+  },
+  "colors": {
+    "primary": {
+      "DEFAULT": "#2E7D32",
+      "50": "#E8F5E9",
+      "100": "#C8E6C9",
+      "500": "#4CAF50",
+      "600": "#43A047",
+      "700": "#388E3C",
+      "800": "#2E7D32",
+      "900": "#1B5E20"
+    },
+    "secondary": {
+      "DEFAULT": "#81C784"
+    },
+    "accent": {
+      "DEFAULT": "#F57C00",
+      "50": "#FFF3E0",
+      "500": "#FF9800",
+      "600": "#FB8C00",
+      "700": "#F57C00"
+    },
+    "background": {
+      "light": "#F8FAFC",
+      "dark": "#121212",
+      "card_light": "#FFFFFF",
+      "card_dark": "#1E1E1E"
+    },
+    "status": {
+      "running": "#4CAF50",
+      "available": "#2196F3",
+      "maintenance": "#F57C00",
+      "cleaning": "#9C27B0"
+    },
+    "rules": [
+      "Use #2E7D32 as the primary anchor for CTAs and key highlights.",
+      "Use Accent Orange (#F57C00) for alerts, maintenance status, and secondary actions.",
+      "Avoid completely white (#FFFFFF) backgrounds for the main app body in light mode; use a soft gray (#F8FAFC) to make white cards pop.",
+      "For dark mode, avoid pure black (#000000). Use #121212 for background and #1E1E1E for elevated surfaces."
+    ]
+  },
+  "visual_enhancers": {
+    "surfaces": "Solid Backgrounds with subtle borders. Do NOT use glassmorphism (feels too fragile/clinical for industrial ag).",
+    "border_radius": "Rounded-2xl or Rounded-3xl (Material Design 3 uses 24px heavily) for cards and modals. Rounded-full for pills and floating action buttons.",
+    "shadows": "Soft ambient shadows for light mode (`shadow-md` to `shadow-lg`). For dark mode, use 1px subtle borders (`border-white/10`) instead of shadows to create elevation.",
+    "icons": "lucide-react"
+  },
+  "layouts_and_grids": {
+    "general": "Mobile-first approach. Since this is an Android-first concept, optimize for single-column layouts, thumb-friendly tap targets (minimum 44px), and bottom navigation.",
+    "dashboard": "Bento-style grid or single-column stack on mobile. 2-column grid on tablets. Feature 8+ metric cards.",
+    "machine_grid": "2x2 grid on mobile for the 4 machines to ensure they fit in one viewport without excessive scrolling.",
+    "bottom_navigation": "Fixed at the bottom. 5 tabs: Dashboard, Customers, New Entry, Machines, More. Use lucide icons. Must have clear active state using Primary Dark Green."
+  },
+  "components": {
+    "cards": "Shadcn UI Cards, customized with `rounded-3xl` and `border-0` with `shadow-sm`.",
+    "forms": "Multi-step form for New Drying Entry. Use Shadcn Inputs, Selects. Add clear validation.",
+    "buttons": "Pill-shaped (`rounded-full`) or highly rounded (`rounded-xl`). Primary buttons use Dark Green. Include active/press states (e.g., `active:scale-95`).",
+    "timeline": "For Batch Tracking. Vertical line with nodes connecting statuses: Received -> Loaded -> Drying -> Completed -> Delivered.",
+    "tabs": "Shadcn Tabs, customized to look like Material Design 3 segmented buttons.",
+    "toast": "Use Sonner for toast notifications (success/error messages)."
+  },
+  "motion": {
+    "transitions": "Smooth Simple Professional. No bouncy or unnecessary animations.",
+    "interactions": "Hover states on all buttons/cards (e.g., `hover:bg-primary-700`). Tap states (`active:opacity-80`) for mobile feel.",
+    "page_loads": "Fade-in for pages and staggered slight upward translation for dashboard cards."
+  },
+  "media": {
+    "image_urls": {
+      "coffee_drying": {
+        "url": "https://images.unsplash.com/photo-1761318543563-f5c211a99195?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Nzh8MHwxfHNlYXJjaHwzfHxjb2ZmZWUlMjBiZWFucyUyMGRyeWluZyUyMGFncmljdWx0dXJlfGVufDB8fHx8MTc4MzgzMDAzMnww&ixlib=rb-4.1.0&q=85",
+        "description": "Man raking coffee beans on drying mats. Use for hero or placeholder in New Entry.",
+        "category": "product_placeholder"
+      },
+      "cardamom": {
+        "url": "https://images.unsplash.com/photo-1541533693007-7ea47d894b0c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHxzcGljZXMlMjBjYXJkYW1vbSUyMGFncmljdWx0dXJlfGVufDB8fHx8MTc4MzgzMDAzMnww&ixlib=rb-4.1.0&q=85",
+        "description": "Cardamom seeds. Use for product category placeholder.",
+        "category": "product_placeholder"
+      },
+      "warehouse": {
+        "url": "https://images.unsplash.com/photo-1694885169342-909981fb408a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHwyfHxpbmR1c3RyaWFsJTIwd2FyZWhvdXNlJTIwYWdyaWN1bHR1cmV8ZW58MHx8fHwxNzgzODMwMDMyfDA&ixlib=rb-4.1.0&q=85",
+        "description": "Large empty industrial warehouse. Use for login screen background or machines tab header.",
+        "category": "background"
+      }
+    },
+    "rules": [
+      "Never use placeholder URLs.",
+      "Images should have a subtle dark overlay (bg-black/40) if text is placed on them."
+    ]
+  },
+  "accessibility": {
+    "contrast": "Ensure all text meets APCA contrast guidelines. Text over images must have drop shadow or overlay.",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., `data-testid=\"login-submit-button\"`).",
+    "touch_targets": "Minimum 44x44px for all tappable elements (buttons, nav items) to accommodate field workers using mobile devices."
+  },
+  "instructions_to_main_agent": [
+    "Since the target is an Android-first mobile application but implemented via React.js/Tailwind, constrain the layout to behave like a PWA or mobile app.",
+    "Use a fixed Bottom Navigation bar for mobile viewports (Dashboard, Customers, New Entry, Machines, More).",
+    "Do NOT use transparent backgrounds for the bottom nav or headers; ensure they have solid backgrounds (Material 3 style).",
+    "Use lucide-react for all Material-style icons.",
+    "Dashboard should have 8 metric cards. Ensure they use 'Progressive Disclosure' and do not clutter the screen.",
+    "The New Entry form must be a multi-step component.",
+    "Implement the 'Machine Grid' as a 2x2 layout on mobile with clear status indicators.",
+    "Implement Sonner for all user notifications.",
+    "Make sure `data-testid` is added to EVERY button, input, and interactive card.",
+    "Use .js and .jsx extensions for files."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Do not use glass-morphism effects with backdrop filters in this app context, stick to solid colors.",
+    "You MUST NOT apply universal transition (e.g., `transition: all`). Always add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container, i.e., do not add `.App { text-align: center; }`.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions. Static = dead.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Prioritize using pre-existing components from src/components/ui.",
+    "Use `sonner` for toasts, located in `/app/src/components/ui/sonner.jsx`."
+  ]
+}

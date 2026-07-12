@@ -53,8 +53,9 @@ export default function LoginScreen() {
             <View style={styles.logoWrap}>
               <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
             </View>
-            <Text style={styles.brand}>EThree Agro</Text>
-            <Text style={styles.tag}>Drying Plant Management</Text>
+            <Text style={styles.brand}>E3</Text>
+            <Text style={styles.tag}>Energy · Efficient · Environment</Text>
+            <Text style={styles.subTag}>Smart Drying Plant Management</Text>
           </View>
 
           <View style={styles.card}>
@@ -130,8 +131,9 @@ const styles = StyleSheet.create({
     shadowColor: "#2E7D32", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 6,
   },
   logoImg: { width: 78, height: 78 },
-  brand: { fontSize: 28, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
-  tag: { fontSize: 14, color: colors.textMuted, fontWeight: "500" },
+  brand: { fontSize: 44, fontWeight: "900", color: colors.primary, letterSpacing: -1.5, marginTop: 2 },
+  tag: { fontSize: 13, color: colors.primary, fontWeight: "700", letterSpacing: 1.2, textTransform: "uppercase" },
+  subTag: { fontSize: 12, color: colors.textMuted, fontWeight: "500", marginTop: 2 },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.xxl,

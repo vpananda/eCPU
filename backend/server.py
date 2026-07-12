@@ -29,7 +29,7 @@ db = client[DB_NAME]
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="EThree Agro Solutions API")
+app = FastAPI(title="E3 - Energy Efficient Environment")
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO)
@@ -274,14 +274,16 @@ async def seed():
         await db.settings.insert_one({
             "key": "expense_categories", "value": DEFAULT_EXPENSE_CATS,
         })
-    if not await db.settings.find_one({"key": "company"}):
-        await db.settings.insert_one({
-            "key": "company",
-            "value": {
-                "name": "EThree Agro Solutions", "address": "",
-                "gst": "", "phone": "", "default_rate": 12,
-            },
-        })
+    # Always upsert company info so rebrand takes effect
+    await db.settings.update_one(
+        {"key": "company"},
+        {"$set": {"value": {
+            "name": "E3 - Energy Efficient Environment", "address": "",
+            "gst": "", "phone": "", "default_rate": 12,
+            "tagline": "Smart Drying Plant Management",
+        }}},
+        upsert=True,
+    )
 
 
 @app.on_event("startup")
@@ -840,7 +842,7 @@ async def audit_logs(user: dict = Depends(require_roles("Admin", "Manager")), li
 
 @api.get("/")
 async def root():
-    return {"app": "EThree Agro Solutions API", "status": "ok"}
+    return {"app": "E3 - Energy Efficient Environment", "tagline": "Smart Drying Plant Management", "status": "ok"}
 
 
 app.include_router(api)

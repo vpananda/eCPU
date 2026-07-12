@@ -67,7 +67,7 @@ export default function Settings() {
           <Row label="Role" value={user?.role || "-"} />
         </Section>
 
-        <Text style={styles.footer}>EThree Agro Solutions · v1.0.0</Text>
+        <Text style={styles.footer}>E3 · Energy · Efficient · Environment · v1.0.0</Text>
       </ScrollView>
     </SafeAreaView>
   );

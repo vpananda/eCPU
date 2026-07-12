@@ -1,21 +1,24 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "E3",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "e3",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "primaryColor": "#2E7D32",
+    "description": "E3 — Energy · Efficient · Environment. Smart drying plant management for modern agriculture.",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.cardamombatchpro.h3n1hn"
+      "bundleIdentifier": "com.emergent.cardamombatchpro.h3n1hn",
+      "icon": "./assets/images/icon.png"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#E8F5E9"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.emergent.cardamombatchpro.h3n1hn"
@@ -31,9 +34,9 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
+          "imageWidth": 260,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#2E7D32"
         }
       ]
     ],

@@ -815,6 +815,17 @@ class MachineUpdate(BaseModel):
     branch_id: Optional[str] = None
 
 
+class MachineLoadIn(BaseModel):
+    batch_ids: List[str]
+    start_time: Optional[str] = None
+
+
+class MachineStopIn(BaseModel):
+    end_time: Optional[str] = None
+    total_dry_weight: float
+    total_dry_bags: int
+
+
 class ArrivalIn(BaseModel):
     """Simplified Arrival: customer + product + weight + bags + photos.
     Machine is assigned later at 'Load' stage. Rate defaults to 12/kg."""
@@ -1160,17 +1171,31 @@ async def list_machines(user: dict = Depends(get_current_user), branch_id: Optio
     else:
         query = branch_query(user)
     machines = await db.machines.find(query, {"_id": 0}).to_list(50)
+    branches = await db.branches.find({}, {"_id": 0}).to_list(100)
+    branch_map = {b["id"]: b["name"] for b in branches}
     for m in machines:
-        if m.get("current_batch_id"):
-            b = await db.batches.find_one({"id": m["current_batch_id"]}, {"_id": 0})
-            if b:
-                cust = await db.customers.find_one({"id": b["customer_id"]}, {"_id": 0})
-                m["current_batch"] = {
-                    "id": b["id"], "batch_no": b["batch_no"],
-                    "customer_name": cust["name"] if cust else "",
-                    "expected_delivery_date": b.get("expected_delivery_date"),
-                    "status": b["status"],
-                }
+        m["branch_name"] = branch_map.get(m.get("branch_id"), "")
+        drying_batches = await db.batches.find({"machine_id": m["id"], "status": "Drying"}, {"_id": 0}).to_list(100)
+        m["running_batches"] = []
+        for db_batch in drying_batches:
+            cust = await db.customers.find_one({"id": db_batch["customer_id"]}, {"_id": 0})
+            m["running_batches"].append({
+                "id": db_batch["id"],
+                "batch_no": db_batch["batch_no"],
+                "customer_name": cust["name"] if cust else "",
+                "raw_weight": db_batch["raw_weight"],
+                "bags": db_batch["bags"],
+            })
+        
+        if drying_batches:
+            first_b = drying_batches[0]
+            first_cust = await db.customers.find_one({"id": first_b["customer_id"]}, {"_id": 0})
+            m["current_batch"] = {
+                "id": first_b["id"], "batch_no": first_b["batch_no"],
+                "customer_name": first_cust["name"] if first_cust else "",
+                "expected_delivery_date": first_b.get("expected_delivery_date"),
+                "status": first_b["status"],
+            }
     return machines
 
 
@@ -1230,6 +1255,111 @@ async def delete_machine(mid: str, user: dict = Depends(require_roles("Admin")))
     
     await db.machines.delete_one({"id": mid})
     await audit("delete", "machine", mid, user, {"name": m.get("name")}, None)
+    return {"ok": True}
+
+
+@api.post("/machines/{mid}/load")
+async def load_machine(mid: str, body: MachineLoadIn, user: dict = Depends(get_current_user)):
+    m = await db.machines.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    
+    if not body.batch_ids:
+        raise HTTPException(status_code=400, detail="At least one batch ID is required")
+
+    # Fetch batches and validate
+    batches = []
+    for bid in body.batch_ids:
+        b = await db.batches.find_one({"id": bid}, {"_id": 0})
+        if not b:
+            raise HTTPException(status_code=404, detail=f"Batch {bid} not found")
+        if b.get("branch_id") != m.get("branch_id"):
+            raise HTTPException(status_code=400, detail=f"Batch {bid} belongs to a different branch")
+        if b.get("status") != "Received":
+            raise HTTPException(status_code=400, detail=f"Batch {bid} status must be Received")
+        batches.append(b)
+
+    # Load machine
+    t_start = body.start_time or now_utc().isoformat()
+    await db.machines.update_one({"id": mid}, {"$set": {
+        "status": "Running",
+        "current_batch_id": body.batch_ids[0],
+        "updated_at": now_utc().isoformat(),
+        "updated_by": user["id"]
+    }})
+
+    # Update batches to Drying
+    for b in batches:
+        await db.batches.update_one({"id": b["id"]}, {"$set": {
+            "status": "Drying",
+            "machine_id": mid,
+            "remarks": f"Loaded in {m['name']} at {t_start}",
+            "updated_at": now_utc().isoformat(),
+            "updated_by": user["id"]
+        }})
+        await audit("load_machine", "batch", b["id"], user, {"status": "Received"}, {"status": "Drying", "machine_id": mid})
+
+    await audit("load", "machine", mid, user, None, {"batch_ids": body.batch_ids, "start_time": t_start})
+    return {"ok": True}
+
+
+@api.post("/machines/{mid}/stop")
+async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_current_user)):
+    m = await db.machines.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    
+    if body.total_dry_weight <= 0:
+        raise HTTPException(status_code=400, detail="Total dry weight must be > 0")
+    if body.total_dry_bags < 0:
+        raise HTTPException(status_code=400, detail="Total dry bags cannot be negative")
+
+    # Find active batches drying in this machine
+    drying_batches = await db.batches.find({"machine_id": mid, "status": "Drying"}, {"_id": 0}).to_list(100)
+    if not drying_batches:
+        raise HTTPException(status_code=400, detail="No active drying batches found in this machine")
+
+    total_raw_weight = sum(float(b["raw_weight"]) for b in drying_batches)
+    if total_raw_weight <= 0:
+        raise HTTPException(status_code=400, detail="Total raw weight of active batches is zero")
+
+    t_end = body.end_time or now_utc().isoformat()
+
+    # Process each batch proportionally
+    for b in drying_batches:
+        raw = float(b["raw_weight"])
+        pct = raw / total_raw_weight
+        prop_dry_weight = round(pct * body.total_dry_weight, 2)
+        prop_bags = int(round(pct * body.total_dry_bags))
+
+        # Recompute totals and update
+        tmp = dict(b)
+        tmp["actual_dry_weight"] = prop_dry_weight
+        tmp["processed_bags"] = prop_bags
+        totals = await recompute_batch_totals(tmp)
+
+        upd = {
+            "status": "Completed",
+            "actual_dry_weight": prop_dry_weight,
+            "processed_bags": prop_bags,
+            "weight_loss": round(raw - prop_dry_weight, 2),
+            "remarks": f"Drying completed in {m['name']} at {t_end}",
+            "updated_at": now_utc().isoformat(),
+            "updated_by": user["id"],
+            **totals
+        }
+        await db.batches.update_one({"id": b["id"]}, {"$set": upd})
+        await audit("stop_machine", "batch", b["id"], user, {"status": "Drying"}, {"status": "Completed"})
+
+    # Free the machine
+    await db.machines.update_one({"id": mid}, {"$set": {
+        "status": "Available",
+        "current_batch_id": None,
+        "updated_at": now_utc().isoformat(),
+        "updated_by": user["id"]
+    }})
+
+    await audit("stop", "machine", mid, user, None, {"end_time": t_end, "total_dry_weight": body.total_dry_weight, "total_dry_bags": body.total_dry_bags})
     return {"ok": True}
 
 
@@ -1398,13 +1528,18 @@ async def clean_batch(b: Optional[dict]) -> Optional[dict]:
 @api.get("/batches")
 async def list_batches(user: dict = Depends(get_current_user),
                        q: Optional[str] = None, status: Optional[str] = None,
-                       branch_id: Optional[str] = None):
+                       branch_id: Optional[str] = None,
+                       start: Optional[str] = None,
+                       end: Optional[str] = None):
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
         query: Dict[str, Any] = {"branch_id": branch_id}
     else:
         query = dict(branch_query(user))
+    if start and end:
+        pstart, pend = _parse_range(start, end)
+        query["created_at"] = {"$gte": pstart, "$lt": pend}
     if status:
         query["status"] = status
     if q:
@@ -1417,7 +1552,10 @@ async def list_batches(user: dict = Depends(get_current_user),
         else:
             query["$or"] = or_clause
     docs = await db.batches.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    branches = await db.branches.find({}, {"_id": 0}).to_list(100)
+    branch_map = {b["id"]: b["name"] for b in branches}
     for d in docs:
+        d["branch_name"] = branch_map.get(d.get("branch_id"), "")
         cust = await db.customers.find_one({"id": d["customer_id"]}, {"_id": 0, "name": 1, "mobile": 1, "code": 1})
         prod = await db.products.find_one({"id": d["product_id"]}, {"_id": 0, "name": 1})
         mach = await db.machines.find_one({"id": d["machine_id"]}, {"_id": 0, "name": 1})
@@ -1892,6 +2030,7 @@ async def dashboard(
     ).to_list(2000)
     period_customers = await db.customers.count_documents(bq)
     period_received_weight = round(sum(b.get("raw_weight", 0) for b in period_batches), 2)
+    period_billed = round(sum(b.get("bill_amount", 0) for b in period_batches), 2)
 
     period_deliveries_docs = await db.batches.find(
         {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
@@ -1963,6 +2102,7 @@ async def dashboard(
         },
         "period_customers": period_customers,
         "period_received_weight": period_received_weight,
+        "period_billed": period_billed,
         "period_deliveries": period_deliveries,
         "period_delivered_weight": period_delivered_weight,
         "period_collection": period_collection,
@@ -2137,6 +2277,30 @@ async def update_branch(bid: str, body: BranchIn, user: dict = Depends(require_r
         "updated_at": now_utc().isoformat(), "updated_by": user["id"]
     }})
     await audit("update", "branch", bid, user, {"name": before["name"]}, {"name": body.name})
+    return {"ok": True}
+
+
+@api.delete("/branches/{bid}")
+async def delete_branch(bid: str, user: dict = Depends(require_roles("Admin"))):
+    branch = await db.branches.find_one({"id": bid}, {"_id": 0})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    
+    # Check dependencies to prevent DB inconsistencies
+    batches = await db.batches.count_documents({"branch_id": bid})
+    if batches > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete branch with configured batches/arrivals")
+        
+    machines = await db.machines.count_documents({"branch_id": bid})
+    if machines > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete branch with configured machines")
+        
+    users = await db.users.count_documents({"branch_id": bid})
+    if users > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete branch with assigned users")
+
+    await db.branches.delete_one({"id": bid})
+    await audit("delete", "branch", bid, user, {"name": branch["name"]}, None)
     return {"ok": True}
 
 

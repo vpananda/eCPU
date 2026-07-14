@@ -268,61 +268,69 @@ export default function Dashboard() {
           </View>
         ) : (
           <View style={styles.dashboardContent}>
-            {/* 3. Today's Summary KPI Cards */}
-            <Text style={styles.sectionHeading}>Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})</Text>
-            <View style={styles.kpiGrid}>
-              <View style={styles.kpiCard}>
+            {/* 3. Produce Summary Section */}
+            <Text style={styles.sectionHeading}>
+              Produce Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})
+            </Text>
+            <View style={styles.threeCardRow}>
+              <View style={styles.smallKpiCard}>
                 <View style={[styles.kpiIconWrap, { backgroundColor: `${colors.primary}12` }]}>
-                  <MaterialCommunityIcons name="download" size={20} color={colors.primary} />
+                  <MaterialCommunityIcons name="download" size={18} color={colors.primary} />
                 </View>
-                <Text style={styles.kpiValue} numberOfLines={1}>{fmtNum(data?.period_received_weight || 0, "", " KG")}</Text>
-                <Text style={styles.kpiLabel}>Received</Text>
-                <View style={styles.trendRow}>
-                  <MaterialCommunityIcons name="trending-up" size={12} color={colors.success} />
-                  <Text style={styles.trendText}>+4.8%</Text>
-                </View>
+                <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_received_weight || 0, "", " KG")}</Text>
+                <Text style={styles.smallKpiLabel}>Received</Text>
               </View>
 
-              <View style={styles.kpiCard}>
+              <View style={styles.smallKpiCard}>
+                <View style={[styles.kpiIconWrap, { backgroundColor: "#FFF3E0" }]}>
+                  <MaterialCommunityIcons name="engine-outline" size={18} color="#E65100" />
+                </View>
+                <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.today_arrival?.processing_weight || 0, "", " KG")}</Text>
+                <Text style={styles.smallKpiLabel}>Processing</Text>
+              </View>
+
+              <View style={styles.smallKpiCard}>
                 <View style={[styles.kpiIconWrap, { backgroundColor: "#F3E5F5" }]}>
-                  <MaterialCommunityIcons name="upload" size={20} color="#7B1FA2" />
+                  <MaterialCommunityIcons name="upload" size={18} color="#7B1FA2" />
                 </View>
-                <Text style={styles.kpiValue} numberOfLines={1}>{fmtNum(data?.period_delivered_weight || 0, "", " KG")}</Text>
-                <Text style={styles.kpiLabel}>Delivered</Text>
-                <View style={styles.trendRow}>
-                  <MaterialCommunityIcons name="trending-up" size={12} color={colors.success} />
-                  <Text style={styles.trendText}>+6.2%</Text>
-                </View>
+                <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_delivered_weight || 0, "", " KG")}</Text>
+                <Text style={styles.smallKpiLabel}>Delivered</Text>
               </View>
-
-              {role !== "Store Incharge" && (
-                <>
-                  <View style={styles.kpiCard}>
-                    <View style={[styles.kpiIconWrap, { backgroundColor: "#E8F5E9" }]}>
-                      <MaterialCommunityIcons name="currency-inr" size={20} color={colors.success} />
-                    </View>
-                    <Text style={styles.kpiValue} numberOfLines={1}>{fmtNum(data?.period_collection || 0, "₹")}</Text>
-                    <Text style={styles.kpiLabel}>Collection</Text>
-                    <View style={styles.trendRow}>
-                      <MaterialCommunityIcons name="trending-up" size={12} color={colors.success} />
-                      <Text style={styles.trendText}>+12.4%</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.kpiCard}>
-                    <View style={[styles.kpiIconWrap, { backgroundColor: "#FFEBEE" }]}>
-                      <MaterialCommunityIcons name="wallet-outline" size={20} color={colors.danger} />
-                    </View>
-                    <Text style={styles.kpiValue} numberOfLines={1}>{fmtNum(data?.pending_payments || 0, "₹")}</Text>
-                    <Text style={styles.kpiLabel}>Pending Collection</Text>
-                    <View style={styles.trendRow}>
-                      <MaterialCommunityIcons name="trending-down" size={12} color={colors.danger} />
-                      <Text style={[styles.trendText, { color: colors.danger }]}>-2.5%</Text>
-                    </View>
-                  </View>
-                </>
-              )}
             </View>
+
+            {/* 4. Finance Summary Section (Hidden for Store Incharge) */}
+            {role !== "Store Incharge" && (
+              <>
+                <Text style={[styles.sectionHeading, { marginTop: spacing.lg }]}>
+                  Finance Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})
+                </Text>
+                <View style={styles.threeCardRow}>
+                  <View style={styles.smallKpiCard}>
+                    <View style={[styles.kpiIconWrap, { backgroundColor: "#E3F2FD" }]}>
+                      <MaterialCommunityIcons name="text-box-outline" size={18} color="#1565C0" />
+                    </View>
+                    <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum((data as any)?.period_billed || 0, "₹")}</Text>
+                    <Text style={styles.smallKpiLabel}>Total Billed</Text>
+                  </View>
+
+                  <View style={styles.smallKpiCard}>
+                    <View style={[styles.kpiIconWrap, { backgroundColor: "#E8F5E9" }]}>
+                      <MaterialCommunityIcons name="currency-inr" size={18} color={colors.success} />
+                    </View>
+                    <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_collection || 0, "₹")}</Text>
+                    <Text style={styles.smallKpiLabel}>Collection</Text>
+                  </View>
+
+                  <View style={styles.smallKpiCard}>
+                    <View style={[styles.kpiIconWrap, { backgroundColor: "#FFEBEE" }]}>
+                      <MaterialCommunityIcons name="wallet-outline" size={18} color={colors.danger} />
+                    </View>
+                    <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.pending_payments || 0, "₹")}</Text>
+                    <Text style={styles.smallKpiLabel}>Pending</Text>
+                  </View>
+                </View>
+              </>
+            )}
 
             {/* 4. Live Processing Card (Primary Card) */}
             <View style={styles.liveCard}>
@@ -377,7 +385,7 @@ export default function Dashboard() {
                 </View>
 
                 <TouchableOpacity
-                  onPress={() => router.push("/(tabs)/customers")}
+                  onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
                   style={styles.liveCardBtn}
                   activeOpacity={0.8}
                 >
@@ -1494,5 +1502,34 @@ const styles = StyleSheet.create({
   pickerSheetApplyText: {
     color: "#fff",
     fontWeight: "800",
+  },
+  threeCardRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  smallKpiCard: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.md,
+    alignItems: "center",
+    ...shadow.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  smallKpiValue: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 6,
+    textAlign: "center",
+  },
+  smallKpiLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontWeight: "700",
+    textAlign: "center",
   },
 });

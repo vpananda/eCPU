@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Modal, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Modal, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -33,6 +33,33 @@ export default function BranchesAdmin() {
 
   const openNew = () => { setEditing(null); setName(""); setAddress(""); setPhone(""); setOpen(true); };
   const openEdit = (b: Branch) => { setEditing(b); setName(b.name); setAddress(b.address || ""); setPhone(b.phone || ""); setOpen(true); };
+
+  const confirmDelete = (b: Branch) => {
+    Alert.alert(
+      "Delete Branch",
+      `Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setSaving(true);
+            try {
+              await api(`/branches/${b.id}`, { method: "DELETE" });
+              toast.show("Branch deleted");
+              setOpen(false);
+              await load();
+            } catch (err: any) {
+              toast.show(err.message || "Failed to delete branch", "error");
+            } finally {
+              setSaving(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const save = async () => {
     if (!name.trim()) return toast.show("Branch name required", "error");
@@ -91,6 +118,17 @@ export default function BranchesAdmin() {
             <Input testID="branch-address" label="Address" value={address} onChangeText={setAddress} multiline />
             <Input testID="branch-phone" label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
             <Button testID="branch-save" title={editing ? "Save Changes" : "Create Branch"} onPress={save} loading={saving} />
+            
+            {editing && (
+              <TouchableOpacity
+                testID="branch-delete"
+                style={styles.deleteBtn}
+                onPress={() => confirmDelete(editing)}
+              >
+                <MaterialCommunityIcons name="delete" size={16} color={colors.danger} />
+                <Text style={styles.deleteBtnText}>Delete Branch</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -112,4 +150,20 @@ const styles = StyleSheet.create({
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.xl, paddingBottom: spacing.xxl },
   handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: spacing.md },
   sheetTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  deleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: colors.danger,
+    borderWidth: 1.5,
+    borderRadius: radius.pill,
+    paddingVertical: 12,
+    marginTop: spacing.md,
+    gap: 6,
+  },
+  deleteBtnText: {
+    color: colors.danger,
+    fontSize: 14,
+    fontWeight: "700",
+  },
 });

@@ -9,6 +9,7 @@ import { useAuth } from "@/src/auth";
 const ACTIONS = [
   { key: "arrival", label: "Arrival", subtitle: "New wet produce received", icon: "arrow-down-bold-circle", color: "#2E7D32", route: "/arrival-form" as const },
   { key: "deliver", label: "Deliver", subtitle: "Handover dried spice to customer", icon: "truck-fast", color: "#F57C00", route: "/delivery-picker" as const },
+  { key: "batching", label: "Batching", subtitle: "Load stock into machine", icon: "engine-outline", color: "#7B1FA2", route: "/batching-form" as const },
   { key: "expense", label: "Expense", subtitle: "Log operating expense", icon: "cash-minus", color: "#C62828", route: "/expense-form" as const },
   { key: "payment", label: "Payment", subtitle: "Collect balance amount", icon: "cash-plus", color: "#1565C0", route: "/payment-picker" as const },
 ];
@@ -59,21 +60,24 @@ export default function NewEntrySheet() {
             <Text style={styles.subtitle}>What would you like to record?</Text>
 
             <View style={styles.grid}>
-              {filteredActions.map(a => (
-                <TouchableOpacity
-                  key={a.key}
-                  testID={`quick-${a.key}`}
-                  style={styles.action}
-                  activeOpacity={0.85}
-                  onPress={() => go(a.route)}
-                >
-                  <View style={[styles.iconBox, { backgroundColor: `${a.color}18` }]}>
-                    <MaterialCommunityIcons name={a.icon as any} size={30} color={a.color} />
-                  </View>
-                  <Text style={styles.actionLabel}>{a.label}</Text>
-                  <Text style={styles.actionSub}>{a.subtitle}</Text>
-                </TouchableOpacity>
-              ))}
+              {filteredActions.map((a, idx) => {
+                const isFullWidth = filteredActions.length % 2 !== 0 && idx === filteredActions.length - 1;
+                return (
+                  <TouchableOpacity
+                    key={a.key}
+                    testID={`quick-${a.key}`}
+                    style={[styles.action, isFullWidth && styles.actionFullWidth]}
+                    activeOpacity={0.85}
+                    onPress={() => go(a.route)}
+                  >
+                    <View style={[styles.iconBox, { backgroundColor: `${a.color}18` }]}>
+                      <MaterialCommunityIcons name={a.icon as any} size={30} color={a.color} />
+                    </View>
+                    <Text style={styles.actionLabel}>{a.label}</Text>
+                    <Text style={styles.actionSub}>{a.subtitle}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             <TouchableOpacity testID="quick-cancel" style={styles.cancel} onPress={close}>
@@ -109,6 +113,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     borderWidth: 1.5,
     borderColor: colors.border,
+  },
+  actionFullWidth: {
+    width: "100%",
   },
   iconBox: { width: 56, height: 56, borderRadius: 18, alignItems: "center", justifyContent: "center", marginBottom: spacing.sm },
   actionLabel: { fontSize: 16, fontWeight: "800", color: colors.text, letterSpacing: -0.3 },

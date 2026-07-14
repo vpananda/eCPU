@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -19,6 +19,7 @@ export default function MachinesScreen() {
   const [list, setList] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [branchModalOpen, setBranchModalOpen] = useState(false);
 
   const selectedBranch = selectedBranchId;
   const setSelectedBranch = setSelectedBranchId;
@@ -44,7 +45,21 @@ export default function MachinesScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Machines</Text>
-          <Text style={styles.subtitle}>{list.length} dryers</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <Text style={styles.subtitle}>{list.length} dryers</Text>
+            {user?.role === "Admin" && (
+              <TouchableOpacity
+                onPress={() => setBranchModalOpen(true)}
+                style={styles.inlineBranchSelector}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.inlineBranchText}>
+                  {selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name || "Selected") : "All Branches"}
+                </Text>
+                <MaterialCommunityIcons name="chevron-down" size={12} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
         {user?.role === "Admin" && (
           <TouchableOpacity
@@ -56,7 +71,6 @@ export default function MachinesScreen() {
           </TouchableOpacity>
         )}
       </View>
-
 
 
       {loading ? (
@@ -77,11 +91,16 @@ export default function MachinesScreen() {
               >
                 <View style={styles.cardTop}>
                   <View style={[styles.iconBox, { backgroundColor: `${colors.status[m.status]}15` }]}>
-                    <MaterialCommunityIcons name="tumble-dryer" size={26} color={colors.status[m.status]} />
+                    <MaterialCommunityIcons name="engine-outline" size={26} color={colors.status[m.status]} />
                   </View>
                   <StatusPill status={m.status} />
                 </View>
                 <Text style={styles.machineName}>{m.name}</Text>
+                
+                <Text style={styles.branchNameText}>
+                  <MaterialCommunityIcons name="map-marker-outline" size={10} color={colors.textMuted} /> {m.branch_name || "Main Branch"}
+                </Text>
+
                 <Text style={styles.capacity}>Capacity {m.capacity}kg</Text>
 
                 {m.current_batch ? (
@@ -97,11 +116,88 @@ export default function MachinesScreen() {
                     <Text style={styles.emptyBatch}>No active batch</Text>
                   </View>
                 )}
+                {m.status === "Available" ? (
+                  <TouchableOpacity
+                    style={styles.actionBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      router.push({
+                        pathname: "/load-dryer",
+                        params: { machineId: m.id, machineName: m.name }
+                      });
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.actionBtnText}>Load Dryer</Text>
+                  </TouchableOpacity>
+                ) : m.status === "Running" ? (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: colors.danger }]}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      router.push({
+                        pathname: "/stop-dryer",
+                        params: { machineId: m.id, machineName: m.name }
+                      });
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.actionBtnText}>Stop Dryer</Text>
+                  </TouchableOpacity>
+                ) : null}
               </TouchableOpacity>
             ))}
           </View>
         </ScrollView>
       )}
+      {/* Branch Selector Modal */}
+      <Modal
+        visible={branchModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setBranchModalOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} onPress={() => setBranchModalOpen(false)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Select Branch</Text>
+            <ScrollView style={styles.modalScroll}>
+              <TouchableOpacity
+                style={[styles.modalItem, !selectedBranchId && styles.modalItemSelected]}
+                onPress={() => {
+                  setSelectedBranchId("");
+                  setBranchModalOpen(false);
+                }}
+              >
+                <Text style={[styles.modalItemText, !selectedBranchId && styles.modalItemTextSelected]}>
+                  All Branches
+                </Text>
+                {!selectedBranchId && <MaterialCommunityIcons name="check" size={18} color={colors.primary} />}
+              </TouchableOpacity>
+
+              {branches.map(b => (
+                <TouchableOpacity
+                  key={b.id}
+                  style={[styles.modalItem, selectedBranchId === b.id && styles.modalItemSelected]}
+                  onPress={() => {
+                    setSelectedBranchId(b.id);
+                    setBranchModalOpen(false);
+                  }}
+                >
+                  <Text style={[styles.modalItemText, selectedBranchId === b.id && styles.modalItemTextSelected]}>
+                    {b.name}
+                  </Text>
+                  {selectedBranchId === b.id && <MaterialCommunityIcons name="check" size={18} color={colors.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setBranchModalOpen(false)}>
+              <Text style={styles.modalCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -152,4 +248,107 @@ const styles = StyleSheet.create({
   batchLabelText: { fontSize: 11, fontWeight: "800", color: colors.primary, letterSpacing: 0.3 },
   batchCust: { fontSize: 12, color: colors.text, fontWeight: "600", marginTop: 2 },
   emptyBatch: { fontSize: 11, color: colors.textMuted, fontWeight: "600", textAlign: "center" },
+  actionBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+  actionBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  branchNameText: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: "700",
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  inlineBranchSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: `${colors.primary}12`,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    gap: 4,
+  },
+  inlineBranchText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  modalSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xl,
+    maxHeight: "80%",
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+    textAlign: "center",
+    marginBottom: spacing.md,
+  },
+  modalScroll: {
+    marginBottom: spacing.lg,
+  },
+  modalItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  modalItemSelected: {
+    borderColor: colors.primary,
+  },
+  modalItemText: {
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: "600",
+  },
+  modalItemTextSelected: {
+    color: colors.primary,
+    fontWeight: "700",
+  },
+  modalCloseBtn: {
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
+  modalCloseText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
 });

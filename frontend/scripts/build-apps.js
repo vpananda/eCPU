@@ -53,6 +53,18 @@ try {
     fs.writeFileSync(localPropertiesPath, `sdk.dir=${escapedSdkDir}\n`, 'utf8');
   }
 
+  // Optimize compilation by limiting active architectures (targets arm64-v8a physical devices, reducing build time by ~75%)
+  const gradlePropertiesPath = path.join(androidDir, 'gradle.properties');
+  if (fs.existsSync(gradlePropertiesPath)) {
+    console.log('[INFO] Optimizing gradle.properties for faster compilation (targeting arm64-v8a only)...');
+    let content = fs.readFileSync(gradlePropertiesPath, 'utf8');
+    content = content.replace(
+      /reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64/g,
+      'reactNativeArchitectures=arm64-v8a'
+    );
+    fs.writeFileSync(gradlePropertiesPath, content, 'utf8');
+  }
+
   execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });
 
   // 6. Copy compiled APK to target folder

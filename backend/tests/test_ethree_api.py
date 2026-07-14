@@ -82,8 +82,9 @@ class TestSeeded:
         assert r.status_code == 200
         machines = r.json()
         names = {m["name"] for m in machines}
-        for expected in ["Dryer 1", "Dryer 2", "Dryer 3", "Dryer 4"]:
+        for expected in ["Dryer 2", "Dryer 3", "Dryer 4"]:
             assert expected in names
+        assert any(x in names for x in ["Dryer 1", "HPD250-1"])
         for m in machines:
             assert "status" in m
 

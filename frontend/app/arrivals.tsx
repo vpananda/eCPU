@@ -1,10 +1,11 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import Calendar from "@/src/components/Calendar";
 
 type Row = {
   batch_id: string;
@@ -43,11 +44,21 @@ const TABS: { key: "in" | "processing" | "out"; label: string; icon: any; color:
 ];
 
 export default function ArrivalsScreen() {
+  const { selectedBranchId } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string }>();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"in" | "processing" | "out">((params.tab as any) || "processing");
+
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [draftStart, setDraftStart] = useState(params.start || "");
+  const [draftEnd, setDraftEnd] = useState(params.end || "");
+
+  React.useEffect(() => {
+    setDraftStart(params.start || "");
+    setDraftEnd(params.end || "");
+  }, [params.start, params.end]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,17 +66,18 @@ export default function ArrivalsScreen() {
       const qs = new URLSearchParams();
       if (params.start) qs.set("start", String(params.start));
       if (params.end) qs.set("end", String(params.end));
+      if (selectedBranchId) qs.set("branch_id", selectedBranchId);
       const d = await api<Payload>(`/dashboard/arrivals?${qs.toString()}`);
       setData(d);
     } finally { setLoading(false); }
-  }, [params.start, params.end]);
+  }, [params.start, params.end, selectedBranchId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const rows: Row[] = tab === "in" ? data?.in || [] : tab === "out" ? data?.out || [] : data?.processing || [];
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <View style={styles.safe}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} testID="arrivals-back">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
@@ -76,8 +88,37 @@ export default function ArrivalsScreen() {
             <Text style={styles.subtitle}>{data.range.start} → {data.range.end}</Text>
           )}
         </View>
-        <View style={{ width: 22 }} />
+        <TouchableOpacity onPress={() => setFilterOpen(!filterOpen)} testID="arrivals-filter-toggle">
+          <MaterialCommunityIcons name={filterOpen ? "calendar-check" : "calendar-range"} size={22} color={colors.primary} />
+        </TouchableOpacity>
       </View>
+
+      {filterOpen && (
+        <View style={styles.filterBar}>
+          <Calendar
+            startDate={draftStart}
+            endDate={draftEnd}
+            onSelectRange={(s, e) => {
+              setDraftStart(s);
+              setDraftEnd(e);
+              if (s && e) {
+                router.setParams({ start: s, end: e });
+              }
+            }}
+          />
+          <TouchableOpacity
+            style={styles.clearBtn}
+            onPress={() => {
+              setDraftStart("");
+              setDraftEnd("");
+              router.setParams({ start: "", end: "" });
+            }}
+            testID="arrivals-filter-clear"
+          >
+            <Text style={styles.clearBtnText}>Clear Filter</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Segmented tabs */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
@@ -162,7 +203,7 @@ export default function ArrivalsScreen() {
           })}
         </ScrollView>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -171,6 +212,9 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { fontSize: 18, fontWeight: "800", color: colors.text },
   subtitle: { fontSize: 11, color: colors.textMuted, fontWeight: "600", marginTop: 2 },
+  filterBar: { paddingHorizontal: spacing.xl, paddingBottom: spacing.md, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
+  clearBtn: { marginTop: spacing.sm, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  clearBtnText: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
 
   tabsRow: { paddingHorizontal: spacing.xl, gap: spacing.sm, paddingVertical: spacing.md },
   tab: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border, flexShrink: 0, ...shadow.card },

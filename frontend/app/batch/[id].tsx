@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -20,6 +20,15 @@ export default function BatchDetail() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
 
+  const [editOpen, setEditOpen] = useState(false);
+  const [newDate, setNewDate] = useState("");
+
+  React.useEffect(() => {
+    if (data?.arrival_date) {
+      setNewDate(data.arrival_date.slice(0, 10));
+    }
+  }, [data]);
+
   const load = useCallback(async () => {
     try {
       const d = await api<any>(`/batches/${id}`);
@@ -28,6 +37,59 @@ export default function BatchDetail() {
   }, [id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const handleDelete = async () => {
+    try {
+      await api(`/batches/${id}`, { method: "DELETE" });
+      toast.show("Batch deleted successfully");
+      router.back();
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    }
+  };
+
+  const confirmDelete = () => {
+    Alert.alert(
+      "Delete Batch",
+      "Are you sure you want to delete this batch? All payments and history will be permanently deleted.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: handleDelete }
+      ]
+    );
+  };
+
+  const handleSaveDate = async () => {
+    const reg = /^\d{4}-\d{2}-\d{2}$/;
+    if (!reg.test(newDate)) {
+      toast.show("Format must be YYYY-MM-DD", "error");
+      return;
+    }
+    const parts = newDate.split("-");
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = parseInt(parts[2], 10);
+    const dateObj = new Date(y, m, d);
+    if (dateObj.getFullYear() !== y || dateObj.getMonth() !== m || dateObj.getDate() !== d) {
+      toast.show("Invalid calendar date", "error");
+      return;
+    }
+    
+    setUpdating(true);
+    try {
+      await api(`/batches/${id}`, {
+        method: "PUT",
+        body: { arrival_date: newDate }
+      });
+      toast.show("Arrival date updated successfully");
+      setEditOpen(false);
+      await load();
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const advance = async () => {
     if (!data) return;
@@ -56,9 +118,51 @@ export default function BatchDetail() {
         <TouchableOpacity onPress={() => router.back()} testID="batch-back">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Batch {data.batch_no}</Text>
-        <StatusPill status={data.status} />
+        <Text style={styles.title} numberOfLines={1}>Batch {data.batch_no}</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => setEditOpen(true)} testID="batch-edit-date">
+            <MaterialCommunityIcons name="calendar-edit" size={22} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={confirmDelete} testID="batch-delete">
+            <MaterialCommunityIcons name="trash-can-outline" size={22} color={colors.danger} />
+          </TouchableOpacity>
+          <StatusPill status={data.status} />
+        </View>
       </View>
+
+      {/* Edit Date Modal */}
+      <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Edit Arrival Date</Text>
+            <Text style={styles.modalLabel}>Arrival Date (YYYY-MM-DD)</Text>
+            <TextInput
+              testID="batch-new-date-input"
+              style={styles.modalInput}
+              value={newDate}
+              onChangeText={setNewDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.textLight}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                testID="batch-edit-cancel"
+                style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
+                onPress={() => setEditOpen(false)}
+              >
+                <Text style={{ color: colors.textMuted, fontWeight: "700" }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="batch-edit-submit"
+                style={[styles.modalBtn, { backgroundColor: colors.primary }]}
+                onPress={handleSaveDate}
+              >
+                <Text style={{ color: "#fff", fontWeight: "800" }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
         {/* QR + Batch header */}
@@ -182,8 +286,16 @@ function Row({ label, value, sub, bold, accent }: { label: string; value: string
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md, gap: spacing.md },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   title: { flex: 1, fontSize: 18, fontWeight: "800", color: colors.text, textAlign: "center" },
   hero: { alignItems: "center", padding: spacing.xl, gap: 4 },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: spacing.xl },
+  modalContent: { backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing.xl, width: "100%", ...shadow.card },
+  modalTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  modalLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
+  modalInput: { backgroundColor: colors.bg, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: colors.text, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.lg },
+  modalButtons: { flexDirection: "row", gap: spacing.md },
+  modalBtn: { flex: 1, paddingVertical: 12, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
   qrBox: { padding: spacing.md, backgroundColor: "#fff", borderRadius: radius.xl, ...shadow.card },
   batchNo: { fontSize: 20, fontWeight: "800", color: colors.text, marginTop: spacing.md, letterSpacing: -0.3 },
   receipt: { fontSize: 12, color: colors.textMuted },

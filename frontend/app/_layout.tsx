@@ -8,6 +8,7 @@ import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { useBrandFonts } from "@/src/hooks/use-brand-fonts";
 import { AuthProvider, useAuth } from "@/src/auth";
 import { ToastProvider } from "@/src/components/Toast";
+import { TopBanner } from "@/src/components/TopBanner";
 import { colors } from "@/src/theme";
 
 LogBox.ignoreAllLogs(true);
@@ -24,7 +25,7 @@ function RouteGuard() {
     const onLogin = segments[0] === "login";
     if (!user && !onLogin) {
       router.replace("/login");
-    } else if (user && (onLogin || segments.length === 0)) {
+    } else if (user && (onLogin || !segments[0])) {
       router.replace("/(tabs)/dashboard");
     }
   }, [user, loading, segments, router]);
@@ -50,7 +51,17 @@ export default function RootLayout() {
       <AuthProvider>
         <ToastProvider>
           <RouteGuard />
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
+          <Stack
+            screenOptions={{
+              headerShown: true,
+              header: () => <TopBanner />,
+              contentStyle: { backgroundColor: colors.bg }
+            }}
+          >
+            <Stack.Screen name="login" options={{ headerShown: false }} />
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          </Stack>
         </ToastProvider>
       </AuthProvider>
     </SafeAreaProvider>

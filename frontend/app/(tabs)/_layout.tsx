@@ -6,15 +6,16 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "@/src/theme";
 
 const ICONS: Record<string, any> = {
-  dashboard: "view-dashboard",
+  dashboard: "home",
   customers: "account-group",
   "new-entry": "plus-circle",
-  machines: "cog-outline",
+  machines: "generator-portable",
   more: "dots-horizontal",
 };
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={({ route }) => ({
@@ -30,7 +31,6 @@ export default function TabLayout() {
           paddingTop: 6,
         },
         tabBarIcon: ({ color, focused }) => {
-          const name = route.name === "new-entry" ? "plus" : ICONS[route.name] || "circle";
           if (route.name === "new-entry") {
             return (
               <View style={styles.newEntry}>
@@ -44,7 +44,13 @@ export default function TabLayout() {
     >
       <Tabs.Screen name="dashboard" options={{ title: "Home" }} />
       <Tabs.Screen name="customers" options={{ title: "Customers" }} />
-      <Tabs.Screen name="new-entry" options={{ title: "" }} />
+      <Tabs.Screen
+        name="new-entry"
+        options={{
+          title: "",
+          tabBarLabel: () => null,
+        }}
+      />
       <Tabs.Screen name="machines" options={{ title: "Machines" }} />
       <Tabs.Screen name="more" options={{ title: "More" }} />
     </Tabs>
@@ -53,10 +59,10 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   newEntry: {
-    width: 52, height: 52, borderRadius: 26,
+    width: 48, height: 48, borderRadius: 24,
     backgroundColor: colors.primary,
     alignItems: "center", justifyContent: "center",
     marginTop: Platform.OS === "ios" ? -6 : -10,
-    shadowColor: colors.primary, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 8,
+    shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
   },
 });

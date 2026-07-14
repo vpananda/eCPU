@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
 
@@ -13,36 +14,57 @@ type Machine = {
 };
 
 export default function MachinesScreen() {
+  const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const router = useRouter();
   const [list, setList] = useState<Machine[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const selectedBranch = selectedBranchId;
+  const setSelectedBranch = setSelectedBranchId;
+
+  const load = useCallback(async (bid = selectedBranch) => {
     try {
-      const d = await api<Machine[]>("/machines");
+      const qs = new URLSearchParams();
+      if (bid) qs.set("branch_id", bid);
+      const d = await api<Machine[]>(`/machines?${qs.toString()}`);
       setList(d);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [selectedBranch]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    load(selectedBranch);
+  }, [load, selectedBranch]));
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <View style={styles.safe}>
       <View style={styles.header}>
-        <Text style={styles.title}>Machines</Text>
-        <Text style={styles.subtitle}>{list.length} dryers</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Machines</Text>
+          <Text style={styles.subtitle}>{list.length} dryers</Text>
+        </View>
+        {user?.role === "Admin" && (
+          <TouchableOpacity
+            testID="add-machine-button"
+            style={styles.addBtn}
+            onPress={() => router.push("/machine-form")}
+          >
+            <MaterialCommunityIcons name="plus" size={22} color="#fff" />
+          </TouchableOpacity>
+        )}
       </View>
+
+
 
       {loading ? (
         <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color={colors.primary} /></View>
       ) : (
         <ScrollView
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(selectedBranch); }} tintColor={colors.primary} />}
         >
           <View style={styles.grid}>
             {list.map(m => (
@@ -55,7 +77,7 @@ export default function MachinesScreen() {
               >
                 <View style={styles.cardTop}>
                   <View style={[styles.iconBox, { backgroundColor: `${colors.status[m.status]}15` }]}>
-                    <MaterialCommunityIcons name="cog" size={26} color={colors.status[m.status]} />
+                    <MaterialCommunityIcons name="tumble-dryer" size={26} color={colors.status[m.status]} />
                   </View>
                   <StatusPill status={m.status} />
                 </View>
@@ -80,15 +102,38 @@ export default function MachinesScreen() {
           </View>
         </ScrollView>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { padding: spacing.xl, paddingBottom: spacing.md },
+  header: { flexDirection: "row", alignItems: "center", padding: spacing.xl, paddingBottom: spacing.md },
   title: { fontSize: 26, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", ...shadow.fab },
+  filterContainer: { marginBottom: spacing.md },
+  chipsScroll: { paddingHorizontal: spacing.xl, gap: spacing.sm, paddingBottom: 2 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  chipTextSelected: {
+    color: "#FFFFFF",
+  },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   card: {
     width: "47.8%",

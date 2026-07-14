@@ -1,15 +1,18 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect, useSegments } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 export default function Reports() {
   const router = useRouter();
+  const segments = useSegments();
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  const isTab = segments.includes("(tabs)");
 
   const load = useCallback(async () => {
     try { setD(await api<any>("/reports/summary")); }
@@ -20,18 +23,19 @@ export default function Reports() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="reports-back">
-          <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
-        </TouchableOpacity>
+      <View style={[styles.header, isTab && { paddingHorizontal: spacing.xl, justifyContent: "flex-start", gap: spacing.sm }]}>
+        {!isTab && (
+          <TouchableOpacity onPress={() => router.back()} testID="reports-back">
+            <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
+          </TouchableOpacity>
+        )}
         <Text style={styles.title}>Reports</Text>
-        <View style={{ width: 22 }} />
       </View>
 
       {loading || !d ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: 60 }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
           {/* Profit card */}
           <View style={styles.hero}>
             <Text style={styles.heroLabel}>Total Profit</Text>

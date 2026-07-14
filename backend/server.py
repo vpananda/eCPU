@@ -1,9 +1,17 @@
 """EThree Agro Solutions - Drying Plant Management Backend."""
+import sys
+import asyncio
+
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 from passlib.context import CryptContext
 from datetime import datetime, timezone, timedelta, date
@@ -18,14 +26,571 @@ import logging
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-MONGO_URL = os.environ["MONGO_URL"]
+DATABASE_URL = os.environ["DATABASE_URL"]
 DB_NAME = os.environ["DB_NAME"]
 JWT_SECRET = os.environ.get("JWT_SECRET", "ethree-agro-secret-key-change-me-2026")
 JWT_ALGO = "HS256"
 JWT_EXPIRE_MIN = 60 * 24 * 30  # 30 days
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+# ---------------------------- POSTGRES DB WRAPPER ----------------------------
+ENUM_FIELDS = {
+    "profiles": {"role": "user_role"},
+    "machines": {"status": "machine_status"},
+    "batches": {"status": "batch_status"},
+    "batch_status_history": {"status": "batch_status"},
+    "payments": {"mode": "payment_mode"},
+    "maintenance": {"status": "maintenance_status"},
+}
+
+UUID_FIELDS = {
+    "profiles": ["id", "branch_id"],
+    "machines": ["id", "branch_id", "current_batch_id"],
+    "customers": ["id", "branch_id", "created_by", "updated_by"],
+    "batches": ["id", "customer_id", "product_id", "machine_id", "branch_id", "created_by", "updated_by"],
+    "batch_status_history": ["id", "batch_id", "changed_by"],
+    "payments": ["id", "batch_id", "created_by"],
+    "expenses": ["id", "branch_id", "created_by"],
+    "maintenance": ["id", "machine_id", "created_by"],
+    "audit_logs": ["id", "user_id"],
+    "user_sessions": ["user_id"]
+}
+
+JSONB_FIELDS = {
+    "settings": ["value"],
+    "audit_logs": ["before", "after"]
+}
+
+def get_col_placeholder(table_name, col_name):
+    tbl = table_name.split(".")[-1]
+    if tbl in ENUM_FIELDS and col_name in ENUM_FIELDS[tbl]:
+        enum_type = ENUM_FIELDS[tbl][col_name]
+        return f"%s::{enum_type}"
+    if tbl in UUID_FIELDS and col_name in UUID_FIELDS[tbl]:
+        return f"%s::uuid"
+    return "%s"
+
+def clean_val(table_name, col_name, val):
+    import json
+    tbl = table_name.split(".")[-1]
+    if tbl in UUID_FIELDS and col_name in UUID_FIELDS[tbl]:
+        if val in (None, ""):
+            return None
+    if tbl in JSONB_FIELDS and col_name in JSONB_FIELDS[tbl]:
+        if val is not None:
+            return json.dumps(val)
+    return val
+
+def postgres_to_mongo_types(row: dict, table_name: Optional[str] = None) -> dict:
+    if not row:
+        return row
+    res = {}
+    tbl = table_name.split(".")[-1] if table_name else None
+    for k, v in row.items():
+        if isinstance(v, uuid.UUID):
+            res[k] = str(v)
+        elif isinstance(v, (datetime, date)):
+            res[k] = v.isoformat()
+        elif v.__class__.__name__ == 'Decimal':
+            f = float(v)
+            res[k] = int(f) if f.is_integer() else f
+        elif isinstance(v, list):
+            res[k] = [postgres_to_mongo_types(item, table_name) if isinstance(item, dict) else (str(item) if isinstance(item, uuid.UUID) else item) for item in v]
+        elif isinstance(v, dict):
+            res[k] = postgres_to_mongo_types(v, table_name)
+        else:
+            res[k] = v
+
+    if tbl == "batches":
+        deliv = {}
+        if "delivered_at" in res and res["delivered_at"] is not None:
+            deliv["delivery_date"] = res["delivered_at"]
+        if "actual_dry_weight" in res and res["actual_dry_weight"] is not None:
+            deliv["actual_dry_weight"] = float(res["actual_dry_weight"])
+        if "processed_bags" in res and res["processed_bags"] is not None:
+            deliv["processed_bags"] = res["processed_bags"]
+        if "weight_loss" in res and res["weight_loss"] is not None:
+            deliv["weight_loss"] = float(res["weight_loss"])
+        if "received_by" in res and res["received_by"] is not None:
+            deliv["received_by"] = res["received_by"]
+        if "received_by_phone" in res and res["received_by_phone"] is not None:
+            deliv["received_by_phone"] = res["received_by_phone"]
+        if "signature" in res and res["signature"] is not None:
+            deliv["signature"] = res["signature"]
+        if "delivery_remarks" in res and res["delivery_remarks"] is not None:
+            deliv["delivery_remarks"] = res["delivery_remarks"]
+        if deliv:
+            res["delivery"] = deliv
+    return res
+
+KEY_MAPPING = {
+    "delivery.delivery_date": "delivered_at",
+    "delivery.actual_dry_weight": "actual_dry_weight",
+    "delivery.processed_bags": "processed_bags",
+    "delivery.weight_loss": "weight_loss",
+    "delivery.received_by": "received_by",
+    "delivery.received_by_phone": "received_by_phone",
+    "delivery.signature": "signature",
+    "delivery.delivery_remarks": "delivery_remarks",
+}
+
+def build_where_clause(filter_dict, table_name=None):
+    if not filter_dict:
+        return "1=1", []
+    
+    parts = []
+    params = []
+    tbl = table_name.split(".")[-1] if table_name else None
+    
+    for k, v in filter_dict.items():
+        if k in KEY_MAPPING:
+            k = KEY_MAPPING[k]
+        if k == "$or" or k == "$and":
+            sub_parts = []
+            for sub in v:
+                sub_clause, sub_params = build_where_clause(sub, table_name)
+                sub_parts.append(f"({sub_clause})")
+                params.extend(sub_params)
+            op = " OR " if k == "$or" else " AND "
+            parts.append("(" + op.join(sub_parts) + ")")
+        elif isinstance(v, dict):
+            for op, val in v.items():
+                if op == "$in":
+                    in_parts = []
+                    non_null_vals = []
+                    for item in val:
+                        if item in (None, ""):
+                            in_parts.append(f"{k} IS NULL")
+                            in_parts.append(f"{k} = ''")
+                        else:
+                            non_null_vals.append(item)
+                    if non_null_vals:
+                        if tbl and tbl in UUID_FIELDS and k in UUID_FIELDS[tbl]:
+                            in_parts.append(f"{k}::text = ANY(%s)")
+                        else:
+                            in_parts.append(f"{k} = ANY(%s)")
+                        params.append(non_null_vals)
+                    if not in_parts:
+                        in_parts.append("FALSE")
+                    parts.append("(" + " OR ".join(in_parts) + ")")
+                elif op == "$gte":
+                    parts.append(f"{k} >= %s")
+                    params.append(val)
+                elif op == "$lte":
+                    parts.append(f"{k} <= %s")
+                    params.append(val)
+                elif op == "$lt":
+                    parts.append(f"{k} < %s")
+                    params.append(val)
+                elif op == "$gt":
+                    parts.append(f"{k} > %s")
+                    params.append(val)
+                elif op == "$regex":
+                    pattern = val
+                    if isinstance(pattern, str):
+                        pattern = pattern.replace("^", "")
+                        if not pattern.endswith("$"):
+                            pattern = pattern + "%"
+                        if not pattern.startswith("^"):
+                            pattern = "%" + pattern
+                    parts.append(f"{k} ILIKE %s")
+                    params.append(pattern)
+        else:
+            if v is None:
+                parts.append(f"{k} IS NULL")
+            elif tbl and tbl in UUID_FIELDS and k in UUID_FIELDS[tbl]:
+                parts.append(f"{k}::text = %s")
+                params.append(v)
+            else:
+                parts.append(f"{k} = %s")
+                params.append(v)
+                
+    return " AND ".join(parts) if parts else "1=1", params
+
+class PostgresFindCursor:
+    def __init__(self, collection, filter_dict=None):
+        self.collection = collection
+        self.filter_dict = filter_dict
+        self.sort_col = None
+        self.sort_dir = "ASC"
+
+    def sort(self, col, direction=-1):
+        if col == "_id":
+            col = "id"
+        if col in KEY_MAPPING:
+            col = KEY_MAPPING[col]
+        self.sort_col = col
+        self.sort_dir = "DESC" if direction == -1 else "ASC"
+        return self
+
+    async def to_list(self, limit=None):
+        where_clause, params = build_where_clause(self.filter_dict, self.collection.table_name)
+        query = f"SELECT * FROM {self.collection.table_name} WHERE {where_clause}"
+        if self.sort_col:
+            query += f" ORDER BY {self.sort_col} {self.sort_dir}"
+        if limit:
+            query += f" LIMIT {limit}"
+        return await self.collection.db.query(query, params, self.collection.table_name)
+
+class PostgresCollection:
+    def __init__(self, db_wrapper, table_name, pk_col="id"):
+        self.db = db_wrapper
+        self.table_name = table_name
+        self.pk_col = pk_col
+
+    async def count_documents(self, filter_dict=None):
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        query = f"SELECT COUNT(*) as count FROM {self.table_name} WHERE {where_clause}"
+        res = await self.db.query(query, params, self.table_name)
+        return int(res[0]["count"]) if res else 0
+
+    async def find_one(self, filter_dict=None, projection=None):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        query = f"SELECT * FROM {self.table_name} WHERE {where_clause} LIMIT 1"
+        res = await self.db.query(query, params, self.table_name)
+        return res[0] if res else None
+
+    async def insert_one(self, document):
+        doc = dict(document)
+        doc.pop("_id", None)
+        doc.pop("status_history", None)
+        doc.pop("delivery", None)
+        cols = list(doc.keys())
+        placeholders = [get_col_placeholder(self.table_name, c) for c in cols]
+        vals = [clean_val(self.table_name, c, doc[c]) for c in cols]
+        
+        query = f"INSERT INTO {self.table_name} ({', '.join(cols)}) VALUES ({', '.join(placeholders)}) RETURNING *"
+        res = await self.db.query(query, vals, self.table_name)
+        return res[0] if res else doc
+
+    async def update_one(self, filter_dict, update_dict, upsert=False):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        
+        check_query = f"SELECT 1 FROM {self.table_name} WHERE {where_clause}"
+        exists = await self.db.query(check_query, params, self.table_name)
+        
+        if not exists and upsert:
+            insert_doc = {}
+            for k, v in filter_dict.items():
+                if not k.startswith("$"):
+                    if k in KEY_MAPPING:
+                        k = KEY_MAPPING[k]
+                    insert_doc[k] = v
+            if "$set" in update_dict:
+                for k, v in update_dict["$set"].items():
+                    if k in KEY_MAPPING:
+                        k = KEY_MAPPING[k]
+                    insert_doc[k] = v
+            insert_doc.pop("status_history", None)
+            insert_doc.pop("delivery", None)
+            await self.insert_one(insert_doc)
+            return None
+            
+        if not exists:
+            return None
+            
+        set_clause = []
+        set_params = []
+        
+        if "$set" in update_dict:
+            for k, v in update_dict["$set"].items():
+                if k in ("status_history", "delivery"):
+                    continue
+                if k in KEY_MAPPING:
+                    k = KEY_MAPPING[k]
+                placeholders = get_col_placeholder(self.table_name, k)
+                set_clause.append(f"{k} = {placeholders}")
+                set_params.append(clean_val(self.table_name, k, v))
+                
+        if "$inc" in update_dict:
+            for k, v in update_dict["$inc"].items():
+                if k in KEY_MAPPING:
+                    k = KEY_MAPPING[k]
+                set_clause.append(f"{k} = COALESCE({k}, 0) + %s")
+                set_params.append(v)
+                
+        if not set_clause:
+            return None
+            
+        query = f"UPDATE {self.table_name} SET {', '.join(set_clause)} WHERE {where_clause}"
+        await self.db.execute(query, set_params + params)
+        return None
+
+    async def find_one_and_update(self, filter_dict, update_dict, upsert=False, return_document=False):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        
+        check_query = f"SELECT * FROM {self.table_name} WHERE {where_clause}"
+        rows = await self.db.query(check_query, params, self.table_name)
+        
+        if not rows and upsert:
+            insert_doc = {}
+            for k, v in filter_dict.items():
+                if not k.startswith("$"):
+                    if k in KEY_MAPPING:
+                        k = KEY_MAPPING[k]
+                    insert_doc[k] = v
+            if "$set" in update_dict:
+                for k, v in update_dict["$set"].items():
+                    if k in KEY_MAPPING:
+                        k = KEY_MAPPING[k]
+                    insert_doc[k] = v
+            if "$inc" in update_dict:
+                for k, v in update_dict["$inc"].items():
+                    if k in KEY_MAPPING:
+                        k = KEY_MAPPING[k]
+                    insert_doc[k] = v
+            
+            res = await self.insert_one(insert_doc)
+            return res
+            
+        if not rows:
+            return None
+            
+        original_doc = rows[0]
+        set_clause = []
+        set_params = []
+        
+        if "$set" in update_dict:
+            for k, v in update_dict["$set"].items():
+                if k in ("status_history", "delivery"):
+                    continue
+                if k in KEY_MAPPING:
+                    k = KEY_MAPPING[k]
+                placeholders = get_col_placeholder(self.table_name, k)
+                set_clause.append(f"{k} = {placeholders}")
+                set_params.append(clean_val(self.table_name, k, v))
+                
+        if "$inc" in update_dict:
+            for k, v in update_dict["$inc"].items():
+                if k in KEY_MAPPING:
+                    k = KEY_MAPPING[k]
+                set_clause.append(f"{k} = COALESCE({k}, 0) + %s")
+                set_params.append(v)
+                
+        if not set_clause:
+            return original_doc
+            
+        query = f"UPDATE {self.table_name} SET {', '.join(set_clause)} WHERE {where_clause} RETURNING *"
+        res = await self.db.query(query, set_params + params, self.table_name)
+        
+        if return_document:
+            return res[0] if res else None
+        return original_doc
+
+    async def delete_one(self, filter_dict):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        query = f"DELETE FROM {self.table_name} WHERE {self.pk_col} IN (SELECT {self.pk_col} FROM {self.table_name} WHERE {where_clause} LIMIT 1)"
+        await self.db.execute(query, params)
+        return None
+
+    async def delete_many(self, filter_dict):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        query = f"DELETE FROM {self.table_name} WHERE {where_clause}"
+        await self.db.execute(query, params)
+        return None
+
+    def find(self, filter_dict=None, projection=None):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        return PostgresFindCursor(self, filter_dict)
+
+class UsersCollection(PostgresCollection):
+    def __init__(self, db_wrapper):
+        super().__init__(db_wrapper, "public.profiles", "id")
+
+    async def find_one(self, filter_dict=None, projection=None):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        where_clause = where_clause.replace("id::text", "p.id::text").replace("email", "p.email").replace("mobile", "p.mobile")
+        
+        query = f"""
+            SELECT 
+                p.id::text as id, p.name, p.email, p.mobile, p.role::text as role, 
+                p.branch_id::text as branch_id, p.google_linked, p.picture, 
+                p.created_at, p.updated_at, u.encrypted_password as password
+            FROM public.profiles p
+            JOIN auth.users u ON p.id = u.id
+            WHERE {where_clause}
+            LIMIT 1
+        """
+        res = await self.db.query(query, params)
+        return res[0] if res else None
+
+    async def insert_one(self, document):
+        doc = dict(document)
+        doc.pop("_id", None)
+        uid = doc.get("id") or str(uuid.uuid4())
+        email = doc.get("email") or f"{doc.get('mobile', uid)}@e3.example.com"
+        password = doc.get("password") or "default-password"
+        
+        auth_query = """
+            INSERT INTO auth.users (
+                id, email, encrypted_password, email_confirmed_at, 
+                role, aud, created_at, updated_at, raw_app_meta_data, raw_user_meta_data
+            ) VALUES (
+                %s, %s, %s, now(), 
+                'authenticated', 'authenticated', now(), now(), 
+                '{"provider":"local","providers":["local"]}', %s
+            )
+        """
+        import json
+        meta = json.dumps({"name": doc.get("name", "")})
+        await self.db.execute(auth_query, [uid, email, password, meta])
+        
+        upd_query = """
+            UPDATE public.profiles
+            SET name = %s, mobile = %s, role = %s::user_role, branch_id = %s::uuid
+            WHERE id = %s
+        """
+        bid = doc.get("branch_id")
+        if bid in (None, ""):
+            bid = None
+        await self.db.execute(upd_query, [doc.get("name"), doc.get("mobile"), doc.get("role", "Store Incharge"), bid, uid])
+        return doc
+
+    async def update_one(self, filter_dict, update_dict, upsert=False):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        where_clause, params = build_where_clause(filter_dict, self.table_name)
+        where_clause = where_clause.replace("id::text", "p.id::text").replace("email", "p.email").replace("mobile", "p.mobile")
+        
+        select_query = f"SELECT p.id::text FROM public.profiles p JOIN auth.users u ON p.id = u.id WHERE {where_clause}"
+        rows = await self.db.query(select_query, params)
+        if not rows:
+            return None
+        
+        uids = [row["id"] for row in rows]
+        set_attrs = update_dict.get("$set", {})
+        password = set_attrs.get("password")
+        
+        if password:
+            for uid in uids:
+                await self.db.execute("UPDATE auth.users SET encrypted_password = %s WHERE id = %s", [password, uid])
+                
+        profile_upds = {k: v for k, v in set_attrs.items() if k != "password"}
+        if profile_upds:
+            set_clause = []
+            set_params = []
+            for k, v in profile_upds.items():
+                if k == "role":
+                    set_clause.append("role = %s::user_role")
+                elif k == "branch_id":
+                    set_clause.append("branch_id = %s::uuid" if v else "branch_id = NULL")
+                    if not v:
+                        continue
+                else:
+                    set_clause.append(f"{k} = %s")
+                set_params.append(v)
+            
+            for uid in uids:
+                query = f"UPDATE public.profiles SET {', '.join(set_clause)} WHERE id = %s"
+                await self.db.execute(query, set_params + [uid])
+        return None
+
+    def find(self, filter_dict=None, projection=None):
+        if filter_dict and "_id" in filter_dict:
+            filter_dict = {("id" if k == "_id" else k): v for k, v in filter_dict.items()}
+        return UsersFindCursor(self, filter_dict)
+
+class UsersFindCursor(PostgresFindCursor):
+    async def to_list(self, limit=None):
+        where_clause, params = build_where_clause(self.filter_dict, self.collection.table_name)
+        where_clause = where_clause.replace("id::text", "p.id::text").replace("email", "p.email").replace("mobile", "p.mobile")
+        
+        query = f"""
+            SELECT 
+                p.id::text as id, p.name, p.email, p.mobile, p.role::text as role, 
+                p.branch_id::text as branch_id, p.google_linked, p.picture, 
+                p.created_at, p.updated_at, u.encrypted_password as password
+            FROM public.profiles p
+            JOIN auth.users u ON p.id = u.id
+            WHERE {where_clause}
+        """
+        if self.sort_col:
+            sort_col_mapped = self.sort_col.replace("id", "p.id").replace("created_at", "p.created_at")
+            query += f" ORDER BY {sort_col_mapped} {self.sort_dir}"
+        if limit:
+            query += f" LIMIT {limit}"
+        return await self.collection.db.query(query, params)
+
+class PostgresDBWrapper:
+    def __init__(self, dsn):
+        if "@2026@" in dsn:
+            dsn = dsn.replace("e3Agro@2026@", "e3Agro%402026@")
+        self.dsn = dsn
+        self.pool = None
+        
+        self.users = UsersCollection(self)
+        self.branches = PostgresCollection(self, "public.branches")
+        self.products = PostgresCollection(self, "public.products")
+        self.machines = PostgresCollection(self, "public.machines")
+        self.customers = PostgresCollection(self, "public.customers")
+        self.batches = PostgresCollection(self, "public.batches")
+        self.payments = PostgresCollection(self, "public.payments")
+        self.expenses = PostgresCollection(self, "public.expenses")
+        self.maintenance = PostgresCollection(self, "public.maintenance")
+        self.settings = PostgresCollection(self, "public.settings", "key")
+        self.audit_logs = PostgresCollection(self, "public.audit_logs")
+        self.user_sessions = PostgresCollection(self, "public.user_sessions", "session_token")
+        self.counters = PostgresCollection(self, "public.counters")
+
+    async def open(self):
+        self.pool = AsyncConnectionPool(
+            conninfo=self.dsn,
+            open=False,
+            kwargs={"row_factory": dict_row}
+        )
+        await self.pool.open()
+
+    async def close(self):
+        if self.pool:
+            await self.pool.close()
+
+    async def query(self, sql, params=None, table_name=None):
+        logger.info(f"DB QUERY START: {sql} | Params: {params}")
+        try:
+            async with self.pool.connection() as conn:
+                logger.info("DB QUERY connection acquired")
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, params)
+                    if cur.description:
+                        rows = await cur.fetchall()
+                        logger.info(f"DB QUERY success, rows: {len(rows)}")
+                        return [postgres_to_mongo_types(row, table_name) for row in rows]
+                    logger.info("DB QUERY success, no rows")
+                    return []
+        except Exception as e:
+            logger.error(f"DB QUERY error: {e}")
+            raise
+
+    async def execute(self, sql, params=None):
+        logger.info(f"DB EXECUTE START: {sql} | Params: {params}")
+        try:
+            async with self.pool.connection() as conn:
+                logger.info("DB EXECUTE connection acquired")
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, params)
+                    logger.info("DB EXECUTE success")
+        except Exception as e:
+            logger.error(f"DB EXECUTE error: {e}")
+            raise
+
+    def close_sync(self):
+        pass
+
+# Setup wrapper instead of motor client
+db = PostgresDBWrapper(DATABASE_URL)
+client = db
 
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
@@ -35,6 +600,19 @@ api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ethree")
+
+# Supabase Initialization
+from supabase import create_client, Client
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+supabase: Optional[Client] = None
+
+if SUPABASE_URL and SUPABASE_KEY and not SUPABASE_URL.startswith("https://your-project-ref"):
+    try:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client initialized successfully.")
+    except Exception as e:
+        logger.warning(f"Could not connect to Supabase: {e}")
 
 
 # ---------------------------- HELPERS ----------------------------
@@ -105,6 +683,16 @@ def require_roles(*roles):
 
 
 async def audit(action: str, entity: str, entity_id: str, user: dict, before: Any = None, after: Any = None):
+    def clean_for_json(val: Any) -> Any:
+        if isinstance(val, dict):
+            return {k: clean_for_json(v) for k, v in val.items()}
+        elif isinstance(val, list):
+            return [clean_for_json(x) for x in val]
+        elif val.__class__.__name__ == 'Decimal':
+            f = float(val)
+            return int(f) if f.is_integer() else f
+        return val
+
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
         "action": action,
@@ -113,8 +701,8 @@ async def audit(action: str, entity: str, entity_id: str, user: dict, before: An
         "user_id": user["id"],
         "user_mobile": user["mobile"],
         "user_role": user["role"],
-        "before": before,
-        "after": after,
+        "before": clean_for_json(before),
+        "after": clean_for_json(after),
         "timestamp": now_utc().isoformat(),
     })
 
@@ -136,7 +724,7 @@ def branch_query(user: dict) -> dict:
     if role == "Admin" or not bid:
         return {}
     # Match user's branch OR legacy records without branch_id
-    return {"$or": [{"branch_id": bid}, {"branch_id": {"$in": [None, ""]}}]}
+    return {"$or": [{"branch_id": bid}, {"branch_id": None}]}
 
 
 def can_write_to_branch(user: dict, branch_id: Optional[str]) -> bool:
@@ -220,6 +808,13 @@ class MachineStatusUpdate(BaseModel):
     status: str
 
 
+class MachineUpdate(BaseModel):
+    name: Optional[str] = None
+    capacity: Optional[float] = None
+    status: Optional[str] = None
+    branch_id: Optional[str] = None
+
+
 class ArrivalIn(BaseModel):
     """Simplified Arrival: customer + product + weight + bags + photos.
     Machine is assigned later at 'Load' stage. Rate defaults to 12/kg."""
@@ -253,6 +848,10 @@ class BatchIn(BaseModel):
     remarks: Optional[str] = ""
     photos: List[str] = []  # base64
     branch_id: Optional[str] = None
+
+
+class BatchUpdate(BaseModel):
+    arrival_date: Optional[str] = None
 
 
 class BatchStatusUpdate(BaseModel):
@@ -321,24 +920,25 @@ DEFAULT_USERS = [
 
 
 async def seed():
-    # Drop any pre-existing unique mobile index so Google users (no mobile) can coexist
-    try:
-        await db.users.drop_index("mobile_1")
-    except Exception:
-        pass
-    # Indexes
-    await db.users.create_index("mobile", sparse=True)
-    await db.users.create_index("email", unique=True, sparse=True)
-    await db.customers.create_index("code", unique=True)
-    await db.batches.create_index("batch_no", unique=True)
-    await db.user_sessions.create_index("session_token", unique=True)
-    try:
-        await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
-    except Exception:
-        pass
+    # 1. Create user_sessions table if not exists
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS public.user_sessions (
+            session_token TEXT PRIMARY KEY,
+            user_id UUID NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            expires_at TIMESTAMPTZ NOT NULL
+        );
+    """)
+    # Create counters table if not exists
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS public.counters (
+            id TEXT PRIMARY KEY,
+            seq INTEGER NOT NULL DEFAULT 0
+        );
+    """)
 
-    # Default branch
-    default_branch = await db.branches.find_one({}, {"_id": 0})
+    # 2. Default branch
+    default_branch = await db.branches.find_one({})
     if not default_branch:
         default_branch = {
             "id": str(uuid.uuid4()), "name": "Main Branch", "address": "HQ",
@@ -347,12 +947,13 @@ async def seed():
         await db.branches.insert_one(dict(default_branch))
     default_branch_id = default_branch["id"]
 
-    # Users — seed with default branch assignment (so scoping works)
+    # 3. Users — seed default users
     for name, mobile, pw, role in DEFAULT_USERS:
         existing = await db.users.find_one({"mobile": mobile})
         if not existing:
             await db.users.insert_one({
                 "id": str(uuid.uuid4()), "name": name, "mobile": mobile,
+                "email": f"{mobile}@e3.example.com",
                 "password": hash_pw(pw), "role": role,
                 "branch_id": default_branch_id,
                 "created_at": now_utc().isoformat(),
@@ -361,7 +962,7 @@ async def seed():
             await db.users.update_one({"id": existing["id"]},
                                       {"$set": {"branch_id": default_branch_id}})
 
-    # Products
+    # 4. Products
     for pname, rate in DEFAULT_PRODUCTS:
         if not await db.products.find_one({"name": pname}):
             await db.products.insert_one({
@@ -369,7 +970,7 @@ async def seed():
                 "created_at": now_utc().isoformat(),
             })
 
-    # Machines — tag with default branch
+    # 5. Machines
     for mname, cap in DEFAULT_MACHINES:
         existing = await db.machines.find_one({"name": mname})
         if not existing:
@@ -383,7 +984,7 @@ async def seed():
             await db.machines.update_one({"id": existing["id"]},
                                          {"$set": {"branch_id": default_branch_id}})
 
-    # Expense categories (settings collection)
+    # 6. Settings
     if not await db.settings.find_one({"key": "expense_categories"}):
         await db.settings.insert_one({
             "key": "expense_categories", "value": DEFAULT_EXPENSE_CATS,
@@ -403,13 +1004,14 @@ async def seed():
 
 @app.on_event("startup")
 async def startup():
+    await db.open()
     await seed()
     logger.info("EThree Agro backend started; seed complete.")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    client.close()
+    await db.close()
 
 
 # ---------------------------- AUTH ----------------------------
@@ -517,6 +1119,8 @@ async def create_user(body: UserCreate, user: dict = Depends(require_roles("Admi
         "id": str(uuid.uuid4()), "name": body.name, "mobile": body.mobile,
         "password": hash_pw(body.password), "role": body.role,
         "branch_id": body.branch_id, "created_at": now_utc().isoformat(),
+        "created_by": user["id"], "updated_at": now_utc().isoformat(),
+        "updated_by": user["id"],
     }
     await db.users.insert_one(dict(u))
     await audit("create", "user", u["id"], user, None, {"mobile": u["mobile"], "role": u["role"]})
@@ -539,7 +1143,8 @@ async def list_products(user: dict = Depends(get_current_user)):
 @api.post("/products")
 async def add_product(body: ProductIn, user: dict = Depends(require_roles("Admin"))):
     p = {"id": str(uuid.uuid4()), "name": body.name, "default_rate": body.default_rate,
-         "created_at": now_utc().isoformat()}
+         "created_at": now_utc().isoformat(), "created_by": user["id"],
+         "updated_at": now_utc().isoformat(), "updated_by": user["id"]}
     await db.products.insert_one(dict(p))
     await audit("create", "product", p["id"], user, None, p)
     return p
@@ -547,8 +1152,13 @@ async def add_product(body: ProductIn, user: dict = Depends(require_roles("Admin
 
 # ---------------------------- MACHINES ----------------------------
 @api.get("/machines")
-async def list_machines(user: dict = Depends(get_current_user)):
-    query = branch_query(user)
+async def list_machines(user: dict = Depends(get_current_user), branch_id: Optional[str] = None):
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        query = {"branch_id": branch_id}
+    else:
+        query = branch_query(user)
     machines = await db.machines.find(query, {"_id": 0}).to_list(50)
     for m in machines:
         if m.get("current_batch_id"):
@@ -569,7 +1179,8 @@ async def add_machine(body: MachineIn, user: dict = Depends(require_roles("Admin
     m = {"id": str(uuid.uuid4()), "name": body.name, "capacity": body.capacity,
          "status": body.status, "current_batch_id": None,
          "branch_id": await resolve_branch_id(user, body.branch_id),
-         "created_at": now_utc().isoformat()}
+         "created_at": now_utc().isoformat(), "created_by": user["id"],
+         "updated_at": now_utc().isoformat(), "updated_by": user["id"]}
     await db.machines.insert_one(dict(m))
     await audit("create", "machine", m["id"], user, None, m)
     return m
@@ -581,15 +1192,56 @@ async def update_machine_status(mid: str, body: MachineStatusUpdate,
     m = await db.machines.find_one({"id": mid}, {"_id": 0})
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
-    await db.machines.update_one({"id": mid}, {"$set": {"status": body.status}})
+    await db.machines.update_one({"id": mid}, {"$set": {
+        "status": body.status,
+        "updated_at": now_utc().isoformat(),
+        "updated_by": user["id"]
+    }})
     await audit("update_status", "machine", mid, user, {"status": m["status"]}, {"status": body.status})
+    return {"ok": True}
+
+
+@api.put("/machines/{mid}")
+async def update_machine(mid: str, body: MachineUpdate, user: dict = Depends(require_roles("Admin"))):
+    m = await db.machines.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    
+    upd = {}
+    if body.name is not None: upd["name"] = body.name
+    if body.capacity is not None: upd["capacity"] = body.capacity
+    if body.status is not None: upd["status"] = body.status
+    if body.branch_id is not None:
+        upd["branch_id"] = body.branch_id or None
+
+    if upd:
+        upd["updated_at"] = now_utc().isoformat()
+        upd["updated_by"] = user["id"]
+        await db.machines.update_one({"id": mid}, {"$set": upd})
+        await audit("update", "machine", mid, user, m, upd)
+    return {"ok": True}
+
+
+@api.delete("/machines/{mid}")
+async def delete_machine(mid: str, user: dict = Depends(require_roles("Admin"))):
+    m = await db.machines.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    
+    await db.machines.delete_one({"id": mid})
+    await audit("delete", "machine", mid, user, {"name": m.get("name")}, None)
     return {"ok": True}
 
 
 # ---------------------------- CUSTOMERS ----------------------------
 @api.get("/customers")
-async def list_customers(user: dict = Depends(get_current_user), q: Optional[str] = None):
-    query: Dict[str, Any] = dict(branch_query(user))
+async def list_customers(user: dict = Depends(get_current_user), q: Optional[str] = None, branch_id: Optional[str] = None):
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        query: Dict[str, Any] = {"branch_id": branch_id}
+    else:
+        query = dict(branch_query(user))
     if q:
         query["$and"] = [{
             "$or": [
@@ -599,6 +1251,41 @@ async def list_customers(user: dict = Depends(get_current_user), q: Optional[str
             ]
         }]
     docs = await db.customers.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    
+    # Enrich with branch name
+    branches = {b["id"]: b["name"] for b in await db.branches.find({}, {"_id": 0}).to_list(100)}
+    
+    target_branch = branch_id or user.get("branch_id") if user.get("role") != "Admin" else branch_id
+    if target_branch:
+        stats_rows = await db.query("""
+            SELECT 
+                customer_id::text as customer_id, 
+                COUNT(*)::integer as total_arrivals, 
+                COALESCE(SUM(bill_amount), 0)::float as total_amount, 
+                COALESCE(SUM(total_paid), 0)::float as amount_received
+            FROM public.batches
+            WHERE branch_id::text = %s
+            GROUP BY customer_id
+        """, [target_branch])
+    else:
+        stats_rows = await db.query("""
+            SELECT 
+                customer_id::text as customer_id, 
+                COUNT(*)::integer as total_arrivals, 
+                COALESCE(SUM(bill_amount), 0)::float as total_amount, 
+                COALESCE(SUM(total_paid), 0)::float as amount_received
+            FROM public.batches
+            GROUP BY customer_id
+        """)
+    stats_map = {row["customer_id"]: row for row in stats_rows}
+
+    for doc in docs:
+        doc["branch_name"] = branches.get(doc.get("branch_id"), "-")
+        c_stats = stats_map.get(doc["id"], {"total_arrivals": 0, "total_amount": 0.0, "amount_received": 0.0})
+        doc["total_arrivals"] = c_stats["total_arrivals"]
+        doc["total_amount"] = c_stats["total_amount"]
+        doc["amount_received"] = c_stats["amount_received"]
+        
     return docs
 
 
@@ -607,6 +1294,11 @@ async def get_customer(cid: str, user: dict = Depends(get_current_user)):
     c = await db.customers.find_one({"id": cid}, {"_id": 0})
     if not c:
         raise HTTPException(status_code=404, detail="Not found")
+    
+    # Enrich with branch name
+    branch = await db.branches.find_one({"id": c.get("branch_id")}, {"_id": 0}) if c.get("branch_id") else None
+    c["branch_name"] = branch["name"] if branch else "-"
+
     # stats
     batches = await db.batches.find({"customer_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(500)
     total_visits = len(batches)
@@ -661,21 +1353,58 @@ async def update_customer(cid: str, body: CustomerIn,
 
 # ---------------------------- BATCHES ----------------------------
 async def recompute_batch_totals(batch: dict) -> dict:
-    dry = batch.get("actual_dry_weight") or batch.get("estimated_dry_weight") or 0
-    bill_amount = round(dry * batch.get("rate_per_kg", 0) + batch.get("loading_charges", 0) - batch.get("discount", 0), 2)
+    dry = float(batch.get("actual_dry_weight") or batch.get("estimated_dry_weight") or 0)
+    rate = float(batch.get("rate_per_kg") or 0)
+    loading = float(batch.get("loading_charges") or 0)
+    discount = float(batch.get("discount") or 0)
+    
+    bill_amount = round(dry * rate + loading - discount, 2)
     payments = await db.payments.find({"batch_id": batch["id"]}, {"_id": 0}).to_list(500)
-    total_paid = round(sum(p["amount"] for p in payments), 2)
+    total_paid = round(sum(float(p["amount"]) for p in payments), 2)
     return {
         "bill_amount": bill_amount,
         "total_paid": total_paid,
         "balance_amount": round(bill_amount - total_paid, 2),
     }
 
+async def clean_batch(b: Optional[dict]) -> Optional[dict]:
+    if not b:
+        return None
+    # 1. Fetch status history
+    history = await db.query(
+        "SELECT status, changed_at as at, changed_by as by, remarks FROM public.batch_status_history WHERE batch_id = %s ORDER BY changed_at ASC",
+        [b["id"]], "public.batch_status_history"
+    )
+    b["status_history"] = history
+    
+    # 2. Reconstruct delivery object
+    if b.get("delivered_at"):
+        b["delivery"] = {
+            "delivery_date": b.get("delivered_at"),
+            "actual_dry_weight": b.get("actual_dry_weight"),
+            "processed_bags": b.get("processed_bags"),
+            "weight_loss": b.get("weight_loss"),
+            "received_by": b.get("received_by"),
+            "received_by_phone": b.get("received_by_phone"),
+            "signature": b.get("signature"),
+            "remarks": b.get("delivery_remarks"),
+        }
+    else:
+        b["delivery"] = None
+        
+    return b
+
 
 @api.get("/batches")
 async def list_batches(user: dict = Depends(get_current_user),
-                       q: Optional[str] = None, status: Optional[str] = None):
-    query: Dict[str, Any] = dict(branch_query(user))
+                       q: Optional[str] = None, status: Optional[str] = None,
+                       branch_id: Optional[str] = None):
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        query: Dict[str, Any] = {"branch_id": branch_id}
+    else:
+        query = dict(branch_query(user))
     if status:
         query["status"] = status
     if q:
@@ -683,13 +1412,11 @@ async def list_batches(user: dict = Depends(get_current_user),
             {"batch_no": {"$regex": q, "$options": "i"}},
             {"receipt_no": {"$regex": q, "$options": "i"}},
         ]
-        # Combine with branch filter if present
         if "$or" in query:
             query = {"$and": [{"$or": query.pop("$or")}, {"$or": or_clause}, query]} if query else {"$or": or_clause}
         else:
             query["$or"] = or_clause
     docs = await db.batches.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    # Enrich
     for d in docs:
         cust = await db.customers.find_one({"id": d["customer_id"]}, {"_id": 0, "name": 1, "mobile": 1, "code": 1})
         prod = await db.products.find_one({"id": d["product_id"]}, {"_id": 0, "name": 1})
@@ -697,6 +1424,7 @@ async def list_batches(user: dict = Depends(get_current_user),
         d["customer"] = clean(cust) if cust else None
         d["product"] = clean(prod) if prod else None
         d["machine"] = clean(mach) if mach else None
+        await clean_batch(d)
     return docs
 
 
@@ -709,6 +1437,7 @@ async def get_batch(bid: str, user: dict = Depends(get_current_user)):
     b["product"] = clean(await db.products.find_one({"id": b["product_id"]}, {"_id": 0}))
     b["machine"] = clean(await db.machines.find_one({"id": b["machine_id"]}, {"_id": 0}))
     b["payments"] = await db.payments.find({"batch_id": bid}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    await clean_batch(b)
     return b
 
 
@@ -763,7 +1492,7 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
         await db.batches.update_one({"id": bid}, {"$set": totals})
 
     await audit("create", "batch", bid, user, None, {"batch_no": b["batch_no"]})
-    return clean(b)
+    return clean(await clean_batch(b))
 
 
 @api.post("/arrivals")
@@ -823,7 +1552,7 @@ async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)
     }
     await db.batches.insert_one(dict(b))
     await audit("create_arrival", "batch", bid, user, None, {"batch_no": b["batch_no"], "raw_weight": body.raw_weight})
-    return clean(b)
+    return clean(await clean_batch(b))
 
 
 @api.put("/batches/{bid}/status")
@@ -876,7 +1605,7 @@ async def deliver_batch(bid: str, body: DeliveryIn,
         await db.batches.update_one({"id": bid}, {"$set": {"rate_per_kg": body.rate_per_kg}})
         b["rate_per_kg"] = body.rate_per_kg
 
-    weight_loss = round(b["raw_weight"] - body.actual_dry_weight, 2)
+    weight_loss = round(float(b["raw_weight"]) - float(body.actual_dry_weight), 2)
     delivery = {
         "actual_dry_weight": body.actual_dry_weight,
         "processed_bags": body.processed_bags or 0,
@@ -899,9 +1628,12 @@ async def deliver_batch(bid: str, body: DeliveryIn,
         "actual_dry_weight": body.actual_dry_weight,
         "processed_bags": body.processed_bags or 0,
         "weight_loss": weight_loss,
-        "delivery": delivery,
         "status": "Delivered",
-        "status_history": history,
+        "delivered_at": delivery["delivery_date"],
+        "received_by": delivery["received_by"],
+        "received_by_phone": delivery["received_by_phone"],
+        "signature": delivery["signature"],
+        "delivery_remarks": delivery["remarks"],
         "updated_at": now_utc().isoformat(),
         "updated_by": user["id"],
         **totals,
@@ -928,17 +1660,87 @@ async def deliver_batch(bid: str, body: DeliveryIn,
     return {"ok": True, "weight_loss": weight_loss, "bill_amount": totals["bill_amount"], "balance_amount": totals["balance_amount"]}
 
 
+@api.put("/batches/{bid}")
+async def update_batch_fields(
+    bid: str,
+    body: BatchUpdate,
+    user: dict = Depends(get_current_user)
+):
+    b = await db.batches.find_one({"id": bid}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    
+    if not can_write_to_branch(user, b.get("branch_id")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    upd = {}
+    if body.arrival_date is not None:
+        try:
+            import re
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", body.arrival_date):
+                raise ValueError()
+            dt = datetime.strptime(body.arrival_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            upd["arrival_date"] = dt.isoformat()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid arrival_date format, must be YYYY-MM-DD")
+
+    if not upd:
+        return {"ok": True}
+
+    upd["updated_at"] = now_utc().isoformat()
+    upd["updated_by"] = user["id"]
+
+    await db.batches.update_one({"id": bid}, {"$set": upd})
+    await audit("update_batch", "batch", bid, user, {"arrival_date": b.get("arrival_date")}, upd)
+    return {"ok": True}
+
+
+@api.delete("/batches/{bid}")
+async def delete_batch(
+    bid: str,
+    user: dict = Depends(get_current_user)
+):
+    b = await db.batches.find_one({"id": bid}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    
+    if not can_write_to_branch(user, b.get("branch_id")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    machine_id = b.get("machine_id")
+    if machine_id:
+        m = await db.machines.find_one({"id": machine_id})
+        if m and m.get("current_batch_id") == bid:
+            await db.machines.update_one(
+                {"id": machine_id},
+                {"$set": {"status": "Available", "current_batch_id": None}}
+            )
+
+    await db.batches.delete_one({"id": bid})
+    await audit("delete", "batch", bid, user, {"batch_no": b.get("batch_no")}, None)
+    return {"ok": True}
+
+
 # ---------------------------- PAYMENTS ----------------------------
 @api.get("/payments")
-async def list_payments(user: dict = Depends(get_current_user)):
-    # Filter by user's branch by joining on batch
-    branch_ids = None
-    if user.get("role") != "Admin" and user.get("branch_id"):
+async def list_payments(user: dict = Depends(get_current_user), branch_id: Optional[str] = None):
+    # Filter by user's branch (or requested branch_id if allowed) by joining on batch
+    target_branch = branch_id
+    if target_branch:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != target_branch:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        if user.get("role") != "Admin":
+            target_branch = user.get("branch_id")
+
+    if target_branch:
         branch_batches = await db.batches.find(
-            {"branch_id": user["branch_id"]}, {"_id": 0, "id": 1}
+            {"branch_id": target_branch}, {"_id": 0, "id": 1}
         ).to_list(3000)
         branch_ids = [b["id"] for b in branch_batches]
-    query = {"batch_id": {"$in": branch_ids}} if branch_ids is not None else {}
+        query = {"batch_id": {"$in": branch_ids}}
+    else:
+        query = {}
     docs = await db.payments.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     for d in docs:
         b = await db.batches.find_one({"id": d["batch_id"]}, {"_id": 0, "batch_no": 1, "customer_id": 1})
@@ -960,6 +1762,7 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
         "id": str(uuid.uuid4()), "batch_id": body.batch_id, "amount": body.amount,
         "mode": body.mode, "remarks": body.remarks or "",
         "created_at": now_utc().isoformat(), "created_by": user["id"],
+        "updated_at": now_utc().isoformat(), "updated_by": user["id"],
     }
     await db.payments.insert_one(dict(p))
     totals = await recompute_batch_totals(b)
@@ -970,8 +1773,13 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
 
 # ---------------------------- EXPENSES ----------------------------
 @api.get("/expenses")
-async def list_expenses(user: dict = Depends(get_current_user)):
-    query = branch_query(user)
+async def list_expenses(user: dict = Depends(get_current_user), branch_id: Optional[str] = None):
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        query: Dict[str, Any] = {"branch_id": branch_id}
+    else:
+        query = dict(branch_query(user))
     return await db.expenses.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 
@@ -988,6 +1796,8 @@ async def add_expense(body: ExpenseIn, user: dict = Depends(get_current_user)):
         "expense_date": e.get("expense_date") or now_utc().date().isoformat(),
         "created_at": now_utc().isoformat(),
         "created_by": user["id"],
+        "updated_at": now_utc().isoformat(),
+        "updated_by": user["id"],
     })
     await db.expenses.insert_one(dict(e))
     await audit("create", "expense", e["id"], user, None, {"category": e["category"], "amount": e["amount"]})
@@ -1013,14 +1823,19 @@ async def list_maintenance(user: dict = Depends(get_current_user)):
 @api.post("/maintenance")
 async def add_maintenance(body: MaintenanceIn, user: dict = Depends(get_current_user)):
     m = body.dict()
+    mid = str(uuid.uuid4())
     m.update({
-        "id": str(uuid.uuid4()),
-        "date": now_utc().isoformat(),
+        "id": mid,
         "created_at": now_utc().isoformat(),
         "created_by": user["id"],
+        "updated_at": now_utc().isoformat(),
+        "updated_by": user["id"],
     })
-    await db.maintenance.insert_one(dict(m))
-    await audit("create", "maintenance", m["id"], user, None, {"machine_id": m["machine_id"], "cost": m["cost"]})
+    db_m = dict(m)
+    db_m.pop("date", None)
+    await db.maintenance.insert_one(db_m)
+    await audit("create", "maintenance", mid, user, None, {"machine_id": m["machine_id"], "cost": m["cost"]})
+    m["date"] = m["created_at"]
     return clean(m)
 
 
@@ -1060,16 +1875,22 @@ async def dashboard(
     user: dict = Depends(get_current_user),
     start: Optional[str] = None,
     end: Optional[str] = None,
+    branch_id: Optional[str] = None,
 ):
     tstart, tend = _today_range()
     pstart, pend = _parse_range(start, end)
-    bq = branch_query(user)
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        bq = {"branch_id": branch_id}
+    else:
+        bq = branch_query(user)
 
     # Period-scoped
     period_batches = await db.batches.find(
         {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
     ).to_list(2000)
-    period_customers = len({b["customer_id"] for b in period_batches})
+    period_customers = await db.customers.count_documents(bq)
     period_received_weight = round(sum(b.get("raw_weight", 0) for b in period_batches), 2)
 
     period_deliveries_docs = await db.batches.find(
@@ -1129,6 +1950,10 @@ async def dashboard(
 
     recent = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15)
 
+    drying_completed_count = sum(1 for b in processing_docs if b.get("status") == "Completed")
+    pending_deliveries_count = sum(1 for b in processing_docs if b.get("status") == "Completed")
+    pending_payments_count = sum(1 for b in all_batches if b.get("balance_amount", 0) > 0)
+
     return {
         "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
         "today_arrival": {
@@ -1144,6 +1969,9 @@ async def dashboard(
         "period_expenses": period_expense,
         "period_profit": round(period_collection - period_expense, 2),
         "pending_payments": pending_payments,
+        "pending_payments_count": pending_payments_count,
+        "drying_completed_count": drying_completed_count,
+        "pending_deliveries_count": pending_deliveries_count,
         "machines_running": machines_running,
         "machines_available": machines_available,
         "machines_maintenance": machines_maintenance,
@@ -1157,10 +1985,16 @@ async def dashboard_arrivals(
     user: dict = Depends(get_current_user),
     start: Optional[str] = None,
     end: Optional[str] = None,
+    branch_id: Optional[str] = None,
 ):
     """List arrivals + processing + deliveries with customer + branch + weights."""
     pstart, pend = _parse_range(start, end)
-    bq = branch_query(user)
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        bq = {"branch_id": branch_id}
+    else:
+        bq = branch_query(user)
 
     ins = await db.batches.find(
         {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
@@ -1285,7 +2119,8 @@ async def create_branch(body: BranchIn, user: dict = Depends(require_roles("Admi
     b = {
         "id": str(uuid.uuid4()),
         "name": body.name, "address": body.address or "", "phone": body.phone or "",
-        "created_at": now_utc().isoformat(),
+        "created_at": now_utc().isoformat(), "created_by": user["id"],
+        "updated_at": now_utc().isoformat(), "updated_by": user["id"],
     }
     await db.branches.insert_one(dict(b))
     await audit("create", "branch", b["id"], user, None, {"name": b["name"]})
@@ -1299,6 +2134,7 @@ async def update_branch(bid: str, body: BranchIn, user: dict = Depends(require_r
         raise HTTPException(status_code=404, detail="Not found")
     await db.branches.update_one({"id": bid}, {"$set": {
         "name": body.name, "address": body.address or "", "phone": body.phone or "",
+        "updated_at": now_utc().isoformat(), "updated_by": user["id"]
     }})
     await audit("update", "branch", bid, user, {"name": before["name"]}, {"name": body.name})
     return {"ok": True}
@@ -1317,6 +2153,7 @@ async def update_user(uid: str, body: UserUpdate, user: dict = Depends(require_r
         upd["password"] = hash_pw(body.password)
     if upd:
         upd["updated_at"] = now_utc().isoformat()
+        upd["updated_by"] = user["id"]
         await db.users.update_one({"id": uid}, {"$set": upd})
     await audit("update", "user", uid, user, {"role": existing.get("role")}, {k: v for k, v in upd.items() if k != "password"})
     return {"ok": True}

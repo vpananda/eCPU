@@ -1,9 +1,10 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
@@ -15,6 +16,7 @@ export default function MachineDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -27,6 +29,27 @@ export default function MachineDetail() {
   }, [id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const confirmDelete = () => {
+    Alert.alert(
+      "Delete Machine",
+      "Are you sure you want to delete this machine? This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: handleDelete }
+      ]
+    );
+  };
+
+  const handleDelete = async () => {
+    try {
+      await api(`/machines/${id}`, { method: "DELETE" });
+      toast.show("Machine deleted successfully");
+      router.back();
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    }
+  };
 
   const setStatus = async (status: string) => {
     setUpdating(true);
@@ -48,13 +71,24 @@ export default function MachineDetail() {
         <TouchableOpacity onPress={() => router.back()} testID="machine-detail-back">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>{data.name}</Text>
-        <View style={{ width: 22 }} />
+        <Text style={styles.title} numberOfLines={1}>{data.name}</Text>
+        {user?.role === "Admin" ? (
+          <View style={styles.headerActions}>
+            <TouchableOpacity onPress={() => router.push({ pathname: "/machine-form", params: { id } })} testID="machine-edit" style={{ marginRight: 12 }}>
+              <MaterialCommunityIcons name="pencil" size={22} color={colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={confirmDelete} testID="machine-delete">
+              <MaterialCommunityIcons name="trash-can-outline" size={22} color={colors.danger} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={{ width: 22 }} />
+        )}
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 80 }}>
         <View style={styles.hero}>
           <View style={[styles.iconBox, { backgroundColor: `${colors.status[data.status]}20` }]}>
-            <MaterialCommunityIcons name="cog" size={38} color={colors.status[data.status]} />
+            <MaterialCommunityIcons name="tumble-dryer" size={38} color={colors.status[data.status]} />
           </View>
           <Text style={styles.machineName}>{data.name}</Text>
           <Text style={styles.capacity}>Capacity: {data.capacity} kg</Text>
@@ -100,7 +134,8 @@ export default function MachineDetail() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
-  title: { fontSize: 20, fontWeight: "800", color: colors.text },
+  headerActions: { flexDirection: "row", alignItems: "center" },
+  title: { fontSize: 20, fontWeight: "800", color: colors.text, textAlign: "center", flex: 1 },
   hero: { alignItems: "center", padding: spacing.xl, gap: 6, backgroundColor: colors.card, borderRadius: radius.xxl, marginBottom: spacing.lg, ...shadow.card },
   iconBox: { width: 88, height: 88, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: spacing.sm },
   machineName: { fontSize: 24, fontWeight: "800", color: colors.text },

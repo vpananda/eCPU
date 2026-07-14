@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect, useNavigation } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { useAuth } from "@/src/auth";
 
 const ACTIONS = [
   { key: "arrival", label: "Arrival", subtitle: "New wet produce received", icon: "arrow-down-bold-circle", color: "#2E7D32", route: "/arrival-form" as const },
@@ -15,7 +16,16 @@ const ACTIONS = [
 export default function NewEntrySheet() {
   const router = useRouter();
   const nav = useNavigation();
+  const { user } = useAuth();
   const [visible, setVisible] = useState(false);
+
+  const role = user?.role || "Store Incharge";
+  const filteredActions = ACTIONS.filter(a => {
+    if (role === "Store Incharge" && (a.key === "expense" || a.key === "payment")) {
+      return false;
+    }
+    return true;
+  });
 
   // Open sheet whenever the tab is focused; close when navigating away
   useFocusEffect(
@@ -49,7 +59,7 @@ export default function NewEntrySheet() {
             <Text style={styles.subtitle}>What would you like to record?</Text>
 
             <View style={styles.grid}>
-              {ACTIONS.map(a => (
+              {filteredActions.map(a => (
                 <TouchableOpacity
                   key={a.key}
                   testID={`quick-${a.key}`}

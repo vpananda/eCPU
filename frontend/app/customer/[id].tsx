@@ -48,6 +48,11 @@ export default function CustomerDetail() {
               <MaterialCommunityIcons name="map-marker" size={12} color={colors.textMuted} /> {[data.village, data.taluk, data.district].filter(Boolean).join(", ")}
             </Text>
           ) : null}
+          {data.branch_name && data.branch_name !== "-" ? (
+            <Text style={styles.branch}>
+              <MaterialCommunityIcons name="storefront" size={12} color={colors.primary} /> {data.branch_name}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.statsGrid}>
@@ -100,6 +105,7 @@ const styles = StyleSheet.create({
   codeText: { fontSize: 12, fontWeight: "800", color: colors.accent },
   mobile: { fontSize: 14, color: colors.textMuted, marginTop: 6 },
   location: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  branch: { fontSize: 12, color: colors.primary, fontWeight: "700", marginTop: 4 },
   statsGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: spacing.xl, gap: spacing.md, marginBottom: spacing.lg },
   stat: { width: "47.5%", backgroundColor: colors.card, padding: spacing.lg, borderRadius: radius.xl, ...shadow.card, gap: 4 },
   statValue: { fontSize: 18, fontWeight: "800", color: colors.text },

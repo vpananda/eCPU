@@ -363,3 +363,86 @@ class TestGoogleAuth:
         r = requests.get(f"{API}/auth/me", headers=H(admin_token))
         assert r.status_code == 200
         assert r.json()["role"] == "Admin"
+
+
+class TestBatchModificationsAndCustomerStats:
+    def test_update_and_delete_batch(self, admin_token):
+        # 1. Create a customer
+        mob = f"9{uuid.uuid4().int % 1000000000:09d}"
+        rc = requests.post(f"{API}/customers", headers=H(admin_token),
+                           json={"name": "Test batch-mod customer", "mobile": mob})
+        assert rc.status_code == 200
+        cid = rc.json()["id"]
+
+        # 2. Create a batch/arrival
+        rp = requests.get(f"{API}/products", headers=H(admin_token))
+        pid = rp.json()[0]["id"]
+        
+        rb = requests.post(f"{API}/arrivals", headers=H(admin_token),
+                           json={"customer_id": cid, "product_id": pid, "raw_weight": 100, "rate_per_kg": 12, "arrival_date": "2026-07-10"})
+        assert rb.status_code == 200
+        bid = rb.json()["id"]
+        assert rb.json()["arrival_date"].startswith("2026-07-10")
+
+        # 3. Update arrival date (valid format)
+        ru = requests.put(f"{API}/batches/{bid}", headers=H(admin_token),
+                          json={"arrival_date": "2026-07-12"})
+        assert ru.status_code == 200
+        
+        # Verify get
+        rg = requests.get(f"{API}/batches/{bid}", headers=H(admin_token))
+        assert rg.json()["arrival_date"].startswith("2026-07-12")
+
+        # 4. Update arrival date (invalid format)
+        ru_invalid = requests.put(f"{API}/batches/{bid}", headers=H(admin_token),
+                                   json={"arrival_date": "12-07-2026"})
+        assert ru_invalid.status_code == 400
+
+        # 5. Check customer list stats
+        rcl = requests.get(f"{API}/customers", headers=H(admin_token))
+        assert rcl.status_code == 200
+        cust_list = rcl.json()
+        target_cust = next((c for c in cust_list if c["id"] == cid), None)
+        assert target_cust is not None
+        assert target_cust["total_arrivals"] == 1
+        assert target_cust["total_amount"] == 1200.0  # 100 * 12
+        assert target_cust["amount_received"] == 0.0
+
+        # 6. Delete batch
+        rd = requests.delete(f"{API}/batches/{bid}", headers=H(admin_token))
+        assert rd.status_code == 200
+
+        # Verify batch is deleted
+        rg2 = requests.get(f"{API}/batches/{bid}", headers=H(admin_token))
+        assert rg2.status_code == 404
+
+    def test_update_and_delete_machine(self, admin_token):
+        # 1. Create a machine
+        mname = f"TEST-Dryer-{uuid.uuid4().hex[:4]}"
+        rm = requests.post(f"{API}/machines", headers=H(admin_token),
+                           json={"name": mname, "capacity": 600, "status": "Available"})
+        assert rm.status_code == 200
+        mid = rm.json()["id"]
+
+        # 2. Update machine fields
+        ru = requests.put(f"{API}/machines/{mid}", headers=H(admin_token),
+                          json={"name": mname + "-edited", "capacity": 700, "status": "Cleaning"})
+        assert ru.status_code == 200
+
+        # Verify get
+        rml = requests.get(f"{API}/machines", headers=H(admin_token))
+        assert rml.status_code == 200
+        m = next((x for x in rml.json() if x["id"] == mid), None)
+        assert m is not None
+        assert m["name"] == mname + "-edited"
+        assert float(m["capacity"]) == 700.0
+        assert m["status"] == "Cleaning"
+
+        # 3. Delete machine
+        rd = requests.delete(f"{API}/machines/{mid}", headers=H(admin_token))
+        assert rd.status_code == 200
+
+        # Verify deleted
+        rml2 = requests.get(f"{API}/machines", headers=H(admin_token))
+        assert rml2.status_code == 200
+        assert not any(x["id"] == mid for x in rml2.json())

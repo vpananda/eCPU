@@ -11,6 +11,7 @@ type User = {
   email?: string;
   picture?: string;
   role: "Admin" | "Manager" | "Store Incharge";
+  branch_id?: string;
 };
 
 type AuthCtx = {
@@ -20,6 +21,9 @@ type AuthCtx = {
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  branches: { id: string; name: string }[];
+  selectedBranchId: string;
+  setSelectedBranchId: (id: string) => void;
 };
 
 const Ctx = createContext<AuthCtx>({} as any);
@@ -34,6 +38,31 @@ async function persistSession(token: string, user: User, setUser: (u: User) => v
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+
+  const loadBranches = useCallback(async () => {
+    try {
+      const list = await api<{ id: string; name: string }[]>("/branches");
+      setBranches(list);
+    } catch (e) {
+      console.error("Failed to load branches in AuthProvider", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      loadBranches();
+      if (user.role !== "Admin") {
+        setSelectedBranchId(user.branch_id || "");
+      } else {
+        setSelectedBranchId(""); // Default to "All Branches" for Admin
+      }
+    } else {
+      setBranches([]);
+      setSelectedBranchId("");
+    }
+  }, [user, loadBranches]);
 
   const refresh = useCallback(async () => {
     const t = await getToken();
@@ -133,7 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ user, loading, login, loginWithGoogle, logout, refresh }}>
+    <Ctx.Provider value={{ user, loading, login, loginWithGoogle, logout, refresh, branches, selectedBranchId, setSelectedBranchId }}>
       {children}
     </Ctx.Provider>
   );

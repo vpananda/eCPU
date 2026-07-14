@@ -1,17 +1,19 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
-type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string };
+type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string; branch_id?: string; branch_name?: string; total_arrivals?: number; total_amount?: number; amount_received?: number };
 
 export default function CustomersScreen() {
+  const { branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const router = useRouter();
-  const [q, setQ] = useState("");
   const [list, setList] = useState<Customer[]>([]);
+  const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (search = "") => {
@@ -25,14 +27,21 @@ export default function CustomersScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(q); }, [load, q]));
+  useFocusEffect(useCallback(() => {
+    load(q);
+  }, [load, q]));
+
+  const filteredList = list.filter(item => {
+    if (!selectedBranchId) return true;
+    return item.branch_id === selectedBranchId;
+  });
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <View style={styles.safe}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Customers</Text>
-          <Text style={styles.subtitle}>{list.length} total</Text>
+          <Text style={styles.subtitle}>{filteredList.length} total</Text>
         </View>
         <TouchableOpacity
           testID="add-customer-button"
@@ -62,11 +71,13 @@ export default function CustomersScreen() {
         ) : null}
       </View>
 
+
+
       {loading ? (
         <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color={colors.primary} /></View>
       ) : (
         <FlatList
-          data={list}
+          data={filteredList}
           keyExtractor={i => i.id}
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.md }}
           ListEmptyComponent={() => (
@@ -101,6 +112,29 @@ export default function CustomersScreen() {
                       <Text style={styles.meta} numberOfLines={1}>{item.village}</Text>
                     </>
                   ) : null}
+                  {item.branch_name && item.branch_name !== "-" ? (
+                    <>
+                      <View style={styles.metaDot} />
+                      <MaterialCommunityIcons name="storefront" size={12} color={colors.primary} />
+                      <Text style={[styles.meta, { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
+                        {item.branch_name}
+                      </Text>
+                    </>
+                  ) : null}
+                </View>
+                <View style={styles.statsRow}>
+                  <View style={styles.statItem}>
+                    <MaterialCommunityIcons name="history" size={12} color={colors.textMuted} />
+                    <Text style={styles.statText}>{item.total_arrivals || 0} arrivals</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <MaterialCommunityIcons name="cash" size={12} color={colors.textMuted} />
+                    <Text style={styles.statText}>₹{(item.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <MaterialCommunityIcons name="cash-check" size={12} color={colors.primary} />
+                    <Text style={[styles.statText, { color: colors.primary, fontWeight: "700" }]}>₹{(item.amount_received || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  </View>
                 </View>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textLight} />
@@ -108,7 +142,7 @@ export default function CustomersScreen() {
           )}
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -133,7 +167,32 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   meta: { fontSize: 12, color: colors.textMuted, fontWeight: "500" },
   metaDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: colors.textLight, marginHorizontal: 4 },
+  statsRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 },
+  statItem: { flexDirection: "row", alignItems: "center", gap: 3 },
+  statText: { fontSize: 11, fontWeight: "600", color: colors.textMuted },
   empty: { alignItems: "center", paddingVertical: 60, gap: 6 },
   emptyText: { fontSize: 16, color: colors.text, fontWeight: "700", marginTop: 12 },
   emptySub: { fontSize: 13, color: colors.textMuted },
+  filterContainer: { marginTop: spacing.md },
+  chipsScroll: { paddingHorizontal: spacing.xl, gap: spacing.sm, paddingBottom: 2 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  chipTextSelected: {
+    color: "#FFFFFF",
+  },
 });

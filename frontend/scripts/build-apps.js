@@ -2,9 +2,20 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+// Ensure ANDROID_HOME and ANDROID_SDK_ROOT are set for Android builds on Windows
+if (process.platform === 'win32' && !process.env.ANDROID_HOME) {
+  const defaultWinSdk = path.join(process.env.USERPROFILE || 'C:\\Users\\DELL', 'AppData', 'Local', 'Android', 'Sdk');
+  if (fs.existsSync(defaultWinSdk)) {
+    process.env.ANDROID_HOME = defaultWinSdk;
+    process.env.ANDROID_SDK_ROOT = defaultWinSdk;
+    console.log(`[INFO] Automatically set ANDROID_HOME and ANDROID_SDK_ROOT to: ${defaultWinSdk}`);
+  }
+}
+
+
 // 1. Resolve paths
 const rootDir = path.resolve(__dirname, '..');
-const buildsDir = path.resolve(rootDir, 'builds');
+const buildsDir = path.resolve(rootDir, '..', 'Output');
 const packageJsonPath = path.resolve(rootDir, 'package.json');
 
 // 2. Read package.json version
@@ -34,6 +45,14 @@ try {
   const gradlewCmd = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
   const androidDir = path.join(rootDir, 'android');
   
+  // Ensure local.properties exists with the correct sdk.dir if missing
+  const localPropertiesPath = path.join(androidDir, 'local.properties');
+  if (!fs.existsSync(localPropertiesPath) && process.env.ANDROID_HOME) {
+    console.log('[INFO] local.properties not found in Android project. Generating fallback local.properties...');
+    const escapedSdkDir = process.env.ANDROID_HOME.replace(/\\/g, '\\\\');
+    fs.writeFileSync(localPropertiesPath, `sdk.dir=${escapedSdkDir}\n`, 'utf8');
+  }
+
   execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });
 
   // 6. Copy compiled APK to target folder

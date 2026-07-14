@@ -8,7 +8,7 @@ echo  This tool will:
 echo  1. Parse frontend/package.json to find version
 echo  2. Generate native android & ios projects (expo prebuild)
 echo  3. Compile release APK locally via Gradle
-echo  4. Save outputs to frontend/builds/android/v[version]/
+echo  4. Save outputs to Output/android/v[version]/
 echo.
 echo =====================================================================
 echo.

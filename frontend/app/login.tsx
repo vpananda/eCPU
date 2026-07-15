@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -7,6 +7,7 @@ import { useToast } from "@/src/components/Toast";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { colors, radius, spacing } from "@/src/theme";
+import { storage } from "@/src/utils/storage";
 
 const LOGO = require("../assets/images/e3logo.png");
 
@@ -25,6 +26,15 @@ export default function LoginScreen() {
   const [gLoading, setGLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
 
+  useEffect(() => {
+    (async () => {
+      const savedMobile = await storage.getItem<string>("ethree_saved_mobile", "");
+      const savedPassword = await storage.getItem<string>("ethree_saved_password", "");
+      if (savedMobile) setMobile(savedMobile);
+      if (savedPassword) setPassword(savedPassword);
+    })();
+  }, []);
+
   const onLogin = async () => {
     if (!mobile || !password) {
       toast.show("Enter mobile and password", "error");
@@ -33,6 +43,8 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await login(mobile.trim(), password);
+      await storage.setItem("ethree_saved_mobile", mobile.trim());
+      await storage.setItem("ethree_saved_password", password);
       toast.show("Welcome back!");
     } catch (e: any) {
       toast.show(e.message || "Login failed", "error");

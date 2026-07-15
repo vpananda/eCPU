@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import * as Linking from "expo-linking";
 import { api, setToken, clearToken, getToken } from "@/src/api";
 import { startGoogleLogin, fetchSessionData, exchangeWithBackend, extractSessionId } from "@/src/google-auth";
+import { storage } from "@/src/utils/storage";
 
 type User = {
   id: string;
@@ -32,6 +33,7 @@ export const useAuth = () => useContext(Ctx);
 /** Persist session_token to storage and hydrate user state. */
 async function persistSession(token: string, user: User, setUser: (u: User) => void) {
   await setToken(token);
+  await storage.setItem("ethree_auth_user_json", JSON.stringify(user));
   setUser(user);
 }
 
@@ -66,17 +68,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     const t = await getToken();
+    const cachedUserJson = await storage.getItem<string>("ethree_auth_user_json", "");
+    
     if (!t) {
       setUser(null);
+      await storage.removeItem("ethree_auth_user_json");
       setLoading(false);
       return;
     }
+    
+    if (cachedUserJson) {
+      try {
+        const cachedUser = JSON.parse(cachedUserJson) as User;
+        setUser(cachedUser);
+        setLoading(false);
+      } catch {}
+    }
+    
     try {
       const me = await api<User>("/auth/me");
       setUser(me);
-    } catch {
-      await clearToken();
-      setUser(null);
+      await storage.setItem("ethree_auth_user_json", JSON.stringify(me));
+    } catch (e: any) {
+      const msg = e.message || "";
+      const isAuthError = msg.includes("401") || msg.includes("403") || msg.includes("Unauthorized") || msg.includes("Forbidden") || msg.includes("404");
+      if (isAuthError) {
+        await clearToken();
+        await storage.removeItem("ethree_auth_user_json");
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -135,6 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       auth: false,
     });
     await setToken(res.token);
+    await storage.setItem("ethree_auth_user_json", JSON.stringify(res.user));
     setUser(res.user);
   }, []);
 
@@ -158,6 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await api("/auth/logout", { method: "POST" });
     } catch {}
     await clearToken();
+    await storage.removeItem("ethree_auth_user_json");
     setUser(null);
   }, []);
 

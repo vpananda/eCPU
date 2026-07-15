@@ -20,13 +20,7 @@ export default function NewEntrySheet() {
   const { user } = useAuth();
   const [visible, setVisible] = useState(false);
 
-  const role = user?.role || "Store Incharge";
-  const filteredActions = ACTIONS.filter(a => {
-    if (role === "Store Incharge" && (a.key === "expense" || a.key === "payment")) {
-      return false;
-    }
-    return true;
-  });
+  const filteredActions = ACTIONS;
 
   // Open sheet whenever the tab is focused; close when navigating away
   useFocusEffect(

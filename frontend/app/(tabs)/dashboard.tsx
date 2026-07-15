@@ -437,14 +437,12 @@ export default function Dashboard() {
                 <Text style={styles.actionText}>Deliver Stock</Text>
               </TouchableOpacity>
 
-              {role !== "Store Incharge" && (
-                <TouchableOpacity style={styles.actionItem} onPress={() => router.push("/payment-picker")}>
-                  <View style={[styles.actionIconWrap, { backgroundColor: "#FFF3E0" }]}>
-                    <MaterialCommunityIcons name="cash-plus" size={24} color="#F57C00" />
-                  </View>
-                  <Text style={styles.actionText}>Collect Payment</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={styles.actionItem} onPress={() => router.push("/payment-picker")}>
+                <View style={[styles.actionIconWrap, { backgroundColor: "#FFF3E0" }]}>
+                  <MaterialCommunityIcons name="cash-plus" size={24} color="#F57C00" />
+                </View>
+                <Text style={styles.actionText}>Collect Payment</Text>
+              </TouchableOpacity>
             </View>
 
             {/* 6. Needs Attention Section */}

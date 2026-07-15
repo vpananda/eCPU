@@ -93,6 +93,11 @@ export default function ArrivalForm() {
       } else {
         setBranchId(user?.branch_id || b[0]?.id || null);
       }
+      // Make default spices as cardamom
+      const cardamom = p.find(prod => prod.name.toLowerCase() === "cardamom");
+      if (cardamom) {
+        setProductId((prev) => prev || cardamom.id);
+      }
     } finally { setLoadingData(false); }
   }, [user]);
 
@@ -139,7 +144,7 @@ export default function ArrivalForm() {
         },
       });
       toast.show(`Arrival ${b.batch_no} recorded`);
-      router.replace(`/batch/${b.id}`);
+      router.replace("/arrivals");
     } catch (e: any) {
       toast.show(e.message || "Failed", "error");
     } finally { setSaving(false); }

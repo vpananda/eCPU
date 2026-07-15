@@ -1,17 +1,20 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
 
 type Machine = {
-  id: string; name: string; capacity: number; status: string;
+  id: string; name: string; capacity: number; status: string; branch_name?: string;
   current_batch?: { id: string; batch_no: string; customer_name: string; expected_delivery_date?: string; status: string };
 };
+
+const STATUSES = ["All", "Available", "Running", "Maintenance", "Cleaning"];
 
 export default function MachinesScreen() {
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
@@ -20,6 +23,7 @@ export default function MachinesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [branchModalOpen, setBranchModalOpen] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("All");
 
   const selectedBranch = selectedBranchId;
   const setSelectedBranch = setSelectedBranchId;
@@ -40,13 +44,18 @@ export default function MachinesScreen() {
     load(selectedBranch);
   }, [load, selectedBranch]));
 
+  const filteredList = useMemo(() => {
+    if (filterStatus === "All") return list;
+    return list.filter(m => m.status === filterStatus);
+  }, [list, filterStatus]);
+
   return (
     <View style={styles.safe}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Machines</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
-            <Text style={styles.subtitle}>{list.length} dryers</Text>
+            <Text style={styles.subtitle}>{filteredList.length} dryers</Text>
             {user?.role === "Admin" && (
               <TouchableOpacity
                 onPress={() => setBranchModalOpen(true)}
@@ -72,16 +81,31 @@ export default function MachinesScreen() {
         )}
       </View>
 
+      {/* Status Filter Chips */}
+      <View style={styles.filterContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+          {STATUSES.map(s => (
+            <TouchableOpacity
+              key={s}
+              testID={`machines-filter-${s.toLowerCase()}`}
+              style={[styles.chip, filterStatus === s && styles.chipSelected]}
+              onPress={() => setFilterStatus(s)}
+            >
+              <Text style={[styles.chipText, filterStatus === s && styles.chipTextSelected]}>{s}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
       {loading ? (
-        <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color={colors.primary} /></View>
+        <View style={{ paddingVertical: 40, alignItems: "center" }}><Loader size={60} /></View>
       ) : (
         <ScrollView
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(selectedBranch); }} tintColor={colors.primary} />}
         >
           <View style={styles.grid}>
-            {list.map(m => (
+            {filteredList.map(m => (
               <TouchableOpacity
                 testID={`machine-${m.id}`}
                 key={m.id}

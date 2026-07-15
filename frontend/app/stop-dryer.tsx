@@ -1,9 +1,10 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 type RunningBatch = {
@@ -21,6 +22,27 @@ type Machine = {
   running_batches?: RunningBatch[];
 };
 
+function todayISOStr(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateTime(d: Date) {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  
+  let hours = d.getHours();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const min = String(d.getMinutes()).padStart(2, "0");
+  
+  return `${day}/${month}/${year}, ${String(hours).padStart(2, "0")}:${min} ${ampm}`;
+}
+
 export default function StopDryer() {
   const router = useRouter();
   const { machineId, machineName } = useLocalSearchParams<{ machineId: string; machineName: string }>();
@@ -28,9 +50,54 @@ export default function StopDryer() {
   const [machine, setMachine] = useState<Machine | null>(null);
   const [loading, setLoading] = useState(true);
   
-  const [dryWeightInput, setDryWeightInput] = useState("");
-  const [dryBagsInput, setDryBagsInput] = useState("");
+  // DateTime picker states
+  const [stopTime, setStopTime] = useState(new Date());
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [tempDateStr, setTempDateStr] = useState(todayISOStr(new Date()));
+  const [tempHour, setTempHour] = useState(12);
+  const [tempMinute, setTempMinute] = useState(0);
+  const [tempAmPm, setTempAmPm] = useState<"AM" | "PM">("AM");
   const [saving, setSaving] = useState(false);
+
+  const openDateTimePicker = () => {
+    setTempDateStr(todayISOStr(stopTime));
+    let hr = stopTime.getHours();
+    const ampm = hr >= 12 ? "PM" : "AM";
+    hr = hr % 12;
+    hr = hr ? hr : 12;
+    setTempHour(hr);
+    setTempMinute(Math.round(stopTime.getMinutes() / 5) * 5 % 60);
+    setTempAmPm(ampm);
+    setDatePickerOpen(true);
+  };
+
+  const incrementHour = (amount: number) => {
+    setTempHour(prev => {
+      let val = prev + amount;
+      if (val > 12) return 1;
+      if (val < 1) return 12;
+      return val;
+    });
+  };
+
+  const incrementMinute = (amount: number) => {
+    setTempMinute(prev => {
+      let val = prev + amount;
+      if (val >= 60) return 0;
+      if (val < 0) return 55;
+      return val;
+    });
+  };
+
+  const saveDateTime = () => {
+    const [y, m, d] = tempDateStr.split("-").map(Number);
+    let hr = tempHour;
+    if (tempAmPm === "PM" && hr < 12) hr += 12;
+    if (tempAmPm === "AM" && hr === 12) hr = 0;
+    const newDate = new Date(y, m - 1, d, hr, tempMinute);
+    setStopTime(newDate);
+    setDatePickerOpen(false);
+  };
 
   const fetchMachineDetails = useCallback(async () => {
     setLoading(true);
@@ -65,44 +132,16 @@ export default function StopDryer() {
     return runningBatches.reduce((sum, b) => sum + (b.bags || 0), 0);
   }, [runningBatches]);
 
-  const parsedDryWeight = parseFloat(dryWeightInput) || 0;
-  const parsedDryBags = parseInt(dryBagsInput, 10) || 0;
-
-  // Proportional distribution calculations for preview
-  const previewData = useMemo(() => {
-    if (totalRawWeight === 0) return [];
-    return runningBatches.map(b => {
-      const pct = b.raw_weight / totalRawWeight;
-      const propWeight = pct * parsedDryWeight;
-      const propBags = Math.round(pct * parsedDryBags);
-      return {
-        ...b,
-        propWeight: propWeight.toFixed(2),
-        propBags: propBags
-      };
-    });
-  }, [runningBatches, totalRawWeight, parsedDryWeight, parsedDryBags]);
-
   const handleStop = async () => {
-    if (parsedDryWeight <= 0) {
-      Alert.alert("Invalid Input", "Please enter a valid total dried weight (> 0).");
-      return;
-    }
-    if (parsedDryBags <= 0) {
-      Alert.alert("Invalid Input", "Please enter a valid total processed bag count (> 0).");
-      return;
-    }
-
     setSaving(true);
     try {
       await api(`/machines/${machineId}/stop`, {
         method: "POST",
         body: {
-          total_dry_weight: parsedDryWeight,
-          total_dry_bags: parsedDryBags
+          end_time: stopTime.toISOString()
         }
       });
-      Alert.alert("Success", "Dryer stopped and dry weights recorded successfully.");
+      Alert.alert("Success", "Dryer stopped successfully.");
       router.back();
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to stop dryer");
@@ -153,38 +192,21 @@ export default function StopDryer() {
               </View>
             </View>
 
-            {/* Inputs Block */}
-            <Text style={styles.sectionTitle}>Process Output Details</Text>
-            <View style={styles.inputGroup}>
-              <View style={styles.inputCol}>
-                <Text style={styles.inputLabel}>Total Dried Weight (KG)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={dryWeightInput}
-                  onChangeText={setDryWeightInput}
-                  keyboardType="numeric"
-                  placeholder="0.00"
-                  placeholderTextColor={colors.textLight}
-                />
+            {/* DateTime Picker */}
+            <Text style={styles.sectionTitle}>1. Dryer Stop Time</Text>
+            <TouchableOpacity style={styles.dateTimeField} onPress={openDateTimePicker}>
+              <View style={styles.dateTimeIconBox}>
+                <MaterialCommunityIcons name="clock-outline" size={20} color={colors.primary} />
               </View>
-              <View style={styles.inputCol}>
-                <Text style={styles.inputLabel}>Total Output Bags</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={dryBagsInput}
-                  onChangeText={setDryBagsInput}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  placeholderTextColor={colors.textLight}
-                />
-              </View>
-            </View>
+              <Text style={styles.dateTimeText}>{formatDateTime(stopTime)}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
 
-            {/* Proportional Distribution Preview List */}
-            {previewData.length > 0 && (
+            {/* Loaded Customer Details List */}
+            {runningBatches.length > 0 && (
               <>
-                <Text style={styles.sectionTitle}>Proportional Output Preview</Text>
-                {previewData.map(b => (
+                <Text style={[styles.sectionTitle, { marginTop: spacing.xl }]}>2. Loaded Customer Details</Text>
+                {runningBatches.map(b => (
                   <View key={b.id} style={styles.previewCard}>
                     <View style={styles.previewCardHeader}>
                       <Text style={styles.previewCustName}>{b.customer_name}</Text>
@@ -197,12 +219,8 @@ export default function StopDryer() {
                         <Text style={styles.statVal}>{b.raw_weight} KG</Text>
                       </View>
                       <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Est. Dried</Text>
-                        <Text style={[styles.statVal, { color: colors.primary }]}>{b.propWeight} KG</Text>
-                      </View>
-                      <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Est. Bags</Text>
-                        <Text style={styles.statVal}>{b.propBags} Bags</Text>
+                        <Text style={styles.statLabel}>Input Bags</Text>
+                        <Text style={styles.statVal}>{b.bags} Bags</Text>
                       </View>
                     </View>
                   </View>
@@ -230,6 +248,78 @@ export default function StopDryer() {
           </View>
         </View>
       )}
+
+      {/* DateTime Picker Modal */}
+      <Modal
+        visible={datePickerOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDatePickerOpen(false)}
+      >
+        <View style={styles.dateModalBg}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerSheetHandle} />
+            <Text style={styles.pickerSheetTitle}>Select Dryer Stop Time</Text>
+
+            <Calendar
+              startDate={tempDateStr}
+              endDate={tempDateStr}
+              onSelectRange={(s, e) => {
+                setTempDateStr(s);
+              }}
+            />
+
+            <Text style={styles.timeSectionTitle}>Time</Text>
+            <View style={styles.timePickerRow}>
+              <View style={styles.timeCol}>
+                <TouchableOpacity onPress={() => incrementHour(-1)} style={styles.timeBtn}>
+                  <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.timeValue}>{String(tempHour).padStart(2, "0")}</Text>
+                <TouchableOpacity onPress={() => incrementHour(1)} style={styles.timeBtn}>
+                  <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.timeColon}>:</Text>
+
+              <View style={styles.timeCol}>
+                <TouchableOpacity onPress={() => incrementMinute(-5)} style={styles.timeBtn}>
+                  <MaterialCommunityIcons name="minus" size={16} color={colors.text} />
+                </TouchableOpacity>
+                <Text style={styles.timeValue}>{String(tempMinute).padStart(2, "0")}</Text>
+                <TouchableOpacity onPress={() => incrementMinute(5)} style={styles.timeBtn}>
+                  <MaterialCommunityIcons name="plus" size={16} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.ampmCol}>
+                <TouchableOpacity
+                  style={[styles.ampmBtn, tempAmPm === "AM" && styles.ampmBtnActive]}
+                  onPress={() => setTempAmPm("AM")}
+                >
+                  <Text style={[styles.ampmText, tempAmPm === "AM" && styles.ampmTextActive]}>AM</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.ampmBtn, tempAmPm === "PM" && styles.ampmBtnActive]}
+                  onPress={() => setTempAmPm("PM")}
+                >
+                  <Text style={[styles.ampmText, tempAmPm === "PM" && styles.ampmTextActive]}>PM</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.pickerSheetActions}>
+              <TouchableOpacity style={styles.pickerSheetCancel} onPress={() => setDatePickerOpen(false)}>
+                <Text style={styles.pickerSheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.pickerSheetApply} onPress={saveDateTime}>
+                <Text style={styles.pickerSheetApplyText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -276,19 +366,30 @@ const styles = StyleSheet.create({
   metaLabel: { fontSize: 12, color: colors.textMuted, fontWeight: "500" },
   metaVal: { fontSize: 13, fontWeight: "700", color: colors.text },
   sectionTitle: { fontSize: 13, fontWeight: "800", color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: spacing.sm, marginTop: spacing.md },
-  inputGroup: { flexDirection: "row", gap: spacing.md, marginBottom: spacing.lg },
-  inputCol: { flex: 1 },
-  inputLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, marginBottom: 6, textTransform: "uppercase" },
-  textInput: {
+  dateTimeField: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: radius.md,
     borderWidth: 1.5,
     borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: colors.text,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    ...shadow.card,
+  },
+  dateTimeIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: `${colors.primary}12`,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dateTimeText: {
+    flex: 1,
+    fontSize: 14,
     fontWeight: "700",
+    color: colors.text,
+    marginLeft: spacing.sm,
   },
   previewCard: {
     backgroundColor: "#fff",
@@ -327,4 +428,122 @@ const styles = StyleSheet.create({
   },
   stopBtnDisabled: { opacity: 0.7 },
   stopBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  dateModalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  pickerSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  pickerSheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+    marginBottom: spacing.md,
+    textAlign: "center",
+  },
+  timeSectionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    marginTop: spacing.md,
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  timePickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  timeCol: {
+    alignItems: "center",
+    flexDirection: "row",
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 8,
+  },
+  timeBtn: {
+    padding: 6,
+  },
+  timeValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+    minWidth: 24,
+    textAlign: "center",
+  },
+  timeColon: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  ampmCol: {
+    flexDirection: "row",
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    overflow: "hidden",
+  },
+  ampmBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#fff",
+  },
+  ampmBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  ampmText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.textMuted,
+  },
+  ampmTextActive: {
+    color: "#fff",
+  },
+  pickerSheetActions: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  pickerSheetCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
+  pickerSheetCancelText: {
+    color: colors.textMuted,
+    fontWeight: "700",
+  },
+  pickerSheetApply: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+  },
+  pickerSheetApplyText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
 });

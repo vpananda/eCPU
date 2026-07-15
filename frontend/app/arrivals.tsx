@@ -101,27 +101,45 @@ export default function ArrivalsScreen() {
             onSelectRange={(s, e) => {
               setDraftStart(s);
               setDraftEnd(e);
-              if (s && e) {
-                router.setParams({ start: s, end: e });
-              }
             }}
           />
-          <TouchableOpacity
-            style={styles.clearBtn}
-            onPress={() => {
-              setDraftStart("");
-              setDraftEnd("");
-              router.setParams({ start: "", end: "" });
-            }}
-            testID="arrivals-filter-clear"
-          >
-            <Text style={styles.clearBtnText}>Clear Filter</Text>
-          </TouchableOpacity>
+          <View style={styles.filterActions}>
+            <TouchableOpacity
+              style={styles.clearBtn}
+              onPress={() => {
+                setDraftStart("");
+                setDraftEnd("");
+                router.setParams({ start: "", end: "" });
+                setFilterOpen(false);
+              }}
+              testID="arrivals-filter-clear"
+            >
+              <Text style={styles.clearBtnText}>Clear</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.applyBtn}
+              onPress={() => {
+                if (draftStart) {
+                  router.setParams({ start: draftStart, end: draftEnd || draftStart });
+                }
+                setFilterOpen(false);
+              }}
+              testID="arrivals-filter-apply"
+            >
+              <Text style={styles.applyBtnText}>Apply Filter</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
       {/* Segmented tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabsContainer}
+        contentContainerStyle={styles.tabsRow}
+      >
         {TABS.map(t => {
           const active = tab === t.key;
           const count = t.key === "in" ? data?.totals.in_count : t.key === "out" ? data?.totals.out_count : data?.totals.processing_count;
@@ -213,9 +231,13 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: "800", color: colors.text },
   subtitle: { fontSize: 11, color: colors.textMuted, fontWeight: "600", marginTop: 2 },
   filterBar: { paddingHorizontal: spacing.xl, paddingBottom: spacing.md, backgroundColor: colors.card, borderBottomWidth: 1, borderBottomColor: colors.border },
-  clearBtn: { marginTop: spacing.sm, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  filterActions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.sm },
+  clearBtn: { flex: 1, paddingVertical: 10, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   clearBtnText: { color: colors.textMuted, fontSize: 13, fontWeight: "700" },
+  applyBtn: { flex: 2, paddingVertical: 10, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  applyBtnText: { color: "#fff", fontSize: 13, fontWeight: "800" },
 
+  tabsContainer: { flexGrow: 0 },
   tabsRow: { paddingHorizontal: spacing.xl, gap: spacing.sm, paddingVertical: spacing.md },
   tab: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.xl, backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border, flexShrink: 0, ...shadow.card },
   tabLabel: { fontSize: 13, fontWeight: "800", color: colors.text },

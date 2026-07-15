@@ -154,15 +154,15 @@ class TestFlow:
         assert b["batch_no"].startswith("B") and len(b["batch_no"]) == 6
         assert b["receipt_no"].startswith("R")
         assert b["status"] == "Received"
-        # bill = 80*15 + 100 - 50 = 1250
-        assert abs(b["bill_amount"] - 1250.0) < 0.01, f"bill={b['bill_amount']}"
+        # bill = 100*15 + 100 - 50 = 1550
+        assert abs(b["bill_amount"] - 1550.0) < 0.01, f"bill={b['bill_amount']}"
         TestFlow.ids["batch_id"] = b["id"]
 
         # Verify advance recorded as payment
         rg = requests.get(f"{API}/batches/{b['id']}", headers=H(admin_token))
         gb = rg.json()
         assert gb["total_paid"] == 200.0
-        assert gb["balance_amount"] == 1050.0
+        assert gb["balance_amount"] == 1350.0
 
     def test_batch_validation_raw_weight(self, admin_token):
         prods = requests.get(f"{API}/products", headers=H(admin_token)).json()
@@ -218,8 +218,8 @@ class TestFlow:
         d = r.json()
         # weight_loss = 100 - 75 = 25
         assert d["weight_loss"] == 25
-        # bill = 75*15 + 100 - 50 = 1175
-        assert abs(d["bill_amount"] - 1175.0) < 0.01
+        # bill = 100*15 + 100 - 50 = 1550
+        assert abs(d["bill_amount"] - 1550.0) < 0.01
 
         # machine freed
         machs = requests.get(f"{API}/machines", headers=H(admin_token)).json()
@@ -235,10 +235,10 @@ class TestFlow:
         r = requests.post(f"{API}/payments", headers=H(admin_token),
                           json={"batch_id": TestFlow.ids["batch_id"], "amount": 500, "mode": "UPI"})
         assert r.status_code == 200
-        # total_paid should be 700 (200 advance + 500), bill 1175 → balance 475
+        # total_paid should be 700 (200 advance + 500), bill 1550 → balance 850
         gb = requests.get(f"{API}/batches/{TestFlow.ids['batch_id']}", headers=H(admin_token)).json()
         assert gb["total_paid"] == 700.0
-        assert abs(gb["balance_amount"] - 475.0) < 0.01
+        assert abs(gb["balance_amount"] - 850.0) < 0.01
 
     def test_list_payments(self, admin_token):
         r = requests.get(f"{API}/payments", headers=H(admin_token))

@@ -29,10 +29,13 @@ export default function DeliveryScreen() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    if (!id || id === "[id]") return;
     try {
       const b = await api<any>(`/batches/${id}`);
       setBatch(b);
       if (b.rate_per_kg) setRate(String(b.rate_per_kg));
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load batch", "error");
     } finally { setLoadingData(false); }
   }, [id]);
 
@@ -71,8 +74,21 @@ export default function DeliveryScreen() {
     } finally { setSaving(false); }
   };
 
-  if (loadingData || !batch) {
+  if (loadingData) {
     return <SafeAreaView style={styles.safe}><ActivityIndicator style={{ marginTop: 60 }} color={colors.primary} /></SafeAreaView>;
+  }
+
+  if (!batch) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Batch data not found.</Text>
+          <TouchableOpacity style={styles.errorBtn} onPress={() => router.back()}>
+            <Text style={styles.errorBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   const weightLoss = dryNum > 0 ? Math.max(0, batch.raw_weight - dryNum) : 0;
@@ -218,4 +234,8 @@ const styles = StyleSheet.create({
   modeText: { fontSize: 13, color: colors.text, fontWeight: "700" },
   remainingPill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.info + "15", padding: 8, borderRadius: radius.pill, alignSelf: "flex-start", marginBottom: spacing.md },
   remainingText: { fontSize: 12, fontWeight: "700", color: colors.info },
+  errorContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl, gap: spacing.md },
+  errorText: { fontSize: 16, color: colors.textMuted, textAlign: "center", fontWeight: "600" },
+  errorBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: colors.primary, borderRadius: radius.pill },
+  errorBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

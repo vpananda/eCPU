@@ -330,17 +330,11 @@ FOR EACH ROW EXECUTE FUNCTION public.set_batch_receipt_no();
 -- 6. TRIGGER FUNCTIONS FOR DYNAMIC CALCULATIONS & RELATIONSHIPS
 -- ==========================================
 
--- Calculate Batch Totals (Bill, Balance, Weight Loss) on Batch changes
 CREATE OR REPLACE FUNCTION public.calculate_batch_bill()
 RETURNS TRIGGER AS $$
-DECLARE
-  v_dry_weight NUMERIC(10,2);
 BEGIN
-  -- Use actual_dry_weight if present, otherwise estimated_dry_weight, otherwise raw_weight
-  v_dry_weight := COALESCE(NEW.actual_dry_weight, NEW.estimated_dry_weight, NEW.raw_weight, 0.00);
-  
-  -- Calculate bill_amount = dry_weight * rate + loading - discount
-  NEW.bill_amount := ROUND((v_dry_weight * NEW.rate_per_kg) + NEW.loading_charges - NEW.discount, 2);
+  -- Calculate bill_amount = raw_weight * rate + loading - discount
+  NEW.bill_amount := ROUND((NEW.raw_weight * NEW.rate_per_kg) + NEW.loading_charges - NEW.discount, 2);
   
   -- Calculate balance_amount = bill_amount - total_paid
   NEW.balance_amount := NEW.bill_amount - COALESCE(NEW.total_paid, 0.00);

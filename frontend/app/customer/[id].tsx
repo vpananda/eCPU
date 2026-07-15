@@ -1,29 +1,64 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
+import { useToast } from "@/src/components/Toast";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
 
 export default function CustomerDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useAuth();
+  const toast = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  const confirmDelete = () => {
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDelete = async () => {
+    try {
+      await api(`/customers/${id}`, { method: "DELETE" });
+      toast.show("Customer deleted successfully");
+      router.back();
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    }
+  };
 
   const load = useCallback(async () => {
+    if (!id || id === "[id]") return;
     try {
       const d = await api<any>(`/customers/${id}`);
       setData(d);
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load customer", "error");
     } finally { setLoading(false); }
   }, [id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  if (loading || !data) {
+  if (loading) {
     return <SafeAreaView style={styles.safe}><ActivityIndicator style={{ marginTop: 60 }} color={colors.primary} /></SafeAreaView>;
+  }
+
+  if (!data) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Customer data not found.</Text>
+          <TouchableOpacity style={styles.errorBtn} onPress={() => router.back()}>
+            <Text style={styles.errorBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   const s = data.stats || {};
@@ -35,7 +70,13 @@ export default function CustomerDetail() {
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.title}>Customer</Text>
-        <View style={{ width: 22 }} />
+        {user?.role === "Admin" ? (
+          <TouchableOpacity onPress={confirmDelete} testID="customer-delete">
+            <MaterialCommunityIcons name="trash-can-outline" size={22} color={colors.danger} />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 22 }} />
+        )}
       </View>
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         <View style={styles.hero}>
@@ -79,6 +120,68 @@ export default function CustomerDetail() {
           ))}
         </View>
       </ScrollView>
+
+      {/* Delete Confirmation Modal with Customer Details */}
+      <Modal
+        visible={deleteConfirmOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDeleteConfirmOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} onPress={() => setDeleteConfirmOpen(false)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Confirm Deletion</Text>
+            
+            <Text style={styles.deleteWarningText}>
+              Are you sure you want to permanently delete this customer? This action cannot be undone.
+            </Text>
+
+            {/* Customer Details Panel */}
+            <View style={styles.confirmDetailsBox}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Customer Code</Text>
+                <Text style={styles.detailValue}>{data.code}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Name</Text>
+                <Text style={styles.detailValue}>{data.name}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Mobile</Text>
+                <Text style={styles.detailValue}>{data.mobile}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Branch</Text>
+                <Text style={styles.detailValue}>{data.branch_name || "-"}</Text>
+              </View>
+              <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.detailLabel}>Total Visits</Text>
+                <Text style={styles.detailValue}>{s.total_visits || 0}</Text>
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setDeleteConfirmOpen(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalDeleteBtn}
+                onPress={() => {
+                  setDeleteConfirmOpen(false);
+                  handleDelete();
+                }}
+              >
+                <Text style={styles.modalDeleteText}>Delete Customer</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -116,4 +219,106 @@ const styles = StyleSheet.create({
   batchRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm },
   batchNo: { fontSize: 14, fontWeight: "800", color: colors.text },
   batchMeta: { fontSize: 12, color: colors.textMuted, marginTop: 3 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  modalSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+    textAlign: "center",
+    marginBottom: spacing.md,
+  },
+  deleteWarningText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  confirmDetailsBox: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xl,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  detailLabel: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+  detailValue: {
+    fontSize: 13,
+    color: colors.text,
+    fontWeight: "700",
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  modalDeleteBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    backgroundColor: colors.danger,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalDeleteText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  errorContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl, gap: spacing.md },
+  errorText: { fontSize: 16, color: colors.textMuted, textAlign: "center", fontWeight: "600" },
+  errorBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: colors.primary, borderRadius: radius.pill },
+  errorBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

@@ -22,8 +22,13 @@ export default function PaymentScreen() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const b = await api<any>(`/batches/${id}`);
-    setBatch(b);
+    if (!id || id === "[id]") return;
+    try {
+      const b = await api<any>(`/batches/${id}`);
+      setBatch(b);
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load batch", "error");
+    }
   }, [id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));

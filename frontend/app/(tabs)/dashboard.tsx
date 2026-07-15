@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import Calendar from "@/src/components/Calendar";
+import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const { width } = Dimensions.get("window");
@@ -85,6 +86,8 @@ export default function Dashboard() {
   const activeBranchName = selectedBranchId
     ? branches.find(b => b.id === selectedBranchId)?.name || "Selected Branch"
     : "All Branches";
+
+  const isDryerRunning = (data?.machines_running ?? 0) > 0;
 
   const load = useCallback(async (s = start, e = end, bid = selectedBranchId) => {
     setLoading(true);
@@ -263,7 +266,7 @@ export default function Dashboard() {
 
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <Loader size={80} />
             <Text style={styles.loadingText}>Fetching active reports...</Text>
           </View>
         ) : (
@@ -333,67 +336,82 @@ export default function Dashboard() {
             )}
 
             {/* 4. Live Processing Card (Primary Card) */}
-            <View style={styles.liveCard}>
-              <View style={styles.liveCardTop}>
-                <View style={styles.liveBadge}>
-                  <View style={styles.liveDot} />
-                  <Text style={styles.liveBadgeText}>LIVE DRYING</Text>
-                </View>
-                <Text style={styles.liveCardTitle}>Currently Processing</Text>
-              </View>
-
-              <View style={styles.liveStatsRow}>
-                <View style={styles.liveStat}>
-                  <Text style={styles.liveStatLabel}>Customers in Dryer</Text>
-                  <Text style={styles.liveStatValue}>{data?.today_arrival.processing_count || 18}</Text>
-                </View>
-                <View style={styles.liveStatDivider} />
-                <View style={styles.liveStat}>
-                  <Text style={styles.liveStatLabel}>Total Weight</Text>
-                  <Text style={styles.liveStatValue}>{fmtNum(data?.today_arrival.processing_weight || 4250, "", " KG")}</Text>
-                </View>
-              </View>
-
-              <View style={styles.progressContainer}>
-                <View style={styles.progressHeader}>
-                  <Text style={styles.progressLabel}>Dryer Capacity Utilization</Text>
-                  <Text style={styles.progressValText}>
-                    {data?.today_arrival.processing_weight ? Math.round(data.today_arrival.processing_weight) : 4200} / 5000 KG (84%)
-                  </Text>
-                </View>
-                <View style={styles.progressBarBg}>
-                  <View
-                    style={[
-                      styles.progressBarFill,
-                      {
-                        width: `${Math.min(
-                          100,
-                          data?.today_arrival.processing_weight
-                            ? (data.today_arrival.processing_weight / 5000) * 100
-                            : 84
-                        )}%`,
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.liveCardBottom}>
-                <View style={styles.etaRow}>
-                  <MaterialCommunityIcons name="clock-outline" size={16} color={colors.textMuted} />
-                  <Text style={styles.etaText}>Estimated Completion: <Text style={styles.etaHighlight}>Today 5:30 PM</Text></Text>
-                </View>
-
+            {data?.today_arrival && (
+              isDryerRunning ? (
                 <TouchableOpacity
                   onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
-                  style={styles.liveCardBtn}
-                  activeOpacity={0.8}
+                  style={styles.liveCard}
+                  activeOpacity={0.9}
                 >
-                  <Text style={styles.liveCardBtnText}>View Customer Details</Text>
-                  <MaterialCommunityIcons name="arrow-right" size={16} color="#fff" />
+                  <View style={styles.liveCardTop}>
+                    <View style={styles.liveBadge}>
+                      <View style={styles.liveDot} />
+                      <Text style={styles.liveBadgeText}>LIVE DRYING</Text>
+                    </View>
+                    <Text style={styles.liveCardTitle}>Currently Processing</Text>
+                  </View>
+
+                  <View style={styles.liveStatsRow}>
+                    <View style={styles.liveStat}>
+                      <Text style={styles.liveStatLabel}>Customers in Dryer</Text>
+                      <Text style={styles.liveStatValue}>{data.today_arrival.processing_count ?? 0}</Text>
+                    </View>
+                    <View style={styles.liveStatDivider} />
+                    <View style={styles.liveStat}>
+                      <Text style={styles.liveStatLabel}>Total Weight</Text>
+                      <Text style={styles.liveStatValue}>{fmtNum(data.today_arrival.processing_weight ?? 0, "", " KG")}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.progressContainer}>
+                    <View style={styles.progressHeader}>
+                      <Text style={styles.progressLabel}>Dryer Capacity Utilization</Text>
+                      <Text style={styles.progressValText}>
+                        {Math.round(data.today_arrival.processing_weight ?? 0)} / 5000 KG ({Math.round(((data.today_arrival.processing_weight ?? 0) / 5000) * 100)}%)
+                      </Text>
+                    </View>
+                    <View style={styles.progressBarBg}>
+                      <View
+                        style={[
+                          styles.progressBarFill,
+                          {
+                            width: `${Math.min(
+                              100,
+                              data.today_arrival.processing_weight
+                                ? (data.today_arrival.processing_weight / 5000) * 100
+                                : 0
+                            )}%`,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.liveCardBottom}>
+                    <View style={styles.etaRow}>
+                      <MaterialCommunityIcons name="clock-outline" size={16} color={colors.textMuted} />
+                      <Text style={styles.etaText}>Estimated Completion: <Text style={styles.etaHighlight}>Today 5:30 PM</Text></Text>
+                    </View>
+                  </View>
                 </TouchableOpacity>
-              </View>
-            </View>
+              ) : (
+                <View style={[styles.liveCard, styles.liveCardDisabled]}>
+                  <View style={styles.liveCardTop}>
+                    <View style={[styles.liveBadge, styles.inactiveBadge]}>
+                      <View style={[styles.liveDot, styles.inactiveDot]} />
+                      <Text style={[styles.liveBadgeText, styles.inactiveBadgeText]}>IDLE</Text>
+                    </View>
+                    <Text style={styles.liveCardTitle}>Currently Processing</Text>
+                  </View>
+
+                  <View style={styles.noDryerContainer}>
+                    <MaterialCommunityIcons name="tumble-dryer" size={40} color={colors.textLight} />
+                    <Text style={styles.noDryerText}>No Dryers Running</Text>
+                    <Text style={styles.noDryerSubtext}>Start a batch to view real-time drying metrics.</Text>
+                  </View>
+                </View>
+              )
+            )}
 
             {/* 5. Quick Actions Section */}
             <Text style={styles.sectionHeading}>Quick Actions</Text>
@@ -1530,6 +1548,34 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
     fontWeight: "700",
+    textAlign: "center",
+  },
+  liveCardDisabled: {
+    opacity: 0.85,
+  },
+  inactiveBadge: {
+    backgroundColor: colors.bg,
+  },
+  inactiveDot: {
+    backgroundColor: colors.textLight,
+  },
+  inactiveBadgeText: {
+    color: colors.textMuted,
+  },
+  noDryerContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  noDryerText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  noDryerSubtext: {
+    fontSize: 12,
+    color: colors.textMuted,
     textAlign: "center",
   },
 });

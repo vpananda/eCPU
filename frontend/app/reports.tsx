@@ -12,7 +12,7 @@ export default function Reports() {
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  const isTab = segments.includes("(tabs)");
+  const isTab = (segments as string[]).includes("(tabs)");
 
   const load = useCallback(async () => {
     try { setD(await api<any>("/reports/summary")); }

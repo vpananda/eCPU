@@ -5,22 +5,29 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string; branch_id?: string; branch_name?: string; total_arrivals?: number; total_amount?: number; amount_received?: number };
+
+const STATUSES = ["All", "Active", "Inactive"];
 
 export default function CustomersScreen() {
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const router = useRouter();
   const [list, setList] = useState<Customer[]>([]);
   const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("Active");
   const [loading, setLoading] = useState(true);
   const [branchModalOpen, setBranchModalOpen] = useState(false);
 
-  const load = useCallback(async (search = "") => {
+  const load = useCallback(async (search = "", currentFilter = filter) => {
     setLoading(true);
     try {
-      const path = search ? `/customers?q=${encodeURIComponent(search)}` : "/customers";
+      const qs = new URLSearchParams();
+      if (search) qs.set("q", search);
+      qs.set("status", currentFilter.toLowerCase());
+      const path = `/customers?${qs.toString()}`;
       const data = await api<Customer[]>(path);
       setList(data);
     } finally {
@@ -29,8 +36,8 @@ export default function CustomersScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => {
-    load(q);
-  }, [load, q]));
+    load(q, filter);
+  }, [load, q, filter]));
 
   const filteredList = list.filter(item => {
     if (!selectedBranchId) return true;
@@ -43,7 +50,9 @@ export default function CustomersScreen() {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Customers</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
-            <Text style={styles.subtitle}>{filteredList.length} total</Text>
+            <Text style={styles.subtitle}>
+              {filteredList.length} {filter === "All" ? "total" : filter.toLowerCase()}
+            </Text>
             {user?.role === "Admin" && (
               <TouchableOpacity
                 onPress={() => setBranchModalOpen(true)}
@@ -65,6 +74,22 @@ export default function CustomersScreen() {
         >
           <MaterialCommunityIcons name="plus" size={22} color="#fff" />
         </TouchableOpacity>
+      </View>
+
+      {/* Status Filter Chips */}
+      <View style={styles.filterContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+          {STATUSES.map(s => (
+            <TouchableOpacity
+              key={s}
+              testID={`customers-filter-${s.toLowerCase()}`}
+              style={[styles.chip, filter === s && styles.chipSelected]}
+              onPress={() => setFilter(s)}
+            >
+              <Text style={[styles.chipText, filter === s && styles.chipTextSelected]}>{s}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
       <View style={styles.searchWrap}>
@@ -89,7 +114,7 @@ export default function CustomersScreen() {
 
 
       {loading ? (
-        <View style={{ paddingVertical: 40, alignItems: "center" }}><ActivityIndicator color={colors.primary} /></View>
+        <View style={{ paddingVertical: 40, alignItems: "center" }}><Loader size={60} /></View>
       ) : (
         <FlatList
           data={filteredList}

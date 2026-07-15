@@ -1,10 +1,11 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import QRCode from "react-native-qrcode-svg";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { Button } from "@/src/components/Button";
 import { colors, radius, shadow, spacing } from "@/src/theme";
@@ -16,6 +17,7 @@ export default function BatchDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -30,9 +32,12 @@ export default function BatchDetail() {
   }, [data]);
 
   const load = useCallback(async () => {
+    if (!id || id === "[id]") return;
     try {
       const d = await api<any>(`/batches/${id}`);
       setData(d);
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load batch detail", "error");
     } finally { setLoading(false); }
   }, [id]);
 
@@ -49,14 +54,21 @@ export default function BatchDetail() {
   };
 
   const confirmDelete = () => {
-    Alert.alert(
-      "Delete Batch",
-      "Are you sure you want to delete this batch? All payments and history will be permanently deleted.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: handleDelete }
-      ]
-    );
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm("Are you sure you want to delete this batch? All payments and history will be permanently deleted.");
+      if (confirmed) {
+        handleDelete();
+      }
+    } else {
+      Alert.alert(
+        "Delete Batch",
+        "Are you sure you want to delete this batch? All payments and history will be permanently deleted.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Delete", style: "destructive", onPress: handleDelete }
+        ]
+      );
+    }
   };
 
   const handleSaveDate = async () => {
@@ -106,8 +118,21 @@ export default function BatchDetail() {
     finally { setUpdating(false); }
   };
 
-  if (loading || !data) {
+  if (loading) {
     return <SafeAreaView style={styles.safe}><ActivityIndicator style={{ marginTop: 60 }} color={colors.primary} /></SafeAreaView>;
+  }
+
+  if (!data) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Batch details not found.</Text>
+          <TouchableOpacity style={styles.errorBtn} onPress={() => router.back()}>
+            <Text style={styles.errorBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   const currentIdx = FLOW.indexOf(data.status);
@@ -123,9 +148,11 @@ export default function BatchDetail() {
           <TouchableOpacity onPress={() => setEditOpen(true)} testID="batch-edit-date">
             <MaterialCommunityIcons name="calendar-edit" size={22} color={colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={confirmDelete} testID="batch-delete">
-            <MaterialCommunityIcons name="trash-can-outline" size={22} color={colors.danger} />
-          </TouchableOpacity>
+          {user?.role === "Admin" && (
+            <TouchableOpacity onPress={confirmDelete} testID="batch-delete">
+              <MaterialCommunityIcons name="trash-can-outline" size={22} color={colors.danger} />
+            </TouchableOpacity>
+          )}
           <StatusPill status={data.status} />
         </View>
       </View>
@@ -320,4 +347,8 @@ const styles = StyleSheet.create({
   payMeta: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   remarks: { fontSize: 14, color: colors.text, lineHeight: 20 },
   footer: { padding: spacing.lg, backgroundColor: colors.bg, borderTopWidth: 1, borderTopColor: colors.border },
+  errorContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl, gap: spacing.md },
+  errorText: { fontSize: 16, color: colors.textMuted, textAlign: "center", fontWeight: "600" },
+  errorBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: colors.primary, borderRadius: radius.pill },
+  errorBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

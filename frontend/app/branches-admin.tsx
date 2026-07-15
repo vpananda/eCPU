@@ -35,30 +35,49 @@ export default function BranchesAdmin() {
   const openEdit = (b: Branch) => { setEditing(b); setName(b.name); setAddress(b.address || ""); setPhone(b.phone || ""); setOpen(true); };
 
   const confirmDelete = (b: Branch) => {
-    Alert.alert(
-      "Delete Branch",
-      `Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setSaving(true);
-            try {
-              await api(`/branches/${b.id}`, { method: "DELETE" });
-              toast.show("Branch deleted");
-              setOpen(false);
-              await load();
-            } catch (err: any) {
-              toast.show(err.message || "Failed to delete branch", "error");
-            } finally {
-              setSaving(false);
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(`Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`);
+      if (confirmed) {
+        (async () => {
+          setSaving(true);
+          try {
+            await api(`/branches/${b.id}`, { method: "DELETE" });
+            toast.show("Branch deleted");
+            setOpen(false);
+            await load();
+          } catch (err: any) {
+            toast.show(err.message || "Failed to delete branch", "error");
+          } finally {
+            setSaving(false);
+          }
+        })();
+      }
+    } else {
+      Alert.alert(
+        "Delete Branch",
+        `Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: async () => {
+              setSaving(true);
+              try {
+                await api(`/branches/${b.id}`, { method: "DELETE" });
+                toast.show("Branch deleted");
+                setOpen(false);
+                await load();
+              } catch (err: any) {
+                toast.show(err.message || "Failed to delete branch", "error");
+              } finally {
+                setSaving(false);
+              }
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }
   };
 
   const save = async () => {

@@ -66,7 +66,6 @@ export default function LoginScreen() {
             <View style={styles.logoWrap}>
               <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
             </View>
-            <Text style={styles.brand}>E3</Text>
             <Text style={styles.tag}>Energy, Efficient, Environment</Text>
             <View style={styles.subTagRow}>
               <View style={styles.subTagLine} />

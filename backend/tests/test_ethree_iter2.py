@@ -184,9 +184,9 @@ class TestArrivals:
         j = r.json()
         # weight_loss = 50 - 40 = 10
         assert abs(j["weight_loss"] - 10.0) < 0.01
-        # bill = 40*15 = 600, balance = 600-200 = 400
-        assert abs(j["bill_amount"] - 600.0) < 0.01
-        assert abs(j["balance_amount"] - 400.0) < 0.01
+        # bill = 50*15 = 750, balance = 750-200 = 550
+        assert abs(j["bill_amount"] - 750.0) < 0.01
+        assert abs(j["balance_amount"] - 550.0) < 0.01
         # verify payment recorded
         pays = requests.get(f"{API}/payments", headers=H(admin_token)).json()
         assert any(p["batch_id"] == bid and abs(p["amount"] - 200.0) < 0.01 for p in pays)

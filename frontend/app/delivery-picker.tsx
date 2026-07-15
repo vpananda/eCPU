@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { useToast } from "@/src/components/Toast";
 import { StatusPill } from "@/src/components/ui";
 
 type Batch = {
@@ -16,6 +17,7 @@ type Batch = {
 
 export default function DeliveryPicker() {
   const router = useRouter();
+  const toast = useToast();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -26,6 +28,8 @@ export default function DeliveryPicker() {
       // Fetch all non-delivered batches (ready to be handed over)
       const all = await api<Batch[]>("/batches");
       setBatches(all.filter(b => b.status !== "Delivered"));
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load batches", "error");
     } finally { setLoading(false); }
   }, []);
 

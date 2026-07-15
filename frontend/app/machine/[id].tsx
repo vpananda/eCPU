@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -22,23 +22,21 @@ export default function MachineDetail() {
   const [updating, setUpdating] = useState(false);
 
   const load = useCallback(async () => {
+    if (!id || id === "[id]") return;
     try {
       const machines = await api<any[]>("/machines");
       setData(machines.find(m => m.id === id));
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load machine detail", "error");
     } finally { setLoading(false); }
   }, [id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
   const confirmDelete = () => {
-    Alert.alert(
-      "Delete Machine",
-      "Are you sure you want to delete this machine? This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: handleDelete }
-      ]
-    );
+    setDeleteConfirmOpen(true);
   };
 
   const handleDelete = async () => {
@@ -61,8 +59,21 @@ export default function MachineDetail() {
     finally { setUpdating(false); }
   };
 
-  if (loading || !data) {
+  if (loading) {
     return <SafeAreaView style={styles.safe}><ActivityIndicator style={{ marginTop: 60 }} color={colors.primary} /></SafeAreaView>;
+  }
+
+  if (!data) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Machine details not found.</Text>
+          <TouchableOpacity style={styles.errorBtn} onPress={() => router.back()}>
+            <Text style={styles.errorBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -127,6 +138,66 @@ export default function MachineDetail() {
 
         <Button testID="machine-log-maintenance" title="Log Maintenance" variant="outline" onPress={() => router.push({ pathname: "/maintenance-form", params: { machine_id: id } })} style={{ marginTop: spacing.xl }} />
       </ScrollView>
+
+      {/* Delete Confirmation Modal with Machine Details */}
+      <Modal
+        visible={deleteConfirmOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDeleteConfirmOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBackdrop} onPress={() => setDeleteConfirmOpen(false)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Confirm Deletion</Text>
+            
+            <Text style={styles.deleteWarningText}>
+              Are you sure you want to permanently delete this machine? This action cannot be undone.
+            </Text>
+
+            {/* Machine Details Panel */}
+            <View style={styles.confirmDetailsBox}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Machine Name</Text>
+                <Text style={styles.detailValue}>{data.name}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Capacity</Text>
+                <Text style={styles.detailValue}>{data.capacity} kg</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Current Status</Text>
+                <Text style={[styles.detailValue, { color: colors.status[data.status], fontWeight: "800" }]}>
+                  {data.status}
+                </Text>
+              </View>
+              <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.detailLabel}>Branch</Text>
+                <Text style={styles.detailValue}>{data.branch_name || "Main Branch"}</Text>
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setDeleteConfirmOpen(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalDeleteBtn}
+                onPress={() => {
+                  setDeleteConfirmOpen(false);
+                  handleDelete();
+                }}
+              >
+                <Text style={styles.modalDeleteText}>Delete Machine</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -148,4 +219,106 @@ const styles = StyleSheet.create({
   statusGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   statusChip: { paddingHorizontal: spacing.lg, paddingVertical: 10, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border },
   statusText: { fontSize: 13, color: colors.text, fontWeight: "700" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalBackdrop: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  modalSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+    textAlign: "center",
+    marginBottom: spacing.md,
+  },
+  deleteWarningText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  confirmDetailsBox: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xl,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  detailLabel: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+  detailValue: {
+    fontSize: 13,
+    color: colors.text,
+    fontWeight: "700",
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  modalDeleteBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: radius.pill,
+    backgroundColor: colors.danger,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalDeleteText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  errorContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl, gap: spacing.md },
+  errorText: { fontSize: 16, color: colors.textMuted, textAlign: "center", fontWeight: "600" },
+  errorBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: colors.primary, borderRadius: radius.pill },
+  errorBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

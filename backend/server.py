@@ -26,9 +26,9 @@ import logging
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-DATABASE_URL = os.environ["DATABASE_URL"]
-DB_NAME = os.environ["DB_NAME"]
-JWT_SECRET = os.environ.get("JWT_SECRET", "ethree-agro-secret-key-change-me-2026")
+DATABASE_URL = os.environ["DATABASE_URL"].strip()
+DB_NAME = os.environ["DB_NAME"].strip()
+JWT_SECRET = os.environ.get("JWT_SECRET", "ethree-agro-secret-key-change-me-2026").strip()
 JWT_ALGO = "HS256"
 JWT_EXPIRE_MIN = 60 * 24 * 30  # 30 days
 
@@ -172,6 +172,15 @@ def build_where_clause(filter_dict, table_name=None):
                     if not in_parts:
                         in_parts.append("FALSE")
                     parts.append("(" + " OR ".join(in_parts) + ")")
+                elif op == "$ne":
+                    if val is None:
+                        parts.append(f"{k} IS NOT NULL")
+                    elif tbl and tbl in UUID_FIELDS and k in UUID_FIELDS[tbl]:
+                        parts.append(f"{k}::text != %s")
+                        params.append(val)
+                    else:
+                        parts.append(f"({k} IS NULL OR {k} != %s)")
+                        params.append(val)
                 elif op == "$gte":
                     parts.append(f"{k} >= %s")
                     params.append(val)
@@ -822,8 +831,8 @@ class MachineLoadIn(BaseModel):
 
 class MachineStopIn(BaseModel):
     end_time: Optional[str] = None
-    total_dry_weight: float
-    total_dry_bags: int
+    total_dry_weight: Optional[float] = None
+    total_dry_bags: Optional[int] = None
 
 
 class ArrivalIn(BaseModel):
@@ -1309,10 +1318,12 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
     
-    if body.total_dry_weight <= 0:
-        raise HTTPException(status_code=400, detail="Total dry weight must be > 0")
-    if body.total_dry_bags < 0:
-        raise HTTPException(status_code=400, detail="Total dry bags cannot be negative")
+    if body.total_dry_weight is not None:
+        if body.total_dry_weight <= 0:
+            raise HTTPException(status_code=400, detail="Total dry weight must be > 0")
+    if body.total_dry_bags is not None:
+        if body.total_dry_bags < 0:
+            raise HTTPException(status_code=400, detail="Total dry bags cannot be negative")
 
     # Find active batches drying in this machine
     drying_batches = await db.batches.find({"machine_id": mid, "status": "Drying"}, {"_id": 0}).to_list(100)
@@ -1325,29 +1336,36 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
 
     t_end = body.end_time or now_utc().isoformat()
 
-    # Process each batch proportionally
+    # Process each batch
     for b in drying_batches:
-        raw = float(b["raw_weight"])
-        pct = raw / total_raw_weight
-        prop_dry_weight = round(pct * body.total_dry_weight, 2)
-        prop_bags = int(round(pct * body.total_dry_bags))
-
-        # Recompute totals and update
-        tmp = dict(b)
-        tmp["actual_dry_weight"] = prop_dry_weight
-        tmp["processed_bags"] = prop_bags
-        totals = await recompute_batch_totals(tmp)
-
         upd = {
             "status": "Completed",
-            "actual_dry_weight": prop_dry_weight,
-            "processed_bags": prop_bags,
-            "weight_loss": round(raw - prop_dry_weight, 2),
             "remarks": f"Drying completed in {m['name']} at {t_end}",
             "updated_at": now_utc().isoformat(),
             "updated_by": user["id"],
-            **totals
         }
+
+        if body.total_dry_weight is not None and body.total_dry_bags is not None:
+            raw = float(b["raw_weight"])
+            pct = raw / total_raw_weight
+            prop_dry_weight = round(pct * body.total_dry_weight, 2)
+            prop_bags = int(round(pct * body.total_dry_bags))
+
+            upd.update({
+                "actual_dry_weight": prop_dry_weight,
+                "processed_bags": prop_bags,
+                "weight_loss": round(raw - prop_dry_weight, 2)
+            })
+
+            tmp = dict(b)
+            tmp["actual_dry_weight"] = prop_dry_weight
+            tmp["processed_bags"] = prop_bags
+            totals = await recompute_batch_totals(tmp)
+            upd.update(totals)
+        else:
+            totals = await recompute_batch_totals({**b, **upd})
+            upd.update(totals)
+
         await db.batches.update_one({"id": b["id"]}, {"$set": upd})
         await audit("stop_machine", "batch", b["id"], user, {"status": "Drying"}, {"status": "Completed"})
 
@@ -1365,13 +1383,24 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
 
 # ---------------------------- CUSTOMERS ----------------------------
 @api.get("/customers")
-async def list_customers(user: dict = Depends(get_current_user), q: Optional[str] = None, branch_id: Optional[str] = None):
+async def list_customers(
+    user: dict = Depends(get_current_user),
+    q: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    status: str = "active"
+):
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
         query: Dict[str, Any] = {"branch_id": branch_id}
     else:
         query = dict(branch_query(user))
+
+    if status == "active":
+        query["is_deleted"] = {"$ne": True}
+    elif status == "inactive":
+        query["is_deleted"] = True
+
     if q:
         query["$and"] = [{
             "$or": [
@@ -1380,14 +1409,13 @@ async def list_customers(user: dict = Depends(get_current_user), q: Optional[str
                 {"code": {"$regex": q, "$options": "i"}},
             ]
         }]
-    docs = await db.customers.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    
-    # Enrich with branch name
-    branches = {b["id"]: b["name"] for b in await db.branches.find({}, {"_id": 0}).to_list(100)}
+    # Dispatch concurrently
+    docs_task = db.customers.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    branches_task = db.branches.find({}, {"_id": 0}).to_list(100)
     
     target_branch = branch_id or user.get("branch_id") if user.get("role") != "Admin" else branch_id
     if target_branch:
-        stats_rows = await db.query("""
+        stats_task = db.query("""
             SELECT 
                 customer_id::text as customer_id, 
                 COUNT(*)::integer as total_arrivals, 
@@ -1398,7 +1426,7 @@ async def list_customers(user: dict = Depends(get_current_user), q: Optional[str
             GROUP BY customer_id
         """, [target_branch])
     else:
-        stats_rows = await db.query("""
+        stats_task = db.query("""
             SELECT 
                 customer_id::text as customer_id, 
                 COUNT(*)::integer as total_arrivals, 
@@ -1407,6 +1435,9 @@ async def list_customers(user: dict = Depends(get_current_user), q: Optional[str
             FROM public.batches
             GROUP BY customer_id
         """)
+
+    docs, branches_list, stats_rows = await asyncio.gather(docs_task, branches_task, stats_task)
+    branches = {b["id"]: b["name"] for b in branches_list}
     stats_map = {row["customer_id"]: row for row in stats_rows}
 
     for doc in docs:
@@ -1481,14 +1512,28 @@ async def update_customer(cid: str, body: CustomerIn,
     return {"ok": True}
 
 
+@api.delete("/customers/{cid}")
+async def delete_customer(cid: str, user: dict = Depends(require_roles("Admin"))):
+    before = await db.customers.find_one({"id": cid}, {"_id": 0})
+    if not before:
+        raise HTTPException(status_code=404, detail="Not found")
+    # Soft delete: update is_deleted flag to True
+    await db.customers.update_one(
+        {"id": cid},
+        {"$set": {"is_deleted": True, "updated_at": now_utc().isoformat(), "updated_by": user["id"]}}
+    )
+    await audit("delete", "customer", cid, user, {"name": before.get("name")}, None)
+    return {"ok": True}
+
+
 # ---------------------------- BATCHES ----------------------------
 async def recompute_batch_totals(batch: dict) -> dict:
-    dry = float(batch.get("actual_dry_weight") or batch.get("estimated_dry_weight") or 0)
+    raw = float(batch.get("raw_weight") or 0)
     rate = float(batch.get("rate_per_kg") or 0)
     loading = float(batch.get("loading_charges") or 0)
     discount = float(batch.get("discount") or 0)
     
-    bill_amount = round(dry * rate + loading - discount, 2)
+    bill_amount = round(raw * rate + loading - discount, 2)
     payments = await db.payments.find({"batch_id": batch["id"]}, {"_id": 0}).to_list(500)
     total_paid = round(sum(float(p["amount"]) for p in payments), 2)
     return {
@@ -1586,8 +1631,7 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Raw weight must be > 0")
     if body.rate_per_kg < 0 or body.loading_charges < 0 or body.discount < 0 or body.advance_paid < 0:
         raise HTTPException(status_code=400, detail="Negative values not allowed")
-    est_dry = body.estimated_dry_weight or body.raw_weight
-    bill_amount = round(est_dry * body.rate_per_kg + body.loading_charges - body.discount, 2)
+    bill_amount = round(body.raw_weight * body.rate_per_kg + body.loading_charges - body.discount, 2)
     if body.advance_paid > bill_amount + 0.01:
         raise HTTPException(status_code=400, detail="Advance cannot exceed bill amount")
 
@@ -1836,7 +1880,7 @@ async def update_batch_fields(
 @api.delete("/batches/{bid}")
 async def delete_batch(
     bid: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_roles("Admin"))
 ):
     b = await db.batches.find_one({"id": bid}, {"_id": 0})
     if not b:
@@ -2024,70 +2068,110 @@ async def dashboard(
     else:
         bq = branch_query(user)
 
-    # Period-scoped
-    period_batches = await db.batches.find(
+    # Dispatch tasks concurrently
+    period_batches_task = db.batches.find(
         {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
     ).to_list(2000)
-    period_customers = await db.customers.count_documents(bq)
-    period_received_weight = round(sum(b.get("raw_weight", 0) for b in period_batches), 2)
-    period_billed = round(sum(b.get("bill_amount", 0) for b in period_batches), 2)
-
-    period_deliveries_docs = await db.batches.find(
+    
+    period_customers_task = db.customers.count_documents(bq)
+    
+    period_deliveries_task = db.batches.find(
         {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
     ).to_list(2000)
+    
+    bb_task = db.batches.find(bq, {"_id": 0, "id": 1}).to_list(3000) if bq else None
+    
+    period_expenses_task = db.expenses.find(
+        {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
+    ).to_list(2000)
+
+    today_batches_task = db.batches.find(
+        {**bq, "created_at": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
+    ).to_list(1000)
+
+    today_deliveries_task = db.batches.find(
+        {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
+    ).to_list(1000)
+
+    processing_task = db.batches.find(
+        {**bq, "status": {"$in": ["Loaded", "Drying", "Completed"]}}, {"_id": 0}
+    ).to_list(2000)
+
+    all_batches_task = db.batches.find(bq, {"_id": 0}).to_list(5000)
+    
+    machines_task = db.machines.find(bq, {"_id": 0}).to_list(50)
+    
+    recent_task = db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15)
+
+    # Gather first round of queries
+    tasks = [
+        period_batches_task,
+        period_customers_task,
+        period_deliveries_task,
+        period_expenses_task,
+        today_batches_task,
+        today_deliveries_task,
+        processing_task,
+        all_batches_task,
+        machines_task,
+        recent_task,
+    ]
+    if bb_task:
+        tasks.append(bb_task)
+
+    results = await asyncio.gather(*tasks)
+
+    # Unpack results
+    period_batches = results[0]
+    period_customers = results[1]
+    period_deliveries_docs = results[2]
+    period_expenses = results[3]
+    today_batches = results[4]
+    today_deliveries_docs = results[5]
+    processing_docs = results[6]
+    all_batches = results[7]
+    machines = results[8]
+    recent = results[9]
+    
+    branch_batch_ids = None
+    if bb_task:
+        bb = results[10]
+        branch_batch_ids = [x["id"] for x in bb]
+
+    # Run secondary query (payments)
+    pay_query: Dict[str, Any] = {"created_at": {"$gte": pstart, "$lt": pend}}
+    if branch_batch_ids is not None:
+        pay_query["batch_id"] = {"$in": branch_batch_ids}
+    
+    period_payments = await db.payments.find(pay_query, {"_id": 0}).to_list(2000)
+
+    period_received_weight = round(sum(b.get("raw_weight", 0) for b in period_batches), 2)
+    period_billed = round(sum(b.get("bill_amount", 0) for b in period_batches), 2)
+    
     period_deliveries = len(period_deliveries_docs)
     period_delivered_weight = round(
         sum(b.get("actual_dry_weight") or 0 for b in period_deliveries_docs), 2
     )
 
-    # Branch-scoped payments: fetch via batches
-    branch_batch_ids = None
-    if bq:
-        bb = await db.batches.find(bq, {"_id": 0, "id": 1}).to_list(3000)
-        branch_batch_ids = [x["id"] for x in bb]
-    pay_query: Dict[str, Any] = {"created_at": {"$gte": pstart, "$lt": pend}}
-    if branch_batch_ids is not None:
-        pay_query["batch_id"] = {"$in": branch_batch_ids}
-    period_payments = await db.payments.find(pay_query, {"_id": 0}).to_list(2000)
     period_collection = round(sum(p["amount"] for p in period_payments), 2)
-
-    period_expenses = await db.expenses.find(
-        {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
-    ).to_list(2000)
     period_expense = round(sum(e["amount"] for e in period_expenses), 2)
 
-    # Today's Processing (renamed from arrival card)
-    today_batches = await db.batches.find(
-        {**bq, "created_at": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
-    ).to_list(1000)
     today_in_weight = round(sum(b.get("raw_weight", 0) for b in today_batches), 2)
     today_in_count = len(today_batches)
 
-    today_deliveries_docs = await db.batches.find(
-        {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
-    ).to_list(1000)
     today_out_weight = round(sum(b.get("actual_dry_weight") or 0 for b in today_deliveries_docs), 2)
     today_out_count = len(today_deliveries_docs)
 
-    # Batches currently in Processing (any non-Received, non-Delivered)
-    processing_docs = await db.batches.find(
-        {**bq, "status": {"$in": ["Loaded", "Drying", "Completed"]}}, {"_id": 0}
-    ).to_list(2000)
     processing_weight = round(sum(b.get("raw_weight", 0) for b in processing_docs), 2)
     processing_count = len(processing_docs)
 
-    # Pending payments (branch-scoped)
-    all_batches = await db.batches.find(bq, {"_id": 0}).to_list(5000)
     pending_payments = round(
         sum(b.get("balance_amount", 0) for b in all_batches if b.get("balance_amount", 0) > 0), 2
     )
 
-    machines = await db.machines.find(bq, {"_id": 0}).to_list(50)
     machines_running = sum(1 for m in machines if m["status"] == "Running")
     machines_available = sum(1 for m in machines if m["status"] == "Available")
     machines_maintenance = sum(1 for m in machines if m["status"] in ("Maintenance", "Cleaning"))
-
-    recent = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15)
 
     drying_completed_count = sum(1 for b in processing_docs if b.get("status") == "Completed")
     pending_deliveries_count = sum(1 for b in processing_docs if b.get("status") == "Completed")
@@ -2230,11 +2314,14 @@ async def reports_summary(user: dict = Depends(get_current_user)):
 async def search(q: str, user: dict = Depends(get_current_user)):
     if not q:
         return {"customers": [], "batches": []}
-    cust = await db.customers.find({"$or": [
-        {"name": {"$regex": q, "$options": "i"}},
-        {"mobile": {"$regex": q, "$options": "i"}},
-        {"code": {"$regex": q, "$options": "i"}},
-    ]}, {"_id": 0}).to_list(20)
+    cust = await db.customers.find({
+        "is_deleted": {"$ne": True},
+        "$or": [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"mobile": {"$regex": q, "$options": "i"}},
+            {"code": {"$regex": q, "$options": "i"}},
+        ]
+    }, {"_id": 0}).to_list(20)
     bat = await db.batches.find({"$or": [
         {"batch_no": {"$regex": q, "$options": "i"}},
         {"receipt_no": {"$regex": q, "$options": "i"}},

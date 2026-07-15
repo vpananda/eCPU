@@ -4,10 +4,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { colors, radius, shadow, spacing } from "@/src/theme";
+import { colors, radius, shadow, spacing } from "@/src/theme";import { useToast } from "@/src/components/Toast";
 
 export default function PaymentPicker() {
   const router = useRouter();
+  const toast = useToast();
   const [batches, setBatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -17,6 +18,8 @@ export default function PaymentPicker() {
     try {
       const all = await api<any[]>("/batches");
       setBatches(all.filter(b => (b.balance_amount || 0) > 0));
+    } catch (e: any) {
+      toast.show(e.message || "Failed to load batches", "error");
     } finally { setLoading(false); }
   }, []);
 

@@ -11,12 +11,6 @@ import { storage } from "@/src/utils/storage";
 
 const LOGO = require("../assets/images/e3logo.png");
 
-const DEMO = [
-  { role: "Admin", mobile: "9999999999", password: "admin123" },
-  { role: "Manager", mobile: "8888888888", password: "manager123" },
-  { role: "Store Incharge", mobile: "7777777777", password: "store123" },
-];
-
 export default function LoginScreen() {
   const { login, loginWithGoogle } = useAuth();
   const toast = useToast();
@@ -65,10 +59,7 @@ export default function LoginScreen() {
     }
   };
 
-  const fillDemo = (m: string, p: string) => {
-    setMobile(m);
-    setPassword(p);
-  };
+
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
@@ -142,26 +133,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.demoBox}>
-            <Text style={styles.demoTitle}>Demo Accounts</Text>
-            {DEMO.map(d => (
-              <TouchableOpacity
-                testID={`demo-${d.role.toLowerCase().replace(" ", "-")}-button`}
-                key={d.mobile}
-                style={styles.demoRow}
-                onPress={() => fillDemo(d.mobile, d.password)}
-              >
-                <View style={styles.demoBadge}>
-                  <MaterialCommunityIcons name="account-circle" size={20} color={colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.demoRole}>{d.role}</Text>
-                  <Text style={styles.demoMeta}>{d.mobile} · {d.password}</Text>
-                </View>
-                <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
-              </TouchableOpacity>
-            ))}
-          </View>
+
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -242,10 +214,4 @@ const styles = StyleSheet.create({
   },
   googleG: { color: "#4285F4", fontWeight: "900", fontSize: 14, lineHeight: 16 },
   googleText: { fontSize: 15, fontWeight: "700", color: colors.text },
-  demoBox: { marginTop: spacing.xl, backgroundColor: colors.primary50, borderRadius: radius.xl, padding: spacing.lg },
-  demoTitle: { fontSize: 12, fontWeight: "800", color: colors.primaryDark, letterSpacing: 0.5, marginBottom: spacing.md, textTransform: "uppercase" },
-  demoRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.md, borderTopWidth: 1, borderTopColor: "#ffffff90" },
-  demoBadge: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
-  demoRole: { fontSize: 14, fontWeight: "700", color: colors.text },
-  demoMeta: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
 });

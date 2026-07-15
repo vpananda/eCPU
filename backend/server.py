@@ -542,6 +542,7 @@ class PostgresDBWrapper:
         self.users = UsersCollection(self)
         self.branches = PostgresCollection(self, "public.branches")
         self.products = PostgresCollection(self, "public.products")
+        self.branch_product_rates = PostgresCollection(self, "public.branch_product_rates")
         self.machines = PostgresCollection(self, "public.machines")
         self.customers = PostgresCollection(self, "public.customers")
         self.batches = PostgresCollection(self, "public.batches")
@@ -804,6 +805,21 @@ class CustomerIn(BaseModel):
 class ProductIn(BaseModel):
     name: str
     default_rate: float = 0
+
+
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    default_rate: Optional[float] = None
+
+
+class BranchProductRateIn(BaseModel):
+    branch_id: str
+    rate: float
+
+
+class BranchRateOverrideIn(BaseModel):
+    product_id: str
+    rate: float
 
 
 class MachineIn(BaseModel):
@@ -1157,7 +1173,22 @@ async def list_users(user: dict = Depends(require_roles("Admin", "Manager"))):
 # ---------------------------- PRODUCTS ----------------------------
 @api.get("/products")
 async def list_products(user: dict = Depends(get_current_user)):
-    return await db.products.find({}, {"_id": 0}).to_list(200)
+    products = await db.products.find({}, {"_id": 0}).to_list(200)
+    rates = await db.branch_product_rates.find({}, {"_id": 0}).to_list(1000)
+    
+    product_rates = {}
+    for r in rates:
+        pid = r["product_id"]
+        bid = r["branch_id"]
+        rate = float(r["rate"])
+        if pid not in product_rates:
+            product_rates[pid] = {}
+        product_rates[pid][bid] = rate
+        
+    for p in products:
+        p["branch_rates"] = product_rates.get(p["id"], {})
+        p["default_rate"] = float(p.get("default_rate") or 0.0)
+    return products
 
 
 @api.post("/products")
@@ -1167,7 +1198,92 @@ async def add_product(body: ProductIn, user: dict = Depends(require_roles("Admin
          "updated_at": now_utc().isoformat(), "updated_by": user["id"]}
     await db.products.insert_one(dict(p))
     await audit("create", "product", p["id"], user, None, p)
-    return p
+    p["branch_rates"] = {}
+    p["default_rate"] = float(p["default_rate"])
+    return clean(p)
+
+
+@api.put("/products/{pid}")
+async def update_product(pid: str, body: ProductUpdate, user: dict = Depends(require_roles("Admin"))):
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    upd = {}
+    if body.name is not None:
+        upd["name"] = body.name
+    if body.default_rate is not None:
+        upd["default_rate"] = body.default_rate
+    if upd:
+        upd["updated_at"] = now_utc().isoformat()
+        upd["updated_by"] = user["id"]
+        await db.products.update_one({"id": pid}, {"$set": upd})
+        await audit("update", "product", pid, user, p, upd)
+    
+    updated = await db.products.find_one({"id": pid}, {"_id": 0})
+    rates = await db.branch_product_rates.find({"product_id": pid}, {"_id": 0}).to_list(100)
+    updated["branch_rates"] = {r["branch_id"]: float(r["rate"]) for r in rates}
+    updated["default_rate"] = float(updated.get("default_rate") or 0.0)
+    return clean(updated)
+
+
+@api.delete("/products/{pid}")
+async def delete_product(pid: str, user: dict = Depends(require_roles("Admin"))):
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    batches_count = await db.batches.count_documents({"product_id": pid})
+    if batches_count > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete spice product currently used in batches")
+        
+    await db.products.delete_one({"id": pid})
+    await db.branch_product_rates.delete_many({"product_id": pid})
+    await audit("delete", "product", pid, user, p, None)
+    return {"ok": True}
+
+
+@api.get("/products/{pid}/rates")
+async def get_product_rates(pid: str, user: dict = Depends(require_roles("Admin"))):
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    rates = await db.branch_product_rates.find({"product_id": pid}, {"_id": 0}).to_list(200)
+    rate_map = {r["branch_id"]: float(r["rate"]) for r in rates}
+    
+    branches = await db.branches.find({}, {"_id": 0}).to_list(200)
+    
+    res = []
+    for b in branches:
+        res.append({
+            "branch_id": b["id"],
+            "branch_name": b["name"],
+            "rate": rate_map.get(b["id"], float(p["default_rate"] or 0.0))
+        })
+    return res
+
+
+@api.put("/products/{pid}/rates")
+async def update_product_rates(pid: str, body: List[BranchProductRateIn], user: dict = Depends(require_roles("Admin"))):
+    p = await db.products.find_one({"id": pid}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    await db.branch_product_rates.delete_many({"product_id": pid})
+    
+    for r in body:
+        item = {
+            "id": str(uuid.uuid4()),
+            "branch_id": r.branch_id,
+            "product_id": pid,
+            "rate": r.rate,
+            "created_at": now_utc().isoformat(),
+            "updated_at": now_utc().isoformat(),
+        }
+        await db.branch_product_rates.insert_one(item)
+        
+    await audit("update_rates", "product", pid, user, None, {"rates_count": len(body)})
+    return {"ok": True}
 
 
 # ---------------------------- MACHINES ----------------------------
@@ -2388,6 +2504,56 @@ async def delete_branch(bid: str, user: dict = Depends(require_roles("Admin"))):
 
     await db.branches.delete_one({"id": bid})
     await audit("delete", "branch", bid, user, {"name": branch["name"]}, None)
+    return {"ok": True}
+
+
+@api.get("/branches/{bid}/rates")
+async def get_branch_rates(bid: str, user: dict = Depends(require_roles("Admin", "Manager"))):
+    if user.get("role") != "Admin" and user.get("branch_id") != bid:
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    branch = await db.branches.find_one({"id": bid}, {"_id": 0})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+        
+    products = await db.products.find({}, {"_id": 0}).to_list(500)
+    rates = await db.branch_product_rates.find({"branch_id": bid}, {"_id": 0}).to_list(1000)
+    rate_map = {r["product_id"]: float(r["rate"]) for r in rates}
+    
+    res = []
+    for p in products:
+        res.append({
+            "product_id": p["id"],
+            "product_name": p["name"],
+            "default_rate": float(p["default_rate"] or 0.0),
+            "rate": rate_map.get(p["id"], float(p["default_rate"] or 0.0))
+        })
+    return res
+
+
+@api.put("/branches/{bid}/rates")
+async def update_branch_rates(bid: str, body: List[BranchRateOverrideIn], user: dict = Depends(require_roles("Admin", "Manager"))):
+    if user.get("role") != "Admin" and user.get("branch_id") != bid:
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    branch = await db.branches.find_one({"id": bid}, {"_id": 0})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+        
+    await db.branch_product_rates.delete_many({"branch_id": bid})
+    
+    for r in body:
+        item = {
+            "id": str(uuid.uuid4()),
+            "branch_id": bid,
+            "product_id": r.product_id,
+            "rate": r.rate,
+            "created_at": now_utc().isoformat(),
+            "updated_at": now_utc().isoformat(),
+        }
+        await db.branch_product_rates.insert_one(item)
+        
+    await audit("update_branch_rates", "branch", bid, user, None, {"rates_count": len(body)})
     return {"ok": True}
 
 

@@ -19,8 +19,9 @@ const ITEMS_BASE = [
 ];
 
 const ADMIN_ITEMS = [
-  { key: "users", label: "Users", icon: "account-multiple", route: "/users-admin", color: "#0288D1" },
-  { key: "branches", label: "Branches", icon: "office-building", route: "/branches-admin", color: "#6A1B9A" },
+  { key: "users", label: "Users", icon: "account-multiple", route: "/users-admin" as const, color: "#0288D1" },
+  { key: "branches", label: "Branches", icon: "office-building", route: "/branches-admin" as const, color: "#6A1B9A" },
+  { key: "products", label: "Spices", icon: "leaf", route: "/products-admin" as const, color: "#2E7D32" },
 ];
 
 const AUDIT_ITEMS = [
@@ -74,6 +75,21 @@ export default function MoreScreen() {
               <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
             </TouchableOpacity>
           ))}
+
+          {(user?.role === "Admin" || user?.role === "Manager") && (
+            <TouchableOpacity
+              testID="more-drying-rates"
+              style={styles.item}
+              onPress={() => router.push("/branch-rates")}
+              activeOpacity={0.85}
+            >
+              <View style={[styles.itemIcon, { backgroundColor: "#FFEBEE" }]}>
+                <MaterialCommunityIcons name="currency-inr" size={22} color="#D32F2F" />
+              </View>
+              <Text style={styles.itemLabel}>Drying Rates</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
+            </TouchableOpacity>
+          )}
 
           {user?.role === "Admin" && (
             <>

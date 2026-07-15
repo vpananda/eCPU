@@ -12,7 +12,7 @@ import { Picker } from "@/src/components/Picker";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 type Customer = { id: string; code: string; name: string; mobile: string; branch_id?: string };
-type Product = { id: string; name: string; default_rate: number };
+type Product = { id: string; name: string; default_rate: number; branch_rates?: Record<string, number> };
 type Branch = { id: string; name: string };
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -108,10 +108,14 @@ export default function ArrivalForm() {
   const selectedBranch = branches.find(b => b.id === branchId);
 
   useEffect(() => {
-    if (selectedProduct && selectedProduct.default_rate > 0) {
-      setRate(String(selectedProduct.default_rate));
+    if (selectedProduct) {
+      const branchRate = (selectedProduct.branch_rates && branchId)
+        ? selectedProduct.branch_rates[branchId]
+        : undefined;
+      const finalRate = branchRate !== undefined ? branchRate : selectedProduct.default_rate;
+      setRate(String(finalRate));
     }
-  }, [selectedProduct]);
+  }, [selectedProduct, branchId]);
 
   // Auto-fill "Received From" with customer name unless user has edited it
   useEffect(() => {

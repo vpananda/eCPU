@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS public.batch_status_history CASCADE;
 DROP TABLE IF EXISTS public.batches CASCADE;
 DROP TABLE IF EXISTS public.customers CASCADE;
 DROP TABLE IF EXISTS public.machines CASCADE;
+DROP TABLE IF EXISTS public.branch_product_rates CASCADE;
 DROP TABLE IF EXISTS public.products CASCADE;
 DROP TABLE IF EXISTS public.profiles CASCADE;
 DROP TABLE IF EXISTS public.branches CASCADE;
@@ -96,6 +97,17 @@ CREATE TABLE public.products (
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
+);
+
+-- Branch Product Rates Table (Branch specific spice rates)
+CREATE TABLE public.branch_product_rates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_id UUID NOT NULL REFERENCES public.branches(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+  rate NUMERIC(10,2) NOT NULL DEFAULT 0.00 CHECK (rate >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(branch_id, product_id)
 );
 
 -- Machines Table

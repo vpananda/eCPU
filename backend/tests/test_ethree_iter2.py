@@ -446,3 +446,76 @@ class TestBatchModificationsAndCustomerStats:
         rml2 = requests.get(f"{API}/machines", headers=H(admin_token))
         assert rml2.status_code == 200
         assert not any(x["id"] == mid for x in rml2.json())
+
+
+class TestExpenseSystemEnhancements:
+    def test_expense_categories_crud(self, admin_token, manager_token):
+        # 1. Get initial categories
+        r = requests.get(f"{API}/expense-categories", headers=H(admin_token))
+        assert r.status_code == 200
+        cats = r.json()
+        assert "Electricity" in cats
+
+        # 2. Update categories as Admin
+        new_cats = cats + ["Chemicals", "Packaging Material"]
+        ru = requests.put(f"{API}/expense-categories", headers=H(admin_token), json={"categories": new_cats})
+        assert ru.status_code == 200
+        assert "Chemicals" in ru.json()["categories"]
+
+        # 3. Update categories as Manager (should fail 403)
+        ru_m = requests.put(f"{API}/expense-categories", headers=H(manager_token), json={"categories": new_cats})
+        assert ru_m.status_code == 403
+
+    def test_expenses_crud_and_filtering(self, admin_token, manager_token):
+        # 1. Add an expense
+        payload = {
+            "category": "Chemicals",
+            "amount": 2500.0,
+            "vendor": "Agro Chemicals Ltd",
+            "remarks": "Test chemical purchase",
+            "expense_date": "2026-07-15",
+            "bill_photos": ["photo_b64_dummy_string"]
+        }
+        r = requests.post(f"{API}/expenses", headers=H(manager_token), json=payload)
+        assert r.status_code == 200
+        eid = r.json()["id"]
+        assert r.json()["category"] == "Chemicals"
+        assert r.json()["bill_photos"] == ["photo_b64_dummy_string"]
+
+        # 2. Retrieve the expense details
+        rg = requests.get(f"{API}/expenses/{eid}", headers=H(manager_token))
+        assert rg.status_code == 200
+        assert rg.json()["amount"] == 2500.0
+
+        # 3. Update the expense
+        ru = requests.put(f"{API}/expenses/{eid}", headers=H(manager_token),
+                          json={"amount": 3000.0, "remarks": "Updated test purchase"})
+        assert ru.status_code == 200
+
+        # Verify update
+        rg2 = requests.get(f"{API}/expenses/{eid}", headers=H(manager_token))
+        assert rg2.json()["amount"] == 3000.0
+        assert rg2.json()["remarks"] == "Updated test purchase"
+
+        # 4. Filter list by date range
+        # Matches:
+        rl1 = requests.get(f"{API}/expenses?start=2026-07-14&end=2026-07-16", headers=H(manager_token))
+        assert rl1.status_code == 200
+        assert any(x["id"] == eid for x in rl1.json())
+
+        # Doesn't match:
+        rl2 = requests.get(f"{API}/expenses?start=2026-07-01&end=2026-07-10", headers=H(manager_token))
+        assert rl2.status_code == 200
+        assert not any(x["id"] == eid for x in rl2.json())
+
+        # 5. Delete as non-Admin (Manager) -> should fail 403
+        rd_m = requests.delete(f"{API}/expenses/{eid}", headers=H(manager_token))
+        assert rd_m.status_code == 403
+
+        # 6. Delete as Admin -> should succeed
+        rd = requests.delete(f"{API}/expenses/{eid}", headers=H(admin_token))
+        assert rd.status_code == 200
+
+        # Verify deleted
+        rg3 = requests.get(f"{API}/expenses/{eid}", headers=H(manager_token))
+        assert rg3.status_code == 404

@@ -22,6 +22,7 @@ const ADMIN_ITEMS = [
   { key: "users", label: "Users", icon: "account-multiple", route: "/users-admin" as const, color: "#0288D1" },
   { key: "branches", label: "Branches", icon: "office-building", route: "/branches-admin" as const, color: "#6A1B9A" },
   { key: "products", label: "Spices", icon: "leaf", route: "/products-admin" as const, color: "#2E7D32" },
+  { key: "expense-categories", label: "Expense Ledgers", icon: "playlist-edit", route: "/expense-categories-admin" as const, color: "#E65100" },
 ];
 
 const AUDIT_ITEMS = [

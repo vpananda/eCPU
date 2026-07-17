@@ -1,9 +1,11 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
+import { Picker } from "@/src/components/Picker";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const CAT_ICONS: Record<string, string> = {
@@ -14,15 +16,39 @@ const CAT_ICONS: Record<string, string> = {
 
 export default function ExpensesScreen() {
   const router = useRouter();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "Admin";
+
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [selectedBranch, setSelectedBranch] = useState<string>("");
+
+  useEffect(() => {
+    if (isAdmin) {
+      api<any[]>("/branches")
+        .then(setBranches)
+        .catch(() => {});
+    }
+  }, [isAdmin]);
 
   const load = useCallback(async () => {
-    try { setList(await api<any[]>("/expenses")); }
-    finally { setLoading(false); }
-  }, []);
+    try {
+      let url = "/expenses";
+      if (selectedBranch) {
+        url += `?branch_id=${selectedBranch}`;
+      }
+      setList(await api<any[]>(url));
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedBranch]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   const total = list.reduce((s, e) => s + e.amount, 0);
 
@@ -47,6 +73,18 @@ export default function ExpensesScreen() {
         <MaterialCommunityIcons name="cash-minus" size={40} color="#fff" />
       </View>
 
+      {isAdmin && (
+        <View style={styles.filterContainer}>
+          <Picker
+            testID="expenses-branch-filter"
+            placeholder="All Branches"
+            value={selectedBranch}
+            onChange={setSelectedBranch}
+            options={[{ id: "", name: "All Branches" }, ...branches.map(b => ({ id: b.id, name: b.name }))]}
+          />
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
@@ -56,17 +94,29 @@ export default function ExpensesScreen() {
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.sm }}
           ListEmptyComponent={<Text style={styles.empty}>No expenses. Tap + to add.</Text>}
           renderItem={({ item }) => (
-            <View style={styles.item}>
+            <TouchableOpacity
+              testID={`expense-item-${item.id}`}
+              style={styles.item}
+              onPress={() => router.push(`/expense-form?id=${item.id}`)}
+              activeOpacity={0.85}
+            >
               <View style={styles.icon}>
                 <MaterialCommunityIcons name={(CAT_ICONS[item.category] as any) || "cash"} size={20} color={colors.accent} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.category}>{item.category}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                  <Text style={styles.category}>{item.category}</Text>
+                  {item.branch_name ? (
+                    <View style={styles.branchBadge}>
+                      <Text style={styles.branchBadgeText}>{item.branch_name}</Text>
+                    </View>
+                  ) : null}
+                </View>
                 {item.vendor ? <Text style={styles.vendor}>{item.vendor}</Text> : null}
                 <Text style={styles.date}>{new Date(item.expense_date || item.created_at).toLocaleDateString("en-IN")}</Text>
               </View>
               <Text style={styles.amount}>₹{item.amount.toFixed(2)}</Text>
-            </View>
+            </TouchableOpacity>
           )}
         />
       )}
@@ -83,9 +133,12 @@ const styles = StyleSheet.create({
   totalLabel: { color: "#FFE0B2", fontSize: 12, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   totalValue: { color: "#fff", fontSize: 28, fontWeight: "800", marginTop: 4 },
   totalSub: { color: "#FFE0B2", fontSize: 12, marginTop: 2 },
+  filterContainer: { paddingHorizontal: spacing.xl, marginTop: spacing.md, marginBottom: -spacing.sm },
   item: { flexDirection: "row", alignItems: "center", backgroundColor: colors.card, padding: spacing.md, borderRadius: radius.lg, gap: spacing.md, ...shadow.card },
   icon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + "20", alignItems: "center", justifyContent: "center" },
   category: { fontSize: 15, fontWeight: "700", color: colors.text },
+  branchBadge: { backgroundColor: colors.primary50, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.sm },
+  branchBadgeText: { fontSize: 10, color: colors.primary, fontWeight: "800" },
   vendor: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   date: { fontSize: 11, color: colors.textLight, marginTop: 1 },
   amount: { fontSize: 16, fontWeight: "800", color: colors.accent },

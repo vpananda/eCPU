@@ -568,32 +568,49 @@ class PostgresDBWrapper:
 
     async def query(self, sql, params=None, table_name=None):
         logger.info(f"DB QUERY START: {sql} | Params: {params}")
-        try:
-            async with self.pool.connection() as conn:
-                logger.info("DB QUERY connection acquired")
-                async with conn.cursor() as cur:
-                    await cur.execute(sql, params)
-                    if cur.description:
-                        rows = await cur.fetchall()
-                        logger.info(f"DB QUERY success, rows: {len(rows)}")
-                        return [postgres_to_mongo_types(row, table_name) for row in rows]
-                    logger.info("DB QUERY success, no rows")
-                    return []
-        except Exception as e:
-            logger.error(f"DB QUERY error: {e}")
-            raise
+        for attempt in range(2):
+            try:
+                async with self.pool.connection() as conn:
+                    logger.info("DB QUERY connection acquired")
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql, params)
+                        if cur.description:
+                            rows = await cur.fetchall()
+                            logger.info(f"DB QUERY success, rows: {len(rows)}")
+                            return [postgres_to_mongo_types(row, table_name) for row in rows]
+                        logger.info("DB QUERY success, no rows")
+                        return []
+            except psycopg.OperationalError as e:
+                logger.warning(f"DB QUERY OperationalError on attempt {attempt+1}: {e}")
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+                    continue
+                logger.error(f"DB QUERY error after retry: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"DB QUERY error: {e}")
+                raise
 
     async def execute(self, sql, params=None):
         logger.info(f"DB EXECUTE START: {sql} | Params: {params}")
-        try:
-            async with self.pool.connection() as conn:
-                logger.info("DB EXECUTE connection acquired")
-                async with conn.cursor() as cur:
-                    await cur.execute(sql, params)
-                    logger.info("DB EXECUTE success")
-        except Exception as e:
-            logger.error(f"DB EXECUTE error: {e}")
-            raise
+        for attempt in range(2):
+            try:
+                async with self.pool.connection() as conn:
+                    logger.info("DB EXECUTE connection acquired")
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql, params)
+                        logger.info("DB EXECUTE success")
+                        return
+            except psycopg.OperationalError as e:
+                logger.warning(f"DB EXECUTE OperationalError on attempt {attempt+1}: {e}")
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+                    continue
+                logger.error(f"DB EXECUTE error after retry: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"DB EXECUTE error: {e}")
+                raise
 
     def close_sync(self):
         pass
@@ -920,9 +937,24 @@ class ExpenseIn(BaseModel):
     amount: float
     vendor: Optional[str] = ""
     bill_photo: Optional[str] = ""
+    bill_photos: Optional[List[str]] = []
     remarks: Optional[str] = ""
     expense_date: Optional[str] = None
     branch_id: Optional[str] = None
+
+
+class ExpenseUpdate(BaseModel):
+    category: Optional[str] = None
+    amount: Optional[float] = None
+    vendor: Optional[str] = None
+    bill_photos: Optional[List[str]] = None
+    remarks: Optional[str] = None
+    expense_date: Optional[str] = None
+    branch_id: Optional[str] = None
+
+
+class ExpenseCategoriesIn(BaseModel):
+    categories: List[str]
 
 
 class MaintenanceIn(BaseModel):
@@ -964,6 +996,10 @@ async def seed():
             created_at TIMESTAMPTZ DEFAULT now(),
             expires_at TIMESTAMPTZ NOT NULL
         );
+    """)
+    # Add bill_photos TEXT[] DEFAULT '{}' column to public.expenses if not exists
+    await db.execute("""
+        ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS bill_photos TEXT[] DEFAULT '{}';
     """)
     # Create counters table if not exists
     await db.execute("""
@@ -2071,14 +2107,44 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
 
 # ---------------------------- EXPENSES ----------------------------
 @api.get("/expenses")
-async def list_expenses(user: dict = Depends(get_current_user), branch_id: Optional[str] = None):
+async def list_expenses(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
-        query: Dict[str, Any] = {"branch_id": branch_id}
-    else:
-        query = dict(branch_query(user))
-    return await db.expenses.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+    q = branch_query(user)
+    where_clause, params = build_where_clause(q, "public.expenses")
+    
+    extra_clauses = []
+    if start:
+        extra_clauses.append("e.expense_date >= %s")
+        params.append(start)
+    if end:
+        extra_clauses.append("e.expense_date <= %s")
+        params.append(end)
+    if branch_id:
+        extra_clauses.append("e.branch_id::text = %s")
+        params.append(branch_id)
+        
+    where_str = where_clause
+    if extra_clauses:
+        where_str += " AND " + " AND ".join(extra_clauses)
+        
+    query = f"""
+        SELECT e.*, b.name as branch_name
+        FROM public.expenses e
+        LEFT JOIN public.branches b ON e.branch_id = b.id
+        WHERE {where_str}
+        ORDER BY e.expense_date DESC, e.created_at DESC
+        LIMIT 500
+    """
+    rows = await db.query(query, params, "public.expenses")
+    return rows
 
 
 @api.post("/expenses")
@@ -2102,10 +2168,70 @@ async def add_expense(body: ExpenseIn, user: dict = Depends(get_current_user)):
     return clean(e)
 
 
+@api.get("/expenses/{eid}")
+async def get_expense(eid: str, user: dict = Depends(get_current_user)):
+    e = await db.expenses.find_one({"id": eid}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if not can_write_to_branch(user, e.get("branch_id")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return clean(e)
+
+
+@api.put("/expenses/{eid}")
+async def update_expense(eid: str, body: ExpenseUpdate, user: dict = Depends(get_current_user)):
+    e = await db.expenses.find_one({"id": eid}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if not can_write_to_branch(user, e.get("branch_id")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    upd = {k: v for k, v in body.dict().items() if v is not None}
+    if "amount" in upd and upd["amount"] <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be > 0")
+    if "expense_date" in upd and not upd["expense_date"]:
+        upd.pop("expense_date")
+
+    upd["updated_at"] = now_utc().isoformat()
+    upd["updated_by"] = user["id"]
+
+    await db.expenses.update_one({"id": eid}, {"$set": upd})
+    await audit("update", "expense", eid, user, e, upd)
+    return {"ok": True}
+
+
+@api.delete("/expenses/{eid}")
+async def delete_expense(eid: str, user: dict = Depends(get_current_user)):
+    if user.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    e = await db.expenses.find_one({"id": eid}, {"_id": 0})
+    if not e:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    await db.expenses.delete_one({"id": eid})
+    await audit("delete", "expense", eid, user, e, None)
+    return {"ok": True}
+
+
 @api.get("/expense-categories")
 async def expense_cats(user: dict = Depends(get_current_user)):
     doc = await db.settings.find_one({"key": "expense_categories"}, {"_id": 0})
-    return doc["value"] if doc else DEFAULT_EXPENSE_CATS
+    cats = doc["value"] if doc else DEFAULT_EXPENSE_CATS
+    return sorted(cats, key=str.lower)
+
+
+@api.put("/expense-categories")
+async def update_expense_cats(body: ExpenseCategoriesIn, user: dict = Depends(get_current_user)):
+    if user.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    seen = set()
+    unique_cats = [c for c in body.categories if not (c in seen or seen.add(c))]
+    await db.settings.update_one(
+        {"key": "expense_categories"},
+        {"$set": {"value": unique_cats}},
+        upsert=True
+    )
+    await audit("update", "settings", "expense_categories", user, None, unique_cats)
+    return {"ok": True, "categories": unique_cats}
 
 
 # ---------------------------- MAINTENANCE ----------------------------

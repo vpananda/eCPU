@@ -52,6 +52,25 @@ export default function Reports() {
             </View>
           </View>
 
+          {/* Detailed Expense Report Button */}
+          <TouchableOpacity
+            testID="reports-expense-detail"
+            style={styles.detailBtn}
+            onPress={() => router.push("/expense-report")}
+            activeOpacity={0.85}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+              <View style={styles.detailIconWrap}>
+                <MaterialCommunityIcons name="file-chart" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={styles.detailTitle}>Detailed Expense Report</Text>
+                <Text style={styles.detailSub}>Filter by date, category, and view receipts</Text>
+              </View>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />
+          </TouchableOpacity>
+
           {/* Alerts */}
           <View style={styles.alertGrid}>
             <View style={[styles.alert, { backgroundColor: colors.danger + "15" }]}>
@@ -132,4 +151,8 @@ const styles = StyleSheet.create({
   overviewRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
   overviewLabel: { fontSize: 13, color: colors.textMuted },
   overviewValue: { fontSize: 15, color: colors.text, fontWeight: "800" },
+  detailBtn: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.card, marginHorizontal: spacing.xl, padding: spacing.md, borderRadius: radius.xl, marginBottom: spacing.lg, ...shadow.card },
+  detailIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary50, alignItems: "center", justifyContent: "center" },
+  detailTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
+  detailSub: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
 });

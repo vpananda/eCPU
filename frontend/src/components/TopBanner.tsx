@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Platform, Image } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSegments, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -34,8 +34,11 @@ function getHeaderTitle(segments: string[]): string {
     case "machine-form": return "New Machine";
     case "maintenance-form": return "Record Maintenance";
     case "maintenance": return "Maintenance Logs";
+    case "payment-form": return "Collect Advance";
     case "payment-picker": return "Collect Payment";
     case "payments": return "Payments";
+    case "sale-form": return "Record Sale";
+    case "sales": return "Sales Logs";
     case "reports": return "Business Reports";
     case "search": return "Search System";
     case "settings": return "System Settings";
@@ -75,6 +78,14 @@ export function TopBanner() {
     });
   };
 
+  const handleBack = () => {
+    if (router.canGoBack && router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/(tabs)/dashboard");
+    }
+  };
+
   const showBackButton = segments[0] !== "(tabs)";
 
   return (
@@ -83,7 +94,7 @@ export function TopBanner() {
         {/* Left Side: Back button + Title */}
         <View style={styles.left}>
           {showBackButton && (
-            <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} testID="header-back-button">
+            <TouchableOpacity onPress={handleBack} style={styles.backBtn} testID="header-back-button">
               <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
             </TouchableOpacity>
           )}
@@ -112,6 +123,17 @@ export function TopBanner() {
             </View>
           )}
 
+          {/* Home Page Icon */}
+          <TouchableOpacity
+            onPress={() => router.replace("/(tabs)/dashboard")}
+            style={styles.homeBtn}
+            testID="header-home-button"
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="home-outline" size={20} color={colors.primary} />
+          </TouchableOpacity>
+
+          {/* Log out */}
           <TouchableOpacity
             onPress={handleSignOut}
             style={styles.logoutBtn}
@@ -120,6 +142,17 @@ export function TopBanner() {
           >
             <MaterialCommunityIcons name="logout" size={20} color={colors.danger} />
           </TouchableOpacity>
+
+          {/* Logged user avatar/initials */}
+          <View style={styles.avatarWrap}>
+            {user?.picture ? (
+              <Image source={{ uri: user.picture }} style={styles.avatarImg} />
+            ) : (
+              <Text style={styles.avatarInitials}>
+                {(user?.name || "U").slice(0, 2).toUpperCase()}
+              </Text>
+            )}
+          </View>
         </View>
       </View>
 
@@ -304,5 +337,31 @@ const styles = StyleSheet.create({
   modalItemTextSelected: {
     color: colors.primary,
     fontWeight: "700",
+  },
+  homeBtn: {
+    padding: 6,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primary50,
+    marginRight: spacing.sm,
+    marginLeft: spacing.sm,
+  },
+  avatarWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: spacing.sm,
+    overflow: "hidden",
+  },
+  avatarImg: {
+    width: 32,
+    height: 32,
+  },
+  avatarInitials: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#ffffff",
   },
 });

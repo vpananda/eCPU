@@ -12,6 +12,7 @@ const ACTIONS = [
   { key: "batching", label: "Batching", subtitle: "Load stock into machine", icon: "engine-outline", color: "#7B1FA2", route: "/batching-form" as const },
   { key: "expense", label: "Expense", subtitle: "Log operating expense", icon: "cash-minus", color: "#C62828", route: "/expense-form" as const },
   { key: "payment", label: "Payment", subtitle: "Collect balance amount", icon: "cash-plus", color: "#1565C0", route: "/payment-picker" as const },
+  { key: "sale", label: "Sale", subtitle: "Record product sale", icon: "tag-outline", color: "#EF6C00", route: "/sale-form" as const },
 ];
 
 export default function NewEntrySheet() {

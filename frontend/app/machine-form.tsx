@@ -23,7 +23,7 @@ export default function MachineForm() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const isEdit = !!id;
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, branches } = useAuth();
 
   const [form, setForm] = useState({
     name: "",
@@ -31,15 +31,11 @@ export default function MachineForm() {
     status: "Available",
     branch_id: "",
   });
-  const [branches, setBranches] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const list = await api<any[]>("/branches");
-        setBranches(list);
-        
         if (isEdit) {
           const machines = await api<any[]>("/machines");
           const m = machines.find(item => item.id === id);
@@ -53,7 +49,7 @@ export default function MachineForm() {
           }
         } else if (user) {
           if (user.role === "Admin") {
-            setForm(f => ({ ...f, branch_id: user.branch_id || list[0]?.id || "" }));
+            setForm(f => ({ ...f, branch_id: f.branch_id || user.branch_id || branches[0]?.id || "" }));
           } else {
             setForm(f => ({ ...f, branch_id: user.branch_id || "" }));
           }
@@ -62,7 +58,7 @@ export default function MachineForm() {
         console.error("Failed to initialize form", e);
       }
     })();
-  }, [id, isEdit, user]);
+  }, [id, isEdit, user, branches]);
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
 

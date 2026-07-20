@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { Picker } from "@/src/components/Picker";
+import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const CAT_ICONS: Record<string, string> = {
@@ -23,6 +24,11 @@ export default function ExpensesScreen() {
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState<any[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [draftStart, setDraftStart] = useState<string>("");
+  const [draftEnd, setDraftEnd] = useState<string>("");
 
   useEffect(() => {
     if (isAdmin) {
@@ -34,15 +40,31 @@ export default function ExpensesScreen() {
 
   const load = useCallback(async () => {
     try {
-      let url = "/expenses";
+      let url = "/expenses?";
+      const params = [];
       if (selectedBranch) {
-        url += `?branch_id=${selectedBranch}`;
+        params.push(`branch_id=${selectedBranch}`);
       }
-      setList(await api<any[]>(url));
+      if (startDate) {
+        params.push(`start=${startDate}`);
+      }
+      if (endDate) {
+        params.push(`end=${endDate}`);
+      }
+      url += params.join("&");
+      const data = await api<any[]>(url);
+      data.sort((a, b) => {
+        const dateA = new Date(a.expense_date || a.created_at);
+        const dateB = new Date(b.expense_date || b.created_at);
+        return dateB.getTime() - dateA.getTime();
+      });
+      setList(data);
+    } catch (err) {
+      // ignore
     } finally {
       setLoading(false);
     }
-  }, [selectedBranch]);
+  }, [selectedBranch, startDate, endDate]);
 
   useFocusEffect(
     useCallback(() => {
@@ -54,21 +76,50 @@ export default function ExpensesScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="expenses-back">
-          <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Expenses</Text>
-        <TouchableOpacity testID="expenses-add" style={styles.addBtn} onPress={() => router.push("/expense-form")}>
-          <MaterialCommunityIcons name="plus" size={22} color="#fff" />
+
+      <View style={styles.dateFilterWrapper}>
+        <TouchableOpacity
+          testID="expenses-date-filter"
+          style={styles.dateFilterTrigger}
+          onPress={() => {
+            setDraftStart(startDate);
+            setDraftEnd(endDate);
+            setPickerOpen(true);
+          }}
+          activeOpacity={0.85}
+        >
+          <MaterialCommunityIcons name="calendar" size={18} color={colors.textMuted} />
+          <Text style={startDate && endDate ? styles.dateFilterText : styles.dateFilterPlaceholder}>
+            {startDate && endDate ? `${startDate} to ${endDate}` : "Filter by Date"}
+          </Text>
+          {startDate || endDate ? (
+            <TouchableOpacity
+              testID="expenses-clear-date"
+              onPress={(e) => {
+                e.stopPropagation();
+                setStartDate("");
+                setEndDate("");
+              }}
+              style={styles.clearDateBtn}
+            >
+              <MaterialCommunityIcons name="close-circle" size={16} color={colors.textLight} />
+            </TouchableOpacity>
+          ) : (
+            <MaterialCommunityIcons name="chevron-down" size={20} color={colors.textMuted} />
+          )}
         </TouchableOpacity>
       </View>
 
       <View style={styles.totalCard}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.totalLabel}>Total Expenses</Text>
           <Text style={styles.totalValue}>₹{total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
-          <Text style={styles.totalSub}>{list.length} entries</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+            <Text style={styles.totalSub}>{list.length} entries</Text>
+            {startDate && endDate ? (
+              <Text style={styles.totalDateRange}>({startDate} - {endDate})</Text>
+            ) : null}
+          </View>
         </View>
         <MaterialCommunityIcons name="cash-minus" size={40} color="#fff" />
       </View>
@@ -120,6 +171,82 @@ export default function ExpensesScreen() {
           )}
         />
       )}
+
+      {/* Date Picker Modal */}
+      <Modal
+        visible={pickerOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setPickerOpen(false)}
+      >
+        <View style={styles.dateModalBg}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerSheetHandle} />
+            <Text style={styles.pickerSheetTitle}>Select Date Range</Text>
+
+            <Calendar
+              startDate={draftStart}
+              endDate={draftEnd}
+              onSelectRange={(s, e) => {
+                setDraftStart(s);
+                setDraftEnd(e);
+              }}
+            />
+
+            <View style={styles.dateRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dateLabel}>From</Text>
+                <TextInput
+                  testID="expenses-start-date"
+                  style={styles.dateInput}
+                  value={draftStart}
+                  onChangeText={setDraftStart}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+              <MaterialCommunityIcons name="arrow-right" size={18} color={colors.textMuted} style={{ marginTop: 22 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dateLabel}>To</Text>
+                <TextInput
+                  testID="expenses-end-date"
+                  style={styles.dateInput}
+                  value={draftEnd}
+                  onChangeText={setDraftEnd}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textLight}
+                />
+              </View>
+            </View>
+
+            <View style={styles.pickerSheetActions}>
+              <TouchableOpacity testID="expenses-range-cancel" style={styles.pickerSheetCancel} onPress={() => setPickerOpen(false)}>
+                <Text style={styles.pickerSheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="expenses-range-apply"
+                style={styles.pickerSheetApply}
+                onPress={() => {
+                  setStartDate(draftStart);
+                  setEndDate(draftEnd);
+                  setPickerOpen(false);
+                }}
+              >
+                <Text style={styles.pickerSheetApplyText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <TouchableOpacity
+        testID="expenses-add"
+        style={styles.fab}
+        onPress={() => router.push("/expense-form")}
+        activeOpacity={0.85}
+      >
+        <MaterialCommunityIcons name="plus" size={24} color="#fff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -143,4 +270,131 @@ const styles = StyleSheet.create({
   date: { fontSize: 11, color: colors.textLight, marginTop: 1 },
   amount: { fontSize: 16, fontWeight: "800", color: colors.accent },
   empty: { textAlign: "center", color: colors.textMuted, marginTop: 40 },
+  dateFilterTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  dateFilterText: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: "700",
+  },
+  dateFilterPlaceholder: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textLight,
+  },
+  clearDateBtn: {
+    padding: 2,
+  },
+  dateModalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xl,
+    paddingBottom: spacing.xxl,
+  },
+  pickerSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  pickerSheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+    marginBottom: spacing.md,
+    textAlign: "center",
+  },
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+    marginTop: spacing.md,
+  },
+  dateLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+    marginBottom: 6,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  dateInput: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pickerSheetActions: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  pickerSheetCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
+  pickerSheetCancelText: {
+    color: colors.textMuted,
+    fontWeight: "700",
+  },
+  pickerSheetApply: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+  },
+  pickerSheetApplyText: {
+    color: "#fff",
+    fontWeight: "800",
+  },
+  dateFilterWrapper: {
+    paddingHorizontal: spacing.xl,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  totalDateRange: {
+    color: "#FFE0B2",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  fab: {
+    position: "absolute",
+    right: spacing.xl,
+    bottom: spacing.xl + 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.fab,
+  },
 });

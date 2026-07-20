@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
   itemDate: { fontSize: 10, color: colors.textLight, marginTop: 2 },
   itemAmount: { fontSize: 15, fontWeight: "800", color: colors.accent },
   photoThumbnails: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm },
-  thumbImage: { width: 40, height: 40, borderRadius: radius.xs, borderWidth: 1, borderColor: colors.border },
+  thumbImage: { width: 40, height: 40, borderRadius: 4, borderWidth: 1, borderColor: colors.border },
   
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.9)", justifyContent: "center", alignItems: "center" },
   modalContent: { width: "90%", height: "80%", justifyContent: "center", alignItems: "center" },

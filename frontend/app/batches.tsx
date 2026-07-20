@@ -37,6 +37,28 @@ export default function BatchesScreen() {
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState(params.status || "All");
+  const [paymentFilter, setPaymentFilter] = useState<"All" | "Pending" | "Paid">("All");
+  const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "balance_desc">("date_desc");
+
+  const processedList = React.useMemo(() => {
+    let result = [...list];
+    
+    if (paymentFilter === "Pending") {
+      result = result.filter(b => (b.balance_amount || 0) > 0);
+    } else if (paymentFilter === "Paid") {
+      result = result.filter(b => (b.balance_amount || 0) <= 0);
+    }
+    
+    if (sortBy === "date_desc") {
+      result.sort((a, b) => new Date(b.created_at || b.start_time).getTime() - new Date(a.created_at || a.start_time).getTime());
+    } else if (sortBy === "date_asc") {
+      result.sort((a, b) => new Date(a.created_at || a.start_time).getTime() - new Date(b.created_at || b.start_time).getTime());
+    } else if (sortBy === "balance_desc") {
+      result.sort((a, b) => (b.balance_amount || 0) - (a.balance_amount || 0));
+    }
+    
+    return result;
+  }, [list, paymentFilter, sortBy]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(params.start || "");
@@ -132,11 +154,81 @@ export default function BatchesScreen() {
         </ScrollView>
       </View>
 
+      {/* Payment Filter Row */}
+      <View style={{ marginBottom: spacing.xs }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          <TouchableOpacity
+            testID="batches-pay-filter-all"
+            style={[styles.smallChip, paymentFilter === "All" && styles.chipActive]}
+            onPress={() => setPaymentFilter("All")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="credit-card-outline" size={14} color={paymentFilter === "All" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "All" && { color: "#fff" }]}>All Payments</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            testID="batches-pay-filter-pending"
+            style={[styles.smallChip, paymentFilter === "Pending" && styles.chipActive]}
+            onPress={() => setPaymentFilter("Pending")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="alert-circle-outline" size={14} color={paymentFilter === "Pending" ? "#fff" : colors.accent} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "Pending" && { color: "#fff" }]}>Pending Balance</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="batches-pay-filter-paid"
+            style={[styles.smallChip, paymentFilter === "Paid" && styles.chipActive]}
+            onPress={() => setPaymentFilter("Paid")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="check-circle-outline" size={14} color={paymentFilter === "Paid" ? "#fff" : colors.success} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "Paid" && { color: "#fff" }]}>Fully Paid</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      {/* Sort Options Row */}
+      <View style={{ marginBottom: spacing.xs }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          <TouchableOpacity
+            testID="batches-sort-newest"
+            style={[styles.smallChip, sortBy === "date_desc" && styles.chipActive]}
+            onPress={() => setSortBy("date_desc")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="sort-descending" size={14} color={sortBy === "date_desc" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "date_desc" && { color: "#fff" }]}>Newest First</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="batches-sort-oldest"
+            style={[styles.smallChip, sortBy === "date_asc" && styles.chipActive]}
+            onPress={() => setSortBy("date_asc")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="sort-ascending" size={14} color={sortBy === "date_asc" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "date_asc" && { color: "#fff" }]}>Oldest First</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="batches-sort-balance"
+            style={[styles.smallChip, sortBy === "balance_desc" && styles.chipActive]}
+            onPress={() => setSortBy("balance_desc")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="cash-minus" size={14} color={sortBy === "balance_desc" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "balance_desc" && { color: "#fff" }]}>Highest Balance</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
-          data={list}
+          data={processedList}
           keyExtractor={i => i.id}
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.md }}
           ListEmptyComponent={() => (
@@ -242,4 +334,17 @@ const styles = StyleSheet.create({
   timeText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
   itemBranchText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
   bill: { fontSize: 14, fontWeight: "800", color: colors.primary, marginTop: 8 },
+  smallChip: { 
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12, 
+    height: 28, 
+    borderRadius: radius.pill, 
+    backgroundColor: colors.card, 
+    borderWidth: 1, 
+    borderColor: colors.border, 
+    justifyContent: "center", 
+    flexShrink: 0 
+  },
+  smallChipText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
 });

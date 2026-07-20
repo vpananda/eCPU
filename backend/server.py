@@ -48,11 +48,12 @@ UUID_FIELDS = {
     "customers": ["id", "branch_id", "created_by", "updated_by"],
     "batches": ["id", "customer_id", "product_id", "machine_id", "branch_id", "created_by", "updated_by"],
     "batch_status_history": ["id", "batch_id", "changed_by"],
-    "payments": ["id", "batch_id", "created_by"],
+    "payments": ["id", "batch_id", "customer_id", "branch_id", "created_by"],
     "expenses": ["id", "branch_id", "created_by"],
     "maintenance": ["id", "machine_id", "created_by"],
     "audit_logs": ["id", "user_id"],
-    "user_sessions": ["user_id"]
+    "user_sessions": ["user_id"],
+    "sales": ["id", "customer_id", "branch_id", "created_by"]
 }
 
 JSONB_FIELDS = {
@@ -551,6 +552,7 @@ class PostgresDBWrapper:
         self.maintenance = PostgresCollection(self, "public.maintenance")
         self.settings = PostgresCollection(self, "public.settings", "key")
         self.audit_logs = PostgresCollection(self, "public.audit_logs")
+        self.sales = PostgresCollection(self, "public.sales")
         self.user_sessions = PostgresCollection(self, "public.user_sessions", "session_token")
         self.counters = PostgresCollection(self, "public.counters")
 
@@ -926,10 +928,24 @@ class DeliveryIn(BaseModel):
 
 
 class PaymentIn(BaseModel):
-    batch_id: str
+    batch_id: Optional[str] = None
+    customer_id: Optional[str] = None
+    branch_id: Optional[str] = None
     amount: float
     mode: str  # Cash, UPI, Bank, Credit
     remarks: Optional[str] = ""
+
+
+class SaleIn(BaseModel):
+    customer_id: str
+    branch_id: str
+    item_name: str
+    quantity: float
+    rate: float
+    amount: float
+    payment_mode: str
+    remarks: Optional[str] = ""
+    sale_date: Optional[str] = None
 
 
 class ExpenseIn(BaseModel):
@@ -1694,15 +1710,18 @@ async def recompute_batch_totals(batch: dict) -> dict:
         "balance_amount": round(bill_amount - total_paid, 2),
     }
 
-async def clean_batch(b: Optional[dict]) -> Optional[dict]:
+async def clean_batch(b: Optional[dict], include_history: bool = True) -> Optional[dict]:
     if not b:
         return None
     # 1. Fetch status history
-    history = await db.query(
-        "SELECT status, changed_at as at, changed_by as by, remarks FROM public.batch_status_history WHERE batch_id = %s ORDER BY changed_at ASC",
-        [b["id"]], "public.batch_status_history"
-    )
-    b["status_history"] = history
+    if include_history:
+        history = await db.query(
+            "SELECT status, changed_at as at, changed_by as by, remarks FROM public.batch_status_history WHERE batch_id = %s ORDER BY changed_at ASC",
+            [b["id"]], "public.batch_status_history"
+        )
+        b["status_history"] = history
+    else:
+        b["status_history"] = []
     
     # 2. Reconstruct delivery object
     if b.get("delivered_at"):
@@ -1727,39 +1746,104 @@ async def list_batches(user: dict = Depends(get_current_user),
                        q: Optional[str] = None, status: Optional[str] = None,
                        branch_id: Optional[str] = None,
                        start: Optional[str] = None,
-                       end: Optional[str] = None):
+                       end: Optional[str] = None,
+                       has_balance: Optional[bool] = None):
+    # Scoping
+    where_clauses = ["1=1"]
+    params = []
+    
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
-        query: Dict[str, Any] = {"branch_id": branch_id}
+        where_clauses.append("b.branch_id = %s")
+        params.append(branch_id)
     else:
-        query = dict(branch_query(user))
+        # branch scoping from user
+        role = user.get("role")
+        bid = user.get("branch_id")
+        if role != "Admin" and bid:
+            where_clauses.append("b.branch_id = %s")
+            params.append(bid)
+            
     if start and end:
         pstart, pend = _parse_range(start, end)
-        query["created_at"] = {"$gte": pstart, "$lt": pend}
+        where_clauses.append("b.created_at >= %s AND b.created_at < %s")
+        params.extend([pstart, pend])
+        
     if status:
-        query["status"] = status
+        where_clauses.append("b.status = %s")
+        params.append(status)
+        
     if q:
-        or_clause = [
-            {"batch_no": {"$regex": q, "$options": "i"}},
-            {"receipt_no": {"$regex": q, "$options": "i"}},
-        ]
-        if "$or" in query:
-            query = {"$and": [{"$or": query.pop("$or")}, {"$or": or_clause}, query]} if query else {"$or": or_clause}
+        where_clauses.append("(b.batch_no ILIKE %s OR b.receipt_no ILIKE %s)")
+        q_like = f"%{q}%"
+        params.extend([q_like, q_like])
+
+    limit = 500
+    if has_balance:
+        where_clauses.append("b.balance_amount > 0")
+        limit = 5000
+        
+    sql = f"""
+        SELECT 
+            b.*,
+            c.name as customer_name, c.mobile as customer_mobile, c.code as customer_code,
+            p.name as product_name,
+            m.name as machine_name,
+            br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.machines m ON b.machine_id = m.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY b.created_at DESC
+        LIMIT {limit}
+    """
+    
+    rows = await db.query(sql, params)
+    
+    docs = []
+    for r in rows:
+        d = dict(r)
+        
+        # Convert UUID fields to strings dynamically
+        for field in ["id", "customer_id", "product_id", "machine_id", "branch_id"]:
+            if d.get(field):
+                d[field] = str(d[field])
+        
+        # Format customer
+        if d.get("customer_id"):
+            d["customer"] = {
+                "id": d["customer_id"],
+                "name": d.get("customer_name") or "",
+                "mobile": d.get("customer_mobile") or "",
+                "code": d.get("customer_code") or ""
+            }
         else:
-            query["$or"] = or_clause
-    docs = await db.batches.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    branches = await db.branches.find({}, {"_id": 0}).to_list(100)
-    branch_map = {b["id"]: b["name"] for b in branches}
-    for d in docs:
-        d["branch_name"] = branch_map.get(d.get("branch_id"), "")
-        cust = await db.customers.find_one({"id": d["customer_id"]}, {"_id": 0, "name": 1, "mobile": 1, "code": 1})
-        prod = await db.products.find_one({"id": d["product_id"]}, {"_id": 0, "name": 1})
-        mach = await db.machines.find_one({"id": d["machine_id"]}, {"_id": 0, "name": 1})
-        d["customer"] = clean(cust) if cust else None
-        d["product"] = clean(prod) if prod else None
-        d["machine"] = clean(mach) if mach else None
-        await clean_batch(d)
+            d["customer"] = None
+            
+        # Format product
+        if d.get("product_id"):
+            d["product"] = {
+                "id": d["product_id"],
+                "name": d.get("product_name") or ""
+            }
+        else:
+            d["product"] = None
+            
+        # Format machine
+        if d.get("machine_id"):
+            d["machine"] = {
+                "id": d["machine_id"],
+                "name": d.get("machine_name") or ""
+            }
+        else:
+            d["machine"] = None
+            
+        await clean_batch(d, include_history=False)
+        docs.append(d)
+        
     return docs
 
 
@@ -1819,6 +1903,8 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
         pay = {
             "id": str(uuid.uuid4()), "batch_id": bid, "amount": body.advance_paid,
             "mode": "Cash", "remarks": "Advance",
+            "customer_id": b.get("customer_id"),
+            "branch_id": b.get("branch_id"),
             "created_at": now_utc().isoformat(), "created_by": user["id"],
         }
         await db.payments.insert_one(dict(pay))
@@ -1980,6 +2066,8 @@ async def deliver_batch(bid: str, body: DeliveryIn,
             "id": str(uuid.uuid4()), "batch_id": bid, "amount": body.amount_received,
             "mode": body.payment_mode or "Cash",
             "remarks": "Collected at delivery",
+            "customer_id": b.get("customer_id"),
+            "branch_id": b.get("branch_id"),
             "created_at": now_utc().isoformat(), "created_by": user["id"],
         }
         await db.payments.insert_one(dict(pay))
@@ -2057,7 +2145,12 @@ async def delete_batch(
 
 # ---------------------------- PAYMENTS ----------------------------
 @api.get("/payments")
-async def list_payments(user: dict = Depends(get_current_user), branch_id: Optional[str] = None):
+async def list_payments(
+    user: dict = Depends(get_current_user),
+    branch_id: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None
+):
     # Filter by user's branch (or requested branch_id if allowed) by joining on batch
     target_branch = branch_id
     if target_branch:
@@ -2067,21 +2160,47 @@ async def list_payments(user: dict = Depends(get_current_user), branch_id: Optio
         if user.get("role") != "Admin":
             target_branch = user.get("branch_id")
 
+    where_clauses = ["1=1"]
+    params = []
+    
     if target_branch:
-        branch_batches = await db.batches.find(
-            {"branch_id": target_branch}, {"_id": 0, "id": 1}
-        ).to_list(3000)
-        branch_ids = [b["id"] for b in branch_batches]
-        query = {"batch_id": {"$in": branch_ids}}
-    else:
-        query = {}
-    docs = await db.payments.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
-    for d in docs:
-        b = await db.batches.find_one({"id": d["batch_id"]}, {"_id": 0, "batch_no": 1, "customer_id": 1})
-        if b:
-            d["batch_no"] = b["batch_no"]
-            cust = await db.customers.find_one({"id": b["customer_id"]}, {"_id": 0, "name": 1})
-            d["customer_name"] = cust["name"] if cust else ""
+        where_clauses.append("(p.branch_id = %s OR b.branch_id = %s)")
+        params.extend([target_branch, target_branch])
+        
+    if start:
+        where_clauses.append("p.created_at >= %s")
+        params.append(start + "T00:00:00")
+    if end:
+        where_clauses.append("p.created_at <= %s")
+        params.append(end + "T23:59:59.999999")
+        
+    sql = f"""
+        SELECT 
+            p.id::text as id, p.amount, p.mode, p.remarks, p.created_at, p.updated_at,
+            p.batch_id::text as batch_id, p.customer_id::text as customer_id, p.branch_id::text as branch_id,
+            b.batch_no,
+            COALESCE(c.name, cb.name) as customer_name,
+            COALESCE(br.name, brb.name) as branch_name
+        FROM public.payments p
+        LEFT JOIN public.batches b ON p.batch_id = b.id
+        LEFT JOIN public.customers c ON p.customer_id = c.id
+        LEFT JOIN public.customers cb ON b.customer_id = cb.id
+        LEFT JOIN public.branches br ON p.branch_id = br.id
+        LEFT JOIN public.branches brb ON b.branch_id = brb.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY p.created_at DESC
+        LIMIT 1000
+    """
+    
+    rows = await db.query(sql, params)
+    
+    docs = []
+    for r in rows:
+        d = dict(r)
+        if not d.get("batch_id"):
+            d["batch_no"] = "Advance"
+        docs.append(d)
+        
     return docs
 
 
@@ -2089,20 +2208,117 @@ async def list_payments(user: dict = Depends(get_current_user), branch_id: Optio
 async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be > 0")
-    b = await db.batches.find_one({"id": body.batch_id}, {"_id": 0})
-    if not b:
-        raise HTTPException(status_code=404, detail="Batch not found")
-    p = {
-        "id": str(uuid.uuid4()), "batch_id": body.batch_id, "amount": body.amount,
-        "mode": body.mode, "remarks": body.remarks or "",
-        "created_at": now_utc().isoformat(), "created_by": user["id"],
-        "updated_at": now_utc().isoformat(), "updated_by": user["id"],
+        
+    if body.batch_id:
+        b = await db.batches.find_one({"id": body.batch_id}, {"_id": 0})
+        if not b:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        p = {
+            "id": str(uuid.uuid4()), "batch_id": body.batch_id, "amount": body.amount,
+            "mode": body.mode, "remarks": body.remarks or "",
+            "customer_id": b.get("customer_id"),
+            "branch_id": b.get("branch_id"),
+            "created_at": now_utc().isoformat(), "created_by": user["id"],
+            "updated_at": now_utc().isoformat(), "updated_by": user["id"],
+        }
+        await db.payments.insert_one(dict(p))
+        totals = await recompute_batch_totals(b)
+        await db.batches.update_one({"id": body.batch_id}, {"$set": totals})
+        await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"]})
+        return clean(p)
+    else:
+        # Advance payment
+        if not body.customer_id or not body.branch_id:
+            raise HTTPException(status_code=400, detail="customer_id and branch_id are required for advance payments")
+        cust = await db.customers.find_one({"id": body.customer_id})
+        if not cust:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        branch = await db.branches.find_one({"id": body.branch_id})
+        if not branch:
+            raise HTTPException(status_code=404, detail="Branch not found")
+            
+        p = {
+            "id": str(uuid.uuid4()), "batch_id": None, "amount": body.amount,
+            "mode": body.mode, "remarks": body.remarks or "",
+            "customer_id": body.customer_id,
+            "branch_id": body.branch_id,
+            "created_at": now_utc().isoformat(), "created_by": user["id"],
+            "updated_at": now_utc().isoformat(), "updated_by": user["id"],
+        }
+        await db.payments.insert_one(dict(p))
+        await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"], "type": "advance"})
+        return clean(p)
+
+
+# ---------------------------- SALES ----------------------------
+@api.get("/sales")
+async def list_sales(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    q = dict(branch_query(user))
+    if branch_id:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        q["branch_id"] = branch_id
+    
+    if start and end:
+        q["sale_date"] = {"$gte": start, "$lte": end}
+    elif start:
+        q["sale_date"] = {"$gte": start}
+    elif end:
+        q["sale_date"] = {"$lte": end}
+        
+    docs = await db.sales.find(q, {"_id": 0}).sort("sale_date", -1).to_list(500)
+    for d in docs:
+        cust = await db.customers.find_one({"id": d["customer_id"]}, {"_id": 0, "name": 1})
+        d["customer_name"] = cust["name"] if cust else ""
+        branch = await db.branches.find_one({"id": d["branch_id"]}, {"_id": 0, "name": 1})
+        d["branch_name"] = branch["name"] if branch else ""
+    return docs
+
+
+@api.post("/sales")
+async def record_sale(body: SaleIn, user: dict = Depends(get_current_user)):
+    if body.quantity <= 0 or body.rate < 0 or body.amount < 0:
+        raise HTTPException(status_code=400, detail="Invalid quantity, rate, or amount")
+        
+    cust = await db.customers.find_one({"id": body.customer_id})
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    branch = await db.branches.find_one({"id": body.branch_id})
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+        
+    s = {
+        "id": str(uuid.uuid4()),
+        "customer_id": body.customer_id,
+        "branch_id": body.branch_id,
+        "item_name": body.item_name,
+        "quantity": body.quantity,
+        "rate": body.rate,
+        "amount": body.amount,
+        "payment_mode": body.payment_mode,
+        "remarks": body.remarks or "",
+        "sale_date": body.sale_date or date.today().isoformat(),
+        "created_at": now_utc().isoformat(),
+        "created_by": user["id"]
     }
-    await db.payments.insert_one(dict(p))
-    totals = await recompute_batch_totals(b)
-    await db.batches.update_one({"id": body.batch_id}, {"$set": totals})
-    await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"]})
-    return clean(p)
+    await db.sales.insert_one(dict(s))
+    await audit("create", "sale", s["id"], user, None, {"item_name": s["item_name"], "amount": s["amount"]})
+    return clean(s)
+
+
+@api.delete("/sales/{id}")
+async def delete_sale(id: str, user: dict = Depends(require_roles("Admin", "Manager"))):
+    s = await db.sales.find_one({"id": id})
+    if not s:
+        raise HTTPException(status_code=404, detail="Sale not found")
+    await db.sales.delete_one({"id": id})
+    await audit("delete", "sale", id, user, None, None)
+    return {"message": "Sale deleted"}
 
 
 # ---------------------------- EXPENSES ----------------------------
@@ -2407,9 +2623,7 @@ async def dashboard(
     processing_weight = round(sum(b.get("raw_weight", 0) for b in processing_docs), 2)
     processing_count = len(processing_docs)
 
-    pending_payments = round(
-        sum(b.get("balance_amount", 0) for b in all_batches if b.get("balance_amount", 0) > 0), 2
-    )
+    pending_payments = max(0.00, round(sum(b.get("balance_amount", 0) for b in all_batches), 2))
 
     machines_running = sum(1 for m in machines if m["status"] == "Running")
     machines_available = sum(1 for m in machines if m["status"] == "Available")
@@ -2455,64 +2669,117 @@ async def dashboard_arrivals(
 ):
     """List arrivals + processing + deliveries with customer + branch + weights."""
     pstart, pend = _parse_range(start, end)
+    
+    # Scoping
+    where_clauses = ["1=1"]
+    params = []
+    
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
-        bq = {"branch_id": branch_id}
+        where_clauses.append("b.branch_id = %s")
+        params.append(branch_id)
     else:
-        bq = branch_query(user)
-
-    ins = await db.batches.find(
-        {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
-    ).sort("created_at", -1).to_list(1000)
-
-    outs = await db.batches.find(
-        {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
-    ).sort("delivery.delivery_date", -1).to_list(1000)
-
-    processing = await db.batches.find(
-        {**bq, "status": {"$in": ["Received", "Loaded", "Drying", "Completed"]}}, {"_id": 0}
-    ).sort("created_at", -1).to_list(1000)
-
-    # Branch lookup cache
-    branches = {b["id"]: b["name"] for b in await db.branches.find({}, {"_id": 0}).to_list(200)}
-
-    async def enrich(b: dict):
-        cust = await db.customers.find_one({"id": b["customer_id"]}, {"_id": 0, "name": 1, "code": 1, "mobile": 1})
-        prod = await db.products.find_one({"id": b["product_id"]}, {"_id": 0, "name": 1})
+        role = user.get("role")
+        bid = user.get("branch_id")
+        if role != "Admin" and bid:
+            where_clauses.append("b.branch_id = %s")
+            params.append(bid)
+            
+    where_str = " AND ".join(where_clauses)
+    
+    # 1. Fetch ins (arrivals in date range)
+    in_sql = f"""
+        SELECT 
+            b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
+            b.arrival_date, b.created_at, b.raw_weight, b.actual_dry_weight, b.status,
+            b.delivered_at as delivery_date,
+            c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
+            p.name as product_name,
+            br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE {where_str} AND b.created_at >= %s AND b.created_at < %s
+        ORDER BY b.created_at DESC
+        LIMIT 1000
+    """
+    in_rows = await db.query(in_sql, params + [pstart, pend])
+    
+    # 2. Fetch outs (deliveries in date range)
+    out_sql = f"""
+        SELECT 
+            b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
+            b.arrival_date, b.created_at, b.raw_weight, b.actual_dry_weight, b.status,
+            b.delivered_at as delivery_date,
+            c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
+            p.name as product_name,
+            br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE {where_str} AND b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s
+        ORDER BY b.delivered_at DESC
+        LIMIT 1000
+    """
+    out_rows = await db.query(out_sql, params + [pstart, pend])
+    
+    # 3. Fetch active processing batches
+    proc_sql = f"""
+        SELECT 
+            b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
+            b.arrival_date, b.created_at, b.raw_weight, b.actual_dry_weight, b.status,
+            b.delivered_at as delivery_date,
+            c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
+            p.name as product_name,
+            br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE {where_str} AND b.status IN ('Received', 'Loaded', 'Drying', 'Completed')
+        ORDER BY b.created_at DESC
+        LIMIT 1000
+    """
+    proc_rows = await db.query(proc_sql, params)
+    
+    def format_row(r):
+        d = dict(r)
         return {
-            "batch_id": b["id"],
-            "batch_no": b["batch_no"],
-            "customer_name": cust["name"] if cust else "",
-            "customer_code": cust["code"] if cust else "",
-            "customer_mobile": cust["mobile"] if cust else "",
-            "product": prod["name"] if prod else "",
-            "branch_id": b.get("branch_id"),
-            "branch_name": branches.get(b.get("branch_id"), "-"),
-            "arrival_date": b.get("arrival_date") or b["created_at"],
-            "raw_weight": b.get("raw_weight", 0),
-            "actual_dry_weight": b.get("actual_dry_weight"),
-            "delivery_date": (b.get("delivery") or {}).get("delivery_date"),
-            "status": b["status"],
+            "batch_id": d["batch_id"],
+            "batch_no": d["batch_no"],
+            "customer_name": d.get("customer_name") or "",
+            "customer_code": d.get("customer_code") or "",
+            "customer_mobile": d.get("customer_mobile") or "",
+            "product": d.get("product_name") or "",
+            "branch_id": d.get("branch_id"),
+            "branch_name": d.get("branch_name") or "-",
+            "arrival_date": d.get("arrival_date") or d["created_at"],
+            "raw_weight": float(d.get("raw_weight") or 0),
+            "actual_dry_weight": float(d["actual_dry_weight"]) if d.get("actual_dry_weight") is not None else None,
+            "delivery_date": d.get("delivery_date"),
+            "status": d["status"],
         }
-
-    in_rows = [await enrich(b) for b in ins]
-    out_rows = [await enrich(b) for b in outs]
-    proc_rows = [await enrich(b) for b in processing]
-
-    total_in = round(sum(r["raw_weight"] for r in in_rows), 2)
-    total_out = round(sum((r["actual_dry_weight"] or 0) for r in out_rows), 2)
-    total_proc = round(sum(r["raw_weight"] for r in proc_rows), 2)
-
+        
+    in_list = [format_row(r) for r in in_rows]
+    out_list = [format_row(r) for r in out_rows]
+    proc_list = [format_row(r) for r in proc_rows]
+    
+    total_in = round(sum(r["raw_weight"] for r in in_list), 2)
+    total_out = round(sum((r["actual_dry_weight"] or 0) for r in out_list), 2)
+    total_proc = round(sum(r["raw_weight"] for r in proc_list), 2)
+    
     return {
         "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
         "totals": {
             "in_weight": total_in, "out_weight": total_out, "processing_weight": total_proc,
-            "in_count": len(in_rows), "out_count": len(out_rows), "processing_count": len(proc_rows),
+            "in_count": len(in_list), "out_count": len(out_list), "processing_count": len(proc_list),
         },
-        "in": in_rows,
-        "out": out_rows,
-        "processing": proc_rows,
+        "in": in_list,
+        "out": out_list,
+        "processing": proc_list,
     }
 
 
@@ -2524,7 +2791,8 @@ async def reports_summary(user: dict = Depends(get_current_user)):
 
     total_collection = round(sum(p["amount"] for p in all_pay), 2)
     total_expense = round(sum(e["amount"] for e in all_exp), 2)
-    pending_payments = round(sum(b.get("balance_amount", 0) for b in all_batches if b.get("balance_amount", 0) > 0), 2)
+    total_billed = round(sum(b.get("bill_amount", 0) for b in all_batches), 2)
+    pending_payments = max(0.00, round(total_billed - total_collection, 2))
     pending_deliveries = sum(1 for b in all_batches if b.get("status") not in ("Delivered",))
 
     # Machine utilization %

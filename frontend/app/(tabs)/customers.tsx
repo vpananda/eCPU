@@ -20,6 +20,8 @@ export default function CustomersScreen() {
   const [filter, setFilter] = useState("Active");
   const [loading, setLoading] = useState(true);
   const [branchModalOpen, setBranchModalOpen] = useState(false);
+  const [paymentFilter, setPaymentFilter] = useState<"All" | "FullyPaid" | "PartialPaid" | "NoPayment">("All");
+  const [sortBy, setSortBy] = useState<"name" | "arrivals" | "billed" | "pending">("name");
 
   const load = useCallback(async (search = "", currentFilter = filter) => {
     setLoading(true);
@@ -39,10 +41,48 @@ export default function CustomersScreen() {
     load(q, filter);
   }, [load, q, filter]));
 
-  const filteredList = list.filter(item => {
-    if (!selectedBranchId) return true;
-    return item.branch_id === selectedBranchId;
-  });
+  const processedList = React.useMemo(() => {
+    let result = list.filter(item => {
+      if (selectedBranchId && item.branch_id !== selectedBranchId) return false;
+      return true;
+    });
+
+    if (paymentFilter === "FullyPaid") {
+      result = result.filter(item => {
+        const billed = item.total_amount || 0;
+        const rec = item.amount_received || 0;
+        return billed > 0 && billed === rec;
+      });
+    } else if (paymentFilter === "PartialPaid") {
+      result = result.filter(item => {
+        const billed = item.total_amount || 0;
+        const rec = item.amount_received || 0;
+        return rec > 0 && rec < billed;
+      });
+    } else if (paymentFilter === "NoPayment") {
+      result = result.filter(item => {
+        const billed = item.total_amount || 0;
+        const rec = item.amount_received || 0;
+        return billed > 0 && rec === 0;
+      });
+    }
+
+    if (sortBy === "name") {
+      result.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    } else if (sortBy === "arrivals") {
+      result.sort((a, b) => (b.total_arrivals || 0) - (a.total_arrivals || 0));
+    } else if (sortBy === "billed") {
+      result.sort((a, b) => (b.total_amount || 0) - (a.total_amount || 0));
+    } else if (sortBy === "pending") {
+      result.sort((a, b) => {
+        const pendA = (a.total_amount || 0) - (a.amount_received || 0);
+        const pendB = (b.total_amount || 0) - (b.amount_received || 0);
+        return pendB - pendA;
+      });
+    }
+
+    return result;
+  }, [list, selectedBranchId, paymentFilter, sortBy]);
 
   return (
     <View style={styles.safe}>
@@ -51,7 +91,7 @@ export default function CustomersScreen() {
           <Text style={styles.title}>Customers</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
             <Text style={styles.subtitle}>
-              {filteredList.length} {filter === "All" ? "total" : filter.toLowerCase()}
+              {processedList.length} {filter === "All" ? "total" : filter.toLowerCase()}
             </Text>
             {user?.role === "Admin" && (
               <TouchableOpacity
@@ -111,13 +151,103 @@ export default function CustomersScreen() {
         ) : null}
       </View>
 
+      {/* Payment Filter Row */}
+      <View style={{ marginBottom: spacing.xs, marginTop: spacing.xs }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+          <TouchableOpacity
+            testID="customers-pay-filter-all"
+            style={[styles.smallChip, paymentFilter === "All" && styles.chipSelected]}
+            onPress={() => setPaymentFilter("All")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="credit-card-outline" size={14} color={paymentFilter === "All" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "All" && { color: "#fff" }]}>All Payments</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            testID="customers-pay-filter-fully"
+            style={[styles.smallChip, paymentFilter === "FullyPaid" && styles.chipSelected]}
+            onPress={() => setPaymentFilter("FullyPaid")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="check-circle-outline" size={14} color={paymentFilter === "FullyPaid" ? "#fff" : colors.success} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "FullyPaid" && { color: "#fff" }]}>Fully Paid</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="customers-pay-filter-partial"
+            style={[styles.smallChip, paymentFilter === "PartialPaid" && styles.chipSelected]}
+            onPress={() => setPaymentFilter("PartialPaid")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="alert-circle-outline" size={14} color={paymentFilter === "PartialPaid" ? "#fff" : colors.accent} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "PartialPaid" && { color: "#fff" }]}>Partially Paid</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="customers-pay-filter-none"
+            style={[styles.smallChip, paymentFilter === "NoPayment" && styles.chipSelected]}
+            onPress={() => setPaymentFilter("NoPayment")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="close-circle-outline" size={14} color={paymentFilter === "NoPayment" ? "#fff" : colors.danger} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, paymentFilter === "NoPayment" && { color: "#fff" }]}>No Payment</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      {/* Sort Options Row */}
+      <View style={{ marginBottom: spacing.xs }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+          <TouchableOpacity
+            testID="customers-sort-name"
+            style={[styles.smallChip, sortBy === "name" && styles.chipSelected]}
+            onPress={() => setSortBy("name")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="sort-alphabetical-ascending" size={14} color={sortBy === "name" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "name" && { color: "#fff" }]}>Name</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="customers-sort-arrivals"
+            style={[styles.smallChip, sortBy === "arrivals" && styles.chipSelected]}
+            onPress={() => setSortBy("arrivals")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="history" size={14} color={sortBy === "arrivals" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "arrivals" && { color: "#fff" }]}>Arrivals</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="customers-sort-billed"
+            style={[styles.smallChip, sortBy === "billed" && styles.chipSelected]}
+            onPress={() => setSortBy("billed")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="cash" size={14} color={sortBy === "billed" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "billed" && { color: "#fff" }]}>Total Billed</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="customers-sort-pending"
+            style={[styles.smallChip, sortBy === "pending" && styles.chipSelected]}
+            onPress={() => setSortBy("pending")}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="cash-minus" size={14} color={sortBy === "pending" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.smallChipText, sortBy === "pending" && { color: "#fff" }]}>Highest Pending</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
 
 
       {loading ? (
         <View style={{ paddingVertical: 40, alignItems: "center" }}><Loader size={60} /></View>
       ) : (
         <FlatList
-          data={filteredList}
+          data={processedList}
           keyExtractor={i => i.id}
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.md }}
           ListEmptyComponent={() => (
@@ -366,4 +496,17 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.textMuted,
   },
+  smallChip: { 
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12, 
+    height: 28, 
+    borderRadius: radius.pill, 
+    backgroundColor: colors.card, 
+    borderWidth: 1, 
+    borderColor: colors.border, 
+    justifyContent: "center", 
+    flexShrink: 0 
+  },
+  smallChipText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
 });

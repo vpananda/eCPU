@@ -48,7 +48,7 @@ async function takeWithCamera(): Promise<string | null> {
 export default function ExpenseForm() {
   const router = useRouter();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, branches: authBranches } = useAuth();
   const { id } = useLocalSearchParams<{ id?: string }>();
 
   const isAdmin = user?.role === "Admin";
@@ -59,31 +59,25 @@ export default function ExpenseForm() {
   const [vendor, setVendor] = useState("");
   const [remarks, setRemarks] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
-  const [branches, setBranches] = useState<any[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [photoSheet, setPhotoSheet] = useState(false);
 
+  const displayBranches = isAdmin
+    ? authBranches
+    : authBranches.filter(b => b.id === user?.branch_id);
+
   useEffect(() => {
-    api<any[]>("/branches")
-      .then(list => {
-        if (isAdmin) {
-          setBranches(list);
-          if (!id && user?.branch_id) {
-            setBranchId(user.branch_id);
-          }
-        } else {
-          const filtered = list.filter(b => b.id === user?.branch_id);
-          setBranches(filtered);
-          if (filtered.length && !id) {
-            setBranchId(filtered[0].id);
-          }
-        }
-      })
-      .catch(() => {});
-  }, [isAdmin, user, id]);
+    if (!id && displayBranches.length && !branchId) {
+      if (isAdmin && user?.branch_id) {
+        setBranchId(user.branch_id);
+      } else if (!isAdmin) {
+        setBranchId(displayBranches[0].id);
+      }
+    }
+  }, [displayBranches, id, isAdmin, user, branchId]);
 
   useEffect(() => {
     setLoading(true);
@@ -200,7 +194,7 @@ export default function ExpenseForm() {
               placeholder="Select branch"
               value={branchId}
               onChange={setBranchId}
-              options={branches.map(b => ({ id: b.id, name: b.name }))}
+              options={displayBranches.map(b => ({ id: b.id, name: b.name }))}
             />
 
             <Picker

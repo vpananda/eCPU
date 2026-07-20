@@ -60,6 +60,8 @@ const DATE_PRESETS = [
   { key: "yesterday", label: "Yesterday" },
   { key: "week", label: "This Week" },
   { key: "month", label: "This Month" },
+  { key: "fy_25_26", label: "25-26" },
+  { key: "fy_26_27", label: "26-27" },
 ];
 
 export default function Dashboard() {
@@ -134,6 +136,12 @@ export default function Dashboard() {
       s = d.toISOString().slice(0, 10);
     } else if (key === "month") {
       s = monthStartISO();
+    } else if (key === "fy_25_26") {
+      s = "2025-04-01";
+      e = "2026-03-31";
+    } else if (key === "fy_26_27") {
+      s = "2026-04-01";
+      e = "2027-03-31";
     }
 
     setStart(s);
@@ -308,29 +316,44 @@ export default function Dashboard() {
                   Finance Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})
                 </Text>
                 <View style={styles.threeCardRow}>
-                  <View style={styles.smallKpiCard}>
+                  <TouchableOpacity
+                    testID="db-billed-kpi"
+                    style={styles.smallKpiCard}
+                    onPress={() => router.push("/batches")}
+                    activeOpacity={0.7}
+                  >
                     <View style={[styles.kpiIconWrap, { backgroundColor: "#E3F2FD" }]}>
                       <MaterialCommunityIcons name="text-box-outline" size={18} color="#1565C0" />
                     </View>
                     <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum((data as any)?.period_billed || 0, "₹")}</Text>
                     <Text style={styles.smallKpiLabel}>Total Billed</Text>
-                  </View>
+                  </TouchableOpacity>
 
-                  <View style={styles.smallKpiCard}>
+                  <TouchableOpacity
+                    testID="db-collection-kpi"
+                    style={styles.smallKpiCard}
+                    onPress={() => router.push("/payments")}
+                    activeOpacity={0.7}
+                  >
                     <View style={[styles.kpiIconWrap, { backgroundColor: "#E8F5E9" }]}>
                       <MaterialCommunityIcons name="currency-inr" size={18} color={colors.success} />
                     </View>
                     <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_collection || 0, "₹")}</Text>
                     <Text style={styles.smallKpiLabel}>Collection</Text>
-                  </View>
+                  </TouchableOpacity>
 
-                  <View style={styles.smallKpiCard}>
+                  <TouchableOpacity
+                    testID="db-pending-kpi"
+                    style={styles.smallKpiCard}
+                    onPress={() => router.push("/payment-picker")}
+                    activeOpacity={0.7}
+                  >
                     <View style={[styles.kpiIconWrap, { backgroundColor: "#FFEBEE" }]}>
                       <MaterialCommunityIcons name="wallet-outline" size={18} color={colors.danger} />
                     </View>
                     <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.pending_payments || 0, "₹")}</Text>
                     <Text style={styles.smallKpiLabel}>Pending</Text>
-                  </View>
+                  </TouchableOpacity>
                 </View>
               </>
             )}

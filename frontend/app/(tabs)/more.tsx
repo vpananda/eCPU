@@ -12,6 +12,7 @@ const LOGO = require("../../assets/images/e3logo.png");
 const ITEMS_BASE = [
   { key: "batches", label: "All Batches", icon: "package-variant-closed", route: "/batches", color: "#2E7D32" },
   { key: "payments", label: "Payments", icon: "cash-multiple", route: "/payments", color: "#43A047" },
+  { key: "sales", label: "Sales Logs", icon: "tag-multiple", route: "/sales", color: "#EF6C00" },
   { key: "expenses", label: "Expenses", icon: "cash-minus", route: "/expenses", color: "#F57C00" },
   { key: "reports", label: "Reports", icon: "chart-bar", route: "/reports", color: "#1565C0" },
   { key: "maintenance", label: "Maintenance", icon: "wrench", route: "/maintenance", color: "#7B1FA2" },

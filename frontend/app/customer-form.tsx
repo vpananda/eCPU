@@ -14,31 +14,22 @@ import { colors, spacing } from "@/src/theme";
 export default function CustomerForm() {
   const router = useRouter();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, branches } = useAuth();
   
   const [form, setForm] = useState({
     name: "", mobile: "", alt_mobile: "", village: "", taluk: "", district: "", address: "", gst: "", remarks: "", branch_id: "",
   });
-  const [branches, setBranches] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const list = await api<any[]>("/branches");
-        setBranches(list);
-        if (user) {
-          if (user.role === "Admin") {
-            setForm(f => ({ ...f, branch_id: user.branch_id || list[0]?.id || "" }));
-          } else {
-            setForm(f => ({ ...f, branch_id: user.branch_id || "" }));
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load branches", e);
+    if (user) {
+      if (user.role === "Admin") {
+        setForm(f => ({ ...f, branch_id: f.branch_id || user.branch_id || branches[0]?.id || "" }));
+      } else {
+        setForm(f => ({ ...f, branch_id: user.branch_id || "" }));
       }
-    })();
-  }, [user]);
+    }
+  }, [user, branches]);
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
 

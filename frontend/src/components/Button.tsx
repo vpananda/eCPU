@@ -1,5 +1,4 @@
-import React from "react";
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, ViewStyle, StyleProp } from "react-native";
+import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, ViewStyle, TextStyle, StyleProp } from "react-native";
 import { colors, radius, spacing } from "@/src/theme";
 
 type Props = {
@@ -11,10 +10,11 @@ type Props = {
   disabled?: boolean;
   testID?: string;
   style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
   icon?: React.ReactNode;
 };
 
-export function Button({ title, onPress, variant = "primary", size = "md", loading, disabled, testID, style, icon }: Props) {
+export function Button({ title, onPress, variant = "primary", size = "md", loading, disabled, testID, style, textStyle, icon }: Props) {
   const isDisabled = disabled || loading;
   const bg =
     variant === "primary" ? colors.primary :
@@ -43,7 +43,7 @@ export function Button({ title, onPress, variant = "primary", size = "md", loadi
       ) : (
         <>
           {icon}
-          <Text style={[styles.text, { color: textColor, fontSize: font }]}>{title}</Text>
+          <Text style={[styles.text, { color: textColor, fontSize: font }, textStyle]}>{title}</Text>
         </>
       )}
     </TouchableOpacity>

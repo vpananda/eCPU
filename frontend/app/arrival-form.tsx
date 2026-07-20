@@ -54,13 +54,12 @@ async function takeWithCamera(): Promise<string | null> {
 export default function ArrivalForm() {
   const router = useRouter();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, branches } = useAuth();
 
   const isAdmin = user?.role === "Admin";
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   const [branchId, setBranchId] = useState<string | null>(null);
@@ -77,21 +76,23 @@ export default function ArrivalForm() {
   const [photoSheet, setPhotoSheet] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const displayBranches = isAdmin
+    ? branches
+    : branches.filter(b => b.id === user?.branch_id);
+
   const load = useCallback(async () => {
     try {
-      const [c, p, b] = await Promise.all([
+      const [c, p] = await Promise.all([
         api<Customer[]>("/customers"),
         api<Product[]>("/products"),
-        api<Branch[]>("/branches"),
       ]);
       setCustomers(c);
       setProducts(p);
-      setBranches(b);
       // Default branch: admin gets first branch, others get their own
       if (user?.role === "Admin") {
-        setBranchId((prev) => prev || b[0]?.id || null);
+        setBranchId((prev) => prev || branches[0]?.id || null);
       } else {
-        setBranchId(user?.branch_id || b[0]?.id || null);
+        setBranchId(user?.branch_id || branches[0]?.id || null);
       }
       // Make default spices as cardamom
       const cardamom = p.find(prod => prod.name.toLowerCase() === "cardamom");
@@ -99,7 +100,7 @@ export default function ArrivalForm() {
         setProductId((prev) => prev || cardamom.id);
       }
     } finally { setLoadingData(false); }
-  }, [user]);
+  }, [user, branches]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -190,7 +191,7 @@ export default function ArrivalForm() {
                 placeholder="Select branch"
                 value={branchId}
                 onChange={setBranchId}
-                options={branches.map(b => ({ id: b.id, name: b.name }))}
+                options={displayBranches.map(b => ({ id: b.id, name: b.name }))}
               />
             ) : (
               <View style={styles.readonlyField}>

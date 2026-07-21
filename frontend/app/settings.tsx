@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
@@ -14,20 +14,37 @@ export default function Settings() {
   const [products, setProducts] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [c, p, m, b] = await Promise.all([
+        api<any>("/settings/company"),
+        api<any[]>("/products"),
+        api<any[]>("/machines"),
+        api<any[]>("/branches"),
+      ]);
+      setCompany(c);
+      setProducts(p);
+      setMachines(m);
+      setBranches(b);
+    } catch (e: any) {
+      setError(e.message || "Failed to load settings data");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    Promise.all([
-      api<any>("/settings/company"),
-      api<any[]>("/products"),
-      api<any[]>("/machines"),
-      api<any[]>("/branches"),
-    ]).then(([c, p, m, b]) => {
-      setCompany(c); setProducts(p); setMachines(m); setBranches(b);
-    });
+    load();
   }, []);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} testID="settings-back">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
@@ -36,7 +53,31 @@ export default function Settings() {
         <View style={{ width: 22 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 100 }}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : error ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl }}>
+          <MaterialCommunityIcons name="alert-circle-outline" size={48} color={colors.danger} />
+          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text, marginTop: spacing.md, textAlign: "center" }}>
+            {error}
+          </Text>
+          <TouchableOpacity
+            onPress={load}
+            style={{
+              marginTop: spacing.lg,
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+              borderRadius: radius.pill,
+              backgroundColor: colors.primary,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700" }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 100 }}>
         <Section title="Company Information">
           <Row label="Name" value={company?.name || "-"} />
           <Row label="Default Rate" value={`₹${company?.default_rate || 0}/kg`} />
@@ -69,6 +110,7 @@ export default function Settings() {
 
         <Text style={styles.footer}>E3 · Post Harvest Processing Unit · v1.0.0</Text>
       </ScrollView>
+      )}
     </SafeAreaView>
   );
 }

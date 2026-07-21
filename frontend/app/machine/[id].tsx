@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
@@ -78,8 +78,9 @@ export default function MachineDetail() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="machine-detail-back">
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBackBtn} testID="machine-detail-back">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>{data.name}</Text>
@@ -93,7 +94,7 @@ export default function MachineDetail() {
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={{ width: 22 }} />
+          <View style={styles.headerBackBtnPlaceholder} />
         )}
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 80 }}>
@@ -205,8 +206,10 @@ export default function MachineDetail() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
-  headerActions: { flexDirection: "row", alignItems: "center" },
-  title: { fontSize: 20, fontWeight: "800", color: colors.text, textAlign: "center", flex: 1 },
+  headerBackBtn: { width: 60, alignItems: "flex-start", justifyContent: "center" },
+  headerBackBtnPlaceholder: { width: 60 },
+  headerActions: { width: 60, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
+  title: { fontSize: 20, fontWeight: "800", color: colors.text, textAlign: "center", flex: 1, marginHorizontal: spacing.xs },
   hero: { alignItems: "center", padding: spacing.xl, gap: 6, backgroundColor: colors.card, borderRadius: radius.xxl, marginBottom: spacing.lg, ...shadow.card },
   iconBox: { width: 88, height: 88, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: spacing.sm },
   machineName: { fontSize: 24, fontWeight: "800", color: colors.text },

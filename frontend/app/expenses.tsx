@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -13,37 +13,30 @@ const CAT_ICONS: Record<string, string> = {
   Electricity: "lightning-bolt", Diesel: "gas-station", "Machine Maintenance": "wrench",
   Repair: "hammer-wrench", Transport: "truck", Packing: "package-variant",
   Salary: "account-cash", Tea: "coffee", "Office Expense": "briefcase", Miscellaneous: "dots-horizontal",
+  "Processing Wages": "account-cash", EB: "lightning-bolt", "Operational Cost": "cash-register",
+  "Building Expenses": "office-building", "Diwali Bonus": "gift", Chemicals: "flask", "Packaging Material": "package-variant"
 };
 
 export default function ExpensesScreen() {
   const router = useRouter();
-  const { user } = useAuth();
-  const isAdmin = user?.role === "Admin";
+  const { user, selectedBranchId } = useAuth();
 
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [branches, setBranches] = useState<any[]>([]);
-  const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [selectedLedger, setSelectedLedger] = useState<any>(null);
   const [draftStart, setDraftStart] = useState<string>("");
   const [draftEnd, setDraftEnd] = useState<string>("");
-
-  useEffect(() => {
-    if (isAdmin) {
-      api<any[]>("/branches")
-        .then(setBranches)
-        .catch(() => {});
-    }
-  }, [isAdmin]);
 
   const load = useCallback(async () => {
     try {
       let url = "/expenses?";
       const params = [];
-      if (selectedBranch) {
-        params.push(`branch_id=${selectedBranch}`);
+      if (selectedBranchId) {
+        params.push(`branch_id=${selectedBranchId}`);
       }
       if (startDate) {
         params.push(`start=${startDate}`);
@@ -64,7 +57,7 @@ export default function ExpensesScreen() {
     } finally {
       setLoading(false);
     }
-  }, [selectedBranch, startDate, endDate]);
+  }, [selectedBranchId, startDate, endDate]);
 
   useFocusEffect(
     useCallback(() => {
@@ -73,6 +66,20 @@ export default function ExpensesScreen() {
   );
 
   const total = list.reduce((s, e) => s + e.amount, 0);
+
+  const groupedList = useMemo(() => {
+    const groups: Record<string, { category: string; total: number; count: number; items: any[] }> = {};
+    for (const item of list) {
+      const cat = item.category || "Miscellaneous";
+      if (!groups[cat]) {
+        groups[cat] = { category: cat, total: 0, count: 0, items: [] };
+      }
+      groups[cat].total += item.amount;
+      groups[cat].count += 1;
+      groups[cat].items.push(item);
+    }
+    return Object.values(groups).sort((a, b) => b.total - a.total);
+  }, [list]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -124,31 +131,24 @@ export default function ExpensesScreen() {
         <MaterialCommunityIcons name="cash-minus" size={40} color="#fff" />
       </View>
 
-      {isAdmin && (
-        <View style={styles.filterContainer}>
-          <Picker
-            testID="expenses-branch-filter"
-            placeholder="All Branches"
-            value={selectedBranch}
-            onChange={setSelectedBranch}
-            options={[{ id: "", name: "All Branches" }, ...branches.map(b => ({ id: b.id, name: b.name }))]}
-          />
-        </View>
-      )}
+
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
-          data={list}
-          keyExtractor={i => i.id}
+          data={groupedList}
+          keyExtractor={i => i.category}
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.sm }}
           ListEmptyComponent={<Text style={styles.empty}>No expenses. Tap + to add.</Text>}
           renderItem={({ item }) => (
             <TouchableOpacity
-              testID={`expense-item-${item.id}`}
+              testID={`expense-item-${item.category.replace(/\s+/g, "-").toLowerCase()}`}
               style={styles.item}
-              onPress={() => router.push(`/expense-form?id=${item.id}`)}
+              onPress={() => {
+                setSelectedLedger(item);
+                setDetailsModalOpen(true);
+              }}
               activeOpacity={0.85}
             >
               <View style={styles.icon}>
@@ -157,16 +157,13 @@ export default function ExpensesScreen() {
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                   <Text style={styles.category}>{item.category}</Text>
-                  {item.branch_name ? (
-                    <View style={styles.branchBadge}>
-                      <Text style={styles.branchBadgeText}>{item.branch_name}</Text>
-                    </View>
-                  ) : null}
+                  <View style={styles.branchBadge}>
+                    <Text style={styles.branchBadgeText}>{item.count} entries</Text>
+                  </View>
                 </View>
-                {item.vendor ? <Text style={styles.vendor}>{item.vendor}</Text> : null}
-                <Text style={styles.date}>{new Date(item.expense_date || item.created_at).toLocaleDateString("en-IN")}</Text>
+                <Text style={styles.date}>Group Total Ledger</Text>
               </View>
-              <Text style={styles.amount}>₹{item.amount.toFixed(2)}</Text>
+              <Text style={styles.amount}>₹{item.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
             </TouchableOpacity>
           )}
         />
@@ -235,6 +232,63 @@ export default function ExpensesScreen() {
                 <Text style={styles.pickerSheetApplyText}>Apply</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Ledger Details Modal */}
+      <Modal
+        visible={detailsModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDetailsModalOpen(false)}
+      >
+        <View style={styles.dateModalBg}>
+          <View style={[styles.pickerSheet, { height: "80%", paddingBottom: 20 }]}>
+            <View style={styles.pickerSheetHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pickerSheetTitle} numberOfLines={1}>{selectedLedger?.category}</Text>
+                <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: "600" }}>
+                  {selectedLedger?.count} entries · Total: ₹{selectedLedger?.total?.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                </Text>
+              </View>
+              <TouchableOpacity testID="ledger-details-close" onPress={() => setDetailsModalOpen(false)} style={{ padding: 4 }}>
+                <MaterialCommunityIcons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={selectedLedger?.items || []}
+              keyExtractor={item => item.id}
+              contentContainerStyle={{ gap: spacing.md, paddingBottom: 40 }}
+              renderItem={({ item }) => (
+                <View style={styles.ledgerItem}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <Text style={styles.ledgerRemarks}>{item.remarks || "No remarks"}</Text>
+                      <TouchableOpacity
+                        testID={`ledger-edit-${item.id}`}
+                        onPress={() => {
+                          setDetailsModalOpen(false);
+                          setTimeout(() => {
+                            router.push(`/expense-form?id=${item.id}`);
+                          }, 100);
+                        }}
+                        style={styles.ledgerEditBtn}
+                      >
+                        <MaterialCommunityIcons name="pencil" size={16} color={colors.primary} />
+                      </TouchableOpacity>
+                    </View>
+                    {item.vendor ? <Text style={styles.ledgerVendor}>{item.vendor}</Text> : null}
+                    <Text style={styles.ledgerDate}>
+                      {new Date(item.expense_date || item.created_at).toLocaleDateString("en-IN")}
+                    </Text>
+                  </View>
+                  <Text style={styles.ledgerAmount}>₹{item.amount.toFixed(0)}</Text>
+                </View>
+              )}
+            />
           </View>
         </View>
       </Modal>
@@ -396,5 +450,45 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.fab,
+  },
+  ledgerItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.bg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  ledgerRemarks: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  ledgerVendor: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  ledgerDate: {
+    fontSize: 11,
+    color: colors.textLight,
+    marginTop: 4,
+  },
+  ledgerAmount: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.danger,
+    marginLeft: spacing.md,
+  },
+  ledgerEditBtn: {
+    padding: 4,
+    backgroundColor: colors.card,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
 });

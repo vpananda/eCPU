@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { Platform } from "react-native";
+import { Platform, Alert } from "react-native";
 import * as Linking from "expo-linking";
 import { api, setToken, clearToken, getToken } from "@/src/api";
 import { startGoogleLogin, fetchSessionData, exchangeWithBackend, extractSessionId } from "@/src/google-auth";
@@ -47,8 +47,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const list = await api<{ id: string; name: string }[]>("/branches");
       setBranches(list);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to load branches in AuthProvider", e);
+      Alert.alert("Failed to load branches", e.message || String(e));
     }
   }, []);
 

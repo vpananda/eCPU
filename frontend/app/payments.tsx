@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, TextInput, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -12,6 +12,21 @@ const MODE_COLORS: Record<string, string> = {
   Cash: "#43A047", UPI: "#7B1FA2", Bank: "#1565C0", Credit: "#F57C00",
 };
 
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function monthStartISO() {
+  const d = new Date(); d.setDate(1);
+  return d.toISOString().slice(0, 10);
+}
+
+const DATE_PRESETS = [
+  { key: "all", label: "All" },
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "month", label: "This Month" },
+  { key: "fy_25_26", label: "25-26" },
+  { key: "fy_26_27", label: "26-27" },
+];
+
 export default function PaymentsScreen() {
   const router = useRouter();
   const { selectedBranchId } = useAuth();
@@ -22,7 +37,37 @@ export default function PaymentsScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [draftStart, setDraftStart] = useState<string>("");
   const [draftEnd, setDraftEnd] = useState<string>("");
+  const [activePreset, setActivePreset] = useState("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+
+  const applyPreset = (key: string) => {
+    setActivePreset(key);
+    const today = new Date();
+    let s = "";
+    let e = "";
+
+    if (key === "today") {
+      s = todayISO();
+      e = todayISO();
+    } else if (key === "yesterday") {
+      const d = new Date();
+      d.setDate(today.getDate() - 1);
+      s = d.toISOString().slice(0, 10);
+      e = s;
+    } else if (key === "month") {
+      s = monthStartISO();
+      e = todayISO();
+    } else if (key === "fy_25_26") {
+      s = "2025-04-01";
+      e = "2026-03-31";
+    } else if (key === "fy_26_27") {
+      s = "2026-04-01";
+      e = "2027-03-31";
+    }
+
+    setStartDate(s);
+    setEndDate(e);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,37 +109,36 @@ export default function PaymentsScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
 
-      <View style={styles.dateFilterWrapper}>
-        <TouchableOpacity
-          testID="payments-date-filter"
-          style={styles.dateFilterTrigger}
-          onPress={() => {
-            setDraftStart(startDate);
-            setDraftEnd(endDate);
-            setPickerOpen(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <MaterialCommunityIcons name="calendar" size={18} color={colors.textMuted} />
-          <Text style={startDate && endDate ? styles.dateFilterText : styles.dateFilterPlaceholder}>
-            {startDate && endDate ? `${startDate} to ${endDate}` : "Filter by Date"}
-          </Text>
-          {startDate || endDate ? (
+      <View style={styles.dateFilterContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateScroll}>
+          {DATE_PRESETS.map(p => (
             <TouchableOpacity
-              testID="payments-clear-date"
-              onPress={(e) => {
-                e.stopPropagation();
-                setStartDate("");
-                setEndDate("");
-              }}
-              style={styles.clearDateBtn}
+              key={p.key}
+              onPress={() => applyPreset(p.key)}
+              style={[styles.datePill, activePreset === p.key && styles.datePillActive]}
+              activeOpacity={0.8}
             >
-              <MaterialCommunityIcons name="close-circle" size={16} color={colors.textLight} />
+              <Text style={[styles.datePillText, activePreset === p.key && styles.datePillTextActive]}>
+                {p.label}
+              </Text>
             </TouchableOpacity>
-          ) : (
-            <MaterialCommunityIcons name="chevron-down" size={20} color={colors.textMuted} />
-          )}
-        </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            onPress={() => {
+              setActivePreset("custom");
+              setDraftStart(startDate);
+              setDraftEnd(endDate);
+              setPickerOpen(true);
+            }}
+            style={[styles.datePill, activePreset === "custom" && styles.datePillActive]}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="calendar-range" size={14} color={activePreset === "custom" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.datePillText, activePreset === "custom" && styles.datePillTextActive]}>
+              {startDate && endDate ? `${startDate} to ${endDate}` : "Custom"}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Customer Name Search Bar */}
@@ -375,4 +419,38 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   searchInput: { flex: 1, paddingVertical: 12, fontSize: 14, color: colors.text },
+  dateFilterContainer: {
+    paddingVertical: spacing.md,
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  dateScroll: {
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+  },
+  datePill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  datePillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  datePillText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  datePillTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
 });

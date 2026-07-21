@@ -8,6 +8,7 @@ import { useAuth } from "@/src/auth";
 import { Picker } from "@/src/components/Picker";
 import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { ScrollView } from "react-native";
 
 const CAT_ICONS: Record<string, string> = {
   Electricity: "lightning-bolt", Diesel: "gas-station", "Machine Maintenance": "wrench",
@@ -16,6 +17,21 @@ const CAT_ICONS: Record<string, string> = {
   "Processing Wages": "account-cash", EB: "lightning-bolt", "Operational Cost": "cash-register",
   "Building Expenses": "office-building", "Diwali Bonus": "gift", Chemicals: "flask", "Packaging Material": "package-variant"
 };
+
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+function monthStartISO() {
+  const d = new Date(); d.setDate(1);
+  return d.toISOString().slice(0, 10);
+}
+
+const DATE_PRESETS = [
+  { key: "all", label: "All" },
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "month", label: "This Month" },
+  { key: "fy_25_26", label: "25-26" },
+  { key: "fy_26_27", label: "26-27" },
+];
 
 export default function ExpensesScreen() {
   const router = useRouter();
@@ -30,6 +46,37 @@ export default function ExpensesScreen() {
   const [selectedLedger, setSelectedLedger] = useState<any>(null);
   const [draftStart, setDraftStart] = useState<string>("");
   const [draftEnd, setDraftEnd] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"grouped" | "detailed">("grouped");
+  const [activePreset, setActivePreset] = useState("all");
+
+  const applyPreset = (key: string) => {
+    setActivePreset(key);
+    const today = new Date();
+    let s = "";
+    let e = "";
+
+    if (key === "today") {
+      s = todayISO();
+      e = todayISO();
+    } else if (key === "yesterday") {
+      const d = new Date();
+      d.setDate(today.getDate() - 1);
+      s = d.toISOString().slice(0, 10);
+      e = s;
+    } else if (key === "month") {
+      s = monthStartISO();
+      e = todayISO();
+    } else if (key === "fy_25_26") {
+      s = "2025-04-01";
+      e = "2026-03-31";
+    } else if (key === "fy_26_27") {
+      s = "2026-04-01";
+      e = "2027-03-31";
+    }
+
+    setStartDate(s);
+    setEndDate(e);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -78,43 +125,42 @@ export default function ExpensesScreen() {
       groups[cat].count += 1;
       groups[cat].items.push(item);
     }
-    return Object.values(groups).sort((a, b) => b.total - a.total);
+    return Object.values(groups).sort((a, b) => a.category.localeCompare(b.category));
   }, [list]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
 
-      <View style={styles.dateFilterWrapper}>
-        <TouchableOpacity
-          testID="expenses-date-filter"
-          style={styles.dateFilterTrigger}
-          onPress={() => {
-            setDraftStart(startDate);
-            setDraftEnd(endDate);
-            setPickerOpen(true);
-          }}
-          activeOpacity={0.85}
-        >
-          <MaterialCommunityIcons name="calendar" size={18} color={colors.textMuted} />
-          <Text style={startDate && endDate ? styles.dateFilterText : styles.dateFilterPlaceholder}>
-            {startDate && endDate ? `${startDate} to ${endDate}` : "Filter by Date"}
-          </Text>
-          {startDate || endDate ? (
+      <View style={styles.dateFilterContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateScroll}>
+          {DATE_PRESETS.map(p => (
             <TouchableOpacity
-              testID="expenses-clear-date"
-              onPress={(e) => {
-                e.stopPropagation();
-                setStartDate("");
-                setEndDate("");
-              }}
-              style={styles.clearDateBtn}
+              key={p.key}
+              onPress={() => applyPreset(p.key)}
+              style={[styles.datePill, activePreset === p.key && styles.datePillActive]}
+              activeOpacity={0.8}
             >
-              <MaterialCommunityIcons name="close-circle" size={16} color={colors.textLight} />
+              <Text style={[styles.datePillText, activePreset === p.key && styles.datePillTextActive]}>
+                {p.label}
+              </Text>
             </TouchableOpacity>
-          ) : (
-            <MaterialCommunityIcons name="chevron-down" size={20} color={colors.textMuted} />
-          )}
-        </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            onPress={() => {
+              setActivePreset("custom");
+              setDraftStart(startDate);
+              setDraftEnd(endDate);
+              setPickerOpen(true);
+            }}
+            style={[styles.datePill, activePreset === "custom" && styles.datePillActive]}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="calendar-range" size={14} color={activePreset === "custom" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+            <Text style={[styles.datePillText, activePreset === "custom" && styles.datePillTextActive]}>
+              {startDate && endDate ? `${startDate} to ${endDate}` : "Custom"}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       <View style={styles.totalCard}>
@@ -133,39 +179,90 @@ export default function ExpensesScreen() {
 
 
 
+      {/* View Mode Toggle Segmented Control */}
+      <View style={styles.toggleContainer}>
+        <TouchableOpacity
+          testID="mode-grouped"
+          style={[styles.toggleBtn, viewMode === "grouped" && styles.toggleBtnActive]}
+          onPress={() => setViewMode("grouped")}
+        >
+          <MaterialCommunityIcons name="view-dashboard-outline" size={18} color={viewMode === "grouped" ? "#fff" : colors.textMuted} />
+          <Text style={[styles.toggleText, viewMode === "grouped" && styles.toggleTextActive]}>Grouped</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="mode-detailed"
+          style={[styles.toggleBtn, viewMode === "detailed" && styles.toggleBtnActive]}
+          onPress={() => setViewMode("detailed")}
+        >
+          <MaterialCommunityIcons name="format-list-bulleted" size={18} color={viewMode === "detailed" ? "#fff" : colors.textMuted} />
+          <Text style={[styles.toggleText, viewMode === "detailed" && styles.toggleTextActive]}>Detailed</Text>
+        </TouchableOpacity>
+      </View>
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
         <FlatList
-          data={groupedList}
-          keyExtractor={i => i.category}
+          data={viewMode === "grouped" ? groupedList : list}
+          keyExtractor={i => viewMode === "grouped" ? i.category : i.id}
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.sm }}
           ListEmptyComponent={<Text style={styles.empty}>No expenses. Tap + to add.</Text>}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              testID={`expense-item-${item.category.replace(/\s+/g, "-").toLowerCase()}`}
-              style={styles.item}
-              onPress={() => {
-                setSelectedLedger(item);
-                setDetailsModalOpen(true);
-              }}
-              activeOpacity={0.85}
-            >
-              <View style={styles.icon}>
-                <MaterialCommunityIcons name={(CAT_ICONS[item.category] as any) || "cash"} size={20} color={colors.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={styles.category}>{item.category}</Text>
-                  <View style={styles.branchBadge}>
-                    <Text style={styles.branchBadgeText}>{item.count} entries</Text>
+          renderItem={({ item }) => {
+            if (viewMode === "grouped") {
+              return (
+                <TouchableOpacity
+                  testID={`expense-item-${item.category.replace(/\s+/g, "-").toLowerCase()}`}
+                  style={styles.item}
+                  onPress={() => {
+                    setSelectedLedger(item);
+                    setDetailsModalOpen(true);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.icon}>
+                    <MaterialCommunityIcons name={(CAT_ICONS[item.category] as any) || "cash"} size={20} color={colors.accent} />
                   </View>
-                </View>
-                <Text style={styles.date}>Group Total Ledger</Text>
-              </View>
-              <Text style={styles.amount}>₹{item.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
-            </TouchableOpacity>
-          )}
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                      <Text style={styles.category}>{item.category}</Text>
+                      <View style={styles.branchBadge}>
+                        <Text style={styles.branchBadgeText}>{item.count} entries</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.date}>Group Total Ledger</Text>
+                  </View>
+                  <Text style={styles.amount}>₹{item.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+                </TouchableOpacity>
+              );
+            } else {
+              return (
+                <TouchableOpacity
+                  testID={`expense-item-${item.id}`}
+                  style={styles.item}
+                  onPress={() => router.push(`/expense-form?id=${item.id}`)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.icon}>
+                    <MaterialCommunityIcons name={(CAT_ICONS[item.category] as any) || "cash"} size={20} color={colors.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                      <Text style={styles.category}>{item.category}</Text>
+                      {item.branch_name ? (
+                        <View style={styles.branchBadge}>
+                          <Text style={styles.branchBadgeText}>{item.branch_name}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    {item.vendor ? <Text style={styles.vendor}>{item.vendor}</Text> : null}
+                    {item.remarks ? <Text style={styles.vendor} numberOfLines={1}>{item.remarks}</Text> : null}
+                    <Text style={styles.date}>{new Date(item.expense_date || item.created_at).toLocaleDateString("en-IN")}</Text>
+                  </View>
+                  <Text style={styles.amount}>₹{item.amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
+                </TouchableOpacity>
+              );
+            }
+          }}
         />
       )}
 
@@ -490,5 +587,69 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  toggleContainer: {
+    flexDirection: "row",
+    backgroundColor: "#E4E9E6",
+    borderRadius: radius.pill,
+    marginHorizontal: spacing.xl,
+    padding: 4,
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
+  toggleBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    gap: 6,
+  },
+  toggleBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  toggleText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  toggleTextActive: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  dateFilterContainer: {
+    paddingVertical: spacing.md,
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    marginBottom: spacing.sm,
+  },
+  dateScroll: {
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+  },
+  datePill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  datePillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  datePillText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  datePillTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
   },
 });

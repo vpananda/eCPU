@@ -535,7 +535,49 @@ class UsersFindCursor(PostgresFindCursor):
 
 class PostgresDBWrapper:
     def __init__(self, dsn):
-        if "@2026@" in dsn:
+        import socket
+        if dsn and "://" in dsn:
+            try:
+                prefix, rest = dsn.split("://", 1)
+                if "?" in rest:
+                    main_part, params_part = rest.split("?", 1)
+                else:
+                    main_part, params_part = rest, ""
+                parts = main_part.rsplit("@", 1)
+                if len(parts) == 2:
+                    creds, host_db = parts
+                else:
+                    creds, host_db = "", parts[0]
+                if "/" in host_db:
+                    host_port, db_path = host_db.split("/", 1)
+                else:
+                    host_port, db_path = host_db, ""
+                if ":" in host_port:
+                    host, port = host_port.split(":", 1)
+                else:
+                    host, port = host_port, ""
+                
+                try:
+                    addrinfo = socket.getaddrinfo(host, None, socket.AF_INET6)
+                    if not addrinfo:
+                        addrinfo = socket.getaddrinfo(host, None, socket.AF_INET)
+                    resolved_ip = addrinfo[0][4][0]
+                    
+                    params = {}
+                    if params_part:
+                        for p in params_part.split("&"):
+                            if "=" in p:
+                                k, v = p.split("=", 1)
+                                params[k] = v
+                    params["hostaddr"] = resolved_ip
+                    new_params_part = "&".join(f"{k}={v}" for k, v in params.items())
+                    dsn = f"{prefix}://{creds}@{host_port}/{db_path}?{new_params_part}"
+                except Exception as dns_err:
+                    print(f"Dynamic DNS resolution failed for host {host}: {dns_err}")
+            except Exception as parse_err:
+                print(f"Failed to parse database DSN: {parse_err}")
+
+        if dsn and "@2026@" in dsn:
             dsn = dsn.replace("e3Agro@2026@", "e3Agro%402026@")
         self.dsn = dsn
         self.pool = None
@@ -625,6 +667,15 @@ pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="E3 - Energy Efficient Environment")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO)
@@ -1555,7 +1606,8 @@ async def list_customers(
     user: dict = Depends(get_current_user),
     q: Optional[str] = None,
     branch_id: Optional[str] = None,
-    status: str = "active"
+    status: str = "active",
+    lite: bool = False
 ):
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
@@ -1581,6 +1633,13 @@ async def list_customers(
     docs_task = db.customers.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
     branches_task = db.branches.find({}, {"_id": 0}).to_list(100)
     
+    if lite:
+        docs, branches_list = await asyncio.gather(docs_task, branches_task)
+        branches = {b["id"]: b["name"] for b in branches_list}
+        for doc in docs:
+            doc["branch_name"] = branches.get(doc.get("branch_id"), "-")
+        return docs
+
     target_branch = branch_id or user.get("branch_id") if user.get("role") != "Admin" else branch_id
     if target_branch:
         stats_task = db.query("""
@@ -2686,6 +2745,8 @@ async def dashboard_arrivals(
             where_clauses.append("b.branch_id = %s")
             params.append(bid)
             
+    s_date = start or pstart[:10]
+    e_date = end or pend[:10]
     where_str = " AND ".join(where_clauses)
     
     # 1. Fetch ins (arrivals in date range)
@@ -2696,16 +2757,21 @@ async def dashboard_arrivals(
             b.delivered_at as delivery_date,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
+            m.name as machine_name,
             br.name as branch_name
         FROM public.batches b
         LEFT JOIN public.customers c ON b.customer_id = c.id
         LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
-        WHERE {where_str} AND b.created_at >= %s AND b.created_at < %s
+        WHERE {where_str} AND (
+            (b.created_at >= %s AND b.created_at < %s) OR
+            (b.arrival_date::text >= %s AND b.arrival_date::text <= %s)
+        )
         ORDER BY b.created_at DESC
         LIMIT 1000
     """
-    in_rows = await db.query(in_sql, params + [pstart, pend])
+    in_rows = await db.query(in_sql, params + [pstart, pend, s_date, e_date])
     
     # 2. Fetch outs (deliveries in date range)
     out_sql = f"""
@@ -2715,10 +2781,12 @@ async def dashboard_arrivals(
             b.delivered_at as delivery_date,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
+            m.name as machine_name,
             br.name as branch_name
         FROM public.batches b
         LEFT JOIN public.customers c ON b.customer_id = c.id
         LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
         WHERE {where_str} AND b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s
         ORDER BY b.delivered_at DESC
@@ -2734,12 +2802,14 @@ async def dashboard_arrivals(
             b.delivered_at as delivery_date,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
+            m.name as machine_name,
             br.name as branch_name
         FROM public.batches b
         LEFT JOIN public.customers c ON b.customer_id = c.id
         LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
-        WHERE {where_str} AND b.status IN ('Received', 'Loaded', 'Drying', 'Completed')
+        WHERE {where_str} AND b.status IN ('Loaded', 'Drying', 'Completed')
         ORDER BY b.created_at DESC
         LIMIT 1000
     """
@@ -2754,6 +2824,7 @@ async def dashboard_arrivals(
             "customer_code": d.get("customer_code") or "",
             "customer_mobile": d.get("customer_mobile") or "",
             "product": d.get("product_name") or "",
+            "machine_name": d.get("machine_name") or "",
             "branch_id": d.get("branch_id"),
             "branch_name": d.get("branch_name") or "-",
             "arrival_date": d.get("arrival_date") or d["created_at"],

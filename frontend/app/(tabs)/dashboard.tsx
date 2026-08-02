@@ -284,29 +284,41 @@ export default function Dashboard() {
               Produce Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})
             </Text>
             <View style={styles.threeCardRow}>
-              <View style={styles.smallKpiCard}>
+              <TouchableOpacity
+                style={styles.smallKpiCard}
+                onPress={() => router.push("/arrivals?tab=in")}
+                activeOpacity={0.85}
+              >
                 <View style={[styles.kpiIconWrap, { backgroundColor: `${colors.primary}12` }]}>
                   <MaterialCommunityIcons name="download" size={18} color={colors.primary} />
                 </View>
                 <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_received_weight || 0, "", " KG")}</Text>
                 <Text style={styles.smallKpiLabel}>Received</Text>
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.smallKpiCard}>
+              <TouchableOpacity
+                style={styles.smallKpiCard}
+                onPress={() => router.push("/arrivals?tab=processing")}
+                activeOpacity={0.85}
+              >
                 <View style={[styles.kpiIconWrap, { backgroundColor: "#FFF3E0" }]}>
                   <MaterialCommunityIcons name="engine-outline" size={18} color="#E65100" />
                 </View>
                 <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.today_arrival?.processing_weight || 0, "", " KG")}</Text>
                 <Text style={styles.smallKpiLabel}>Processing</Text>
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.smallKpiCard}>
+              <TouchableOpacity
+                style={styles.smallKpiCard}
+                onPress={() => router.push("/arrivals?tab=out")}
+                activeOpacity={0.85}
+              >
                 <View style={[styles.kpiIconWrap, { backgroundColor: "#F3E5F5" }]}>
                   <MaterialCommunityIcons name="upload" size={18} color="#7B1FA2" />
                 </View>
                 <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_delivered_weight || 0, "", " KG")}</Text>
                 <Text style={styles.smallKpiLabel}>Delivered</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* 4. Finance Summary Section (Hidden for Store Incharge) */}

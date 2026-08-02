@@ -1,6 +1,18 @@
 import { storage } from "@/src/utils/storage";
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
+const getBaseUrl = () => {
+  let url = process.env.EXPO_PUBLIC_BACKEND_URL;
+  if (!url || url.includes(":8003")) {
+    if (typeof window !== "undefined" && window.location && window.location.hostname) {
+      url = `http://${window.location.hostname}:8001`;
+    } else {
+      url = "http://192.168.29.110:8001";
+    }
+  }
+  return url;
+};
+
+const BASE = getBaseUrl();
 const TOKEN_KEY = "ethree_auth_token";
 
 export async function getToken(): Promise<string | null> {

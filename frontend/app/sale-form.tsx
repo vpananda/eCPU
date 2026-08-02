@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { Input } from "@/src/components/Input";
@@ -55,14 +56,42 @@ export default function SaleForm() {
   }, [displayBranches, isAdmin, user]);
 
   useEffect(() => {
-    setLoading(true);
-    api<any[]>("/customers")
-      .then(list => {
+    async function loadCustomers() {
+      const cached = await storage.getItem<any[]>("cached_customers", []);
+      if (cached && cached.length > 0) {
+        setCustomers(cached);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+      try {
+        const list = await api<any[]>("/customers?lite=true");
         setCustomers(list);
-      })
-      .catch(e => toast.show(e.message || "Failed to load customers", "error"))
-      .finally(() => setLoading(false));
+        storage.setItem("cached_customers", list);
+      } catch (e: any) {
+        if (!cached || cached.length === 0) {
+          toast.show(e.message || "Failed to load customers", "error");
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadCustomers();
   }, []);
+
+  const filteredCustomers = React.useMemo(() => {
+    if (!branchId) return customers;
+    return customers.filter(c => !c.branch_id || c.branch_id === branchId);
+  }, [customers, branchId]);
+
+  useEffect(() => {
+    if (branchId && customerId) {
+      const exists = filteredCustomers.some(c => c.id === customerId);
+      if (!exists) {
+        setCustomerId(null);
+      }
+    }
+  }, [branchId, customerId, filteredCustomers]);
 
   // Recalculate amount when quantity or rate changes
   useEffect(() => {
@@ -131,7 +160,7 @@ export default function SaleForm() {
               placeholder="Select customer"
               value={customerId}
               onChange={setCustomerId}
-              options={customers.map(c => ({ id: c.id, name: `${c.name} (${c.mobile})` }))}
+              options={filteredCustomers.map(c => ({ id: c.id, name: `${c.name} (${c.mobile})` }))}
             />
 
             <Picker

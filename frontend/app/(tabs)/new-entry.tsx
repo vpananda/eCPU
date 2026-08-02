@@ -9,7 +9,7 @@ import { useAuth } from "@/src/auth";
 const ACTIONS = [
   { key: "arrival", label: "Arrival", subtitle: "New wet produce received", icon: "arrow-down-bold-circle", color: "#2E7D32", route: "/arrival-form" as const },
   { key: "deliver", label: "Deliver", subtitle: "Handover dried spice to customer", icon: "truck-fast", color: "#F57C00", route: "/delivery-picker" as const },
-  { key: "batching", label: "Batching", subtitle: "Load stock into machine", icon: "engine-outline", color: "#7B1FA2", route: "/batching-form" as const },
+  { key: "batching", label: "Processing", subtitle: "Load stock into machine", icon: "engine-outline", color: "#7B1FA2", route: "/batching-form" as const },
   { key: "expense", label: "Expense", subtitle: "Log operating expense", icon: "cash-minus", color: "#C62828", route: "/expense-form" as const },
   { key: "payment", label: "Payment", subtitle: "Collect balance amount", icon: "cash-plus", color: "#1565C0", route: "/payment-picker" as const },
   { key: "sale", label: "Sale", subtitle: "Record product sale", icon: "tag-outline", color: "#EF6C00", route: "/sale-form" as const },

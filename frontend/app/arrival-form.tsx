@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { Input } from "@/src/components/Input";
@@ -80,21 +81,41 @@ export default function ArrivalForm() {
     ? branches
     : branches.filter(b => b.id === user?.branch_id);
 
+  useEffect(() => {
+    async function loadFromCache() {
+      const [cachedC, cachedP] = await Promise.all([
+        storage.getItem<Customer[]>("cached_customers", []),
+        storage.getItem<Product[]>("cached_products", []),
+      ]);
+      if (cachedC && cachedC.length > 0) setCustomers(cachedC);
+      if (cachedP && cachedP.length > 0) {
+        setProducts(cachedP);
+        const cardamom = cachedP.find(prod => prod.name.toLowerCase() === "cardamom");
+        if (cardamom) setProductId((prev) => prev || cardamom.id);
+      }
+      if ((cachedC && cachedC.length > 0) || (cachedP && cachedP.length > 0)) {
+        setLoadingData(false);
+      }
+    }
+    loadFromCache();
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const [c, p] = await Promise.all([
-        api<Customer[]>("/customers"),
+        api<Customer[]>("/customers?lite=true"),
         api<Product[]>("/products"),
       ]);
       setCustomers(c);
       setProducts(p);
-      // Default branch: admin gets first branch, others get their own
+      storage.setItem("cached_customers", c);
+      storage.setItem("cached_products", p);
+
       if (user?.role === "Admin") {
         setBranchId((prev) => prev || branches[0]?.id || null);
       } else {
         setBranchId(user?.branch_id || branches[0]?.id || null);
       }
-      // Make default spices as cardamom
       const cardamom = p.find(prod => prod.name.toLowerCase() === "cardamom");
       if (cardamom) {
         setProductId((prev) => prev || cardamom.id);
@@ -103,6 +124,22 @@ export default function ArrivalForm() {
   }, [user, branches]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const filteredCustomers = React.useMemo(() => {
+    if (!branchId) return customers;
+    return customers.filter(c => !c.branch_id || c.branch_id === branchId);
+  }, [customers, branchId]);
+
+  useEffect(() => {
+    if (branchId && customerId) {
+      const exists = filteredCustomers.some(c => c.id === customerId);
+      if (!exists) {
+        setCustomerId(null);
+        setReceivedFrom("");
+        setReceivedFromEdited(false);
+      }
+    }
+  }, [branchId, customerId, filteredCustomers]);
 
   const selectedProduct = products.find(p => p.id === productId);
   const selectedCustomer = customers.find(c => c.id === customerId);
@@ -148,8 +185,15 @@ export default function ArrivalForm() {
           photos,
         },
       });
-      toast.show(`Arrival ${b.batch_no} recorded`);
-      router.replace("/arrivals");
+      toast.show(`Arrival ${b.batch_no || ""} recorded successfully!`);
+      // Reset form fields to record the next arrival immediately
+      setCustomerId(null);
+      setRawWeight("");
+      setBags("");
+      setReceivedFrom("");
+      setReceivedFromEdited(false);
+      setRemarks("");
+      setPhotos([]);
     } catch (e: any) {
       toast.show(e.message || "Failed", "error");
     } finally { setSaving(false); }
@@ -213,7 +257,7 @@ export default function ArrivalForm() {
               placeholder="Select customer"
               value={customerId}
               onChange={(id) => { setCustomerId(id); setReceivedFromEdited(false); }}
-              options={customers.map(c => ({ id: c.id, name: c.name, sub: `${c.code} · ${c.mobile}` }))}
+              options={filteredCustomers.map(c => ({ id: c.id, name: c.name, sub: `${c.code} · ${c.mobile}` }))}
             />
 
             <Input

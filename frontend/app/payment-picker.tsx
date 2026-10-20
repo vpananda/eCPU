@@ -31,15 +31,34 @@ export default function PaymentPicker() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  type SortKey = "due_desc" | "due_asc" | "name_asc" | "name_desc" | "code_asc";
+  const [sortBy, setSortBy] = useState<SortKey>("due_desc");
+
   const filtered = useMemo(() => {
-    if (!q.trim()) return customers;
-    const t = q.toLowerCase();
-    return customers.filter(c =>
-      c.name?.toLowerCase().includes(t) ||
-      c.mobile?.includes(t) ||
-      c.code?.toLowerCase().includes(t)
-    );
-  }, [customers, q]);
+    let list = [...customers];
+    if (q.trim()) {
+      const t = q.toLowerCase();
+      list = list.filter(c =>
+        c.name?.toLowerCase().includes(t) ||
+        c.mobile?.includes(t) ||
+        c.code?.toLowerCase().includes(t)
+      );
+    }
+
+    if (sortBy === "due_desc") {
+      list.sort((a, b) => (b.total_amount - b.amount_received) - (a.total_amount - a.amount_received));
+    } else if (sortBy === "due_asc") {
+      list.sort((a, b) => (a.total_amount - a.amount_received) - (b.total_amount - b.amount_received));
+    } else if (sortBy === "name_asc") {
+      list.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    } else if (sortBy === "name_desc") {
+      list.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
+    } else if (sortBy === "code_asc") {
+      list.sort((a, b) => (a.code || "").localeCompare(b.code || "", undefined, { numeric: true }));
+    }
+
+    return list;
+  }, [customers, q, sortBy]);
 
   const totalDue = useMemo(() => {
     return filtered.reduce((sum, c) => sum + (c.total_amount - c.amount_received), 0);
@@ -73,10 +92,107 @@ export default function PaymentPicker() {
         </View>
       )}
 
+      {/* Sort Options Bar */}
+      {!loading && customers.length > 0 && (
+        <View style={styles.sortBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortScroll}>
+            <View style={styles.sortLabelWrap}>
+              <MaterialCommunityIcons name="sort" size={13} color={colors.textMuted} />
+              <Text style={styles.sortLabel}>SORT:</Text>
+            </View>
+
+            <TouchableOpacity
+              testID="pp-sort-due-desc"
+              style={[styles.sortChip, sortBy === "due_desc" && styles.sortChipActive]}
+              onPress={() => setSortBy("due_desc")}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name="arrow-down"
+                size={13}
+                color={sortBy === "due_desc" ? "#fff" : colors.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.sortChipText, sortBy === "due_desc" && styles.sortChipTextActive]}>
+                Highest Due
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="pp-sort-due-asc"
+              style={[styles.sortChip, sortBy === "due_asc" && styles.sortChipActive]}
+              onPress={() => setSortBy("due_asc")}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name="arrow-up"
+                size={13}
+                color={sortBy === "due_asc" ? "#fff" : colors.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.sortChipText, sortBy === "due_asc" && styles.sortChipTextActive]}>
+                Lowest Due
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="pp-sort-name-asc"
+              style={[styles.sortChip, sortBy === "name_asc" && styles.sortChipActive]}
+              onPress={() => setSortBy("name_asc")}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name="sort-alphabetical-ascending"
+                size={13}
+                color={sortBy === "name_asc" ? "#fff" : colors.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.sortChipText, sortBy === "name_asc" && styles.sortChipTextActive]}>
+                Customer (A-Z)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="pp-sort-name-desc"
+              style={[styles.sortChip, sortBy === "name_desc" && styles.sortChipActive]}
+              onPress={() => setSortBy("name_desc")}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name="sort-alphabetical-descending"
+                size={13}
+                color={sortBy === "name_desc" ? "#fff" : colors.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.sortChipText, sortBy === "name_desc" && styles.sortChipTextActive]}>
+                Customer (Z-A)
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              testID="pp-sort-code-asc"
+              style={[styles.sortChip, sortBy === "code_asc" && styles.sortChipActive]}
+              onPress={() => setSortBy("code_asc")}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons
+                name="numeric"
+                size={13}
+                color={sortBy === "code_asc" ? "#fff" : colors.textMuted}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.sortChipText, sortBy === "code_asc" && styles.sortChipTextActive]}>
+                Code
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.xl, gap: spacing.sm, paddingBottom: 100 }}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.sm, gap: spacing.sm, paddingBottom: 100 }}>
           {filtered.length === 0 && (
             <View style={styles.empty}>
               <MaterialCommunityIcons name="check-circle-outline" size={44} color={colors.success} />
@@ -193,5 +309,49 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
+  },
+  sortBar: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  sortScroll: {
+    paddingHorizontal: spacing.xl,
+    alignItems: "center",
+    gap: 8,
+  },
+  sortLabelWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginRight: 2,
+  },
+  sortLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  sortChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  sortChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  sortChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  sortChipTextActive: {
+    color: "#fff",
   },
 });

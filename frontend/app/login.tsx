@@ -8,6 +8,7 @@ import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { colors, radius, spacing } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
+import { ConnectionBadge } from "@/src/components/ConnectionBadge";
 
 const LOGO = require("../assets/images/e3logo.png");
 
@@ -133,7 +134,9 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-
+          <View style={{ alignItems: "center", marginTop: spacing.xl }}>
+            <ConnectionBadge showPing={true} />
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

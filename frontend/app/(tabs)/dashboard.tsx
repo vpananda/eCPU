@@ -5,6 +5,8 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
+import { ConnectionBadge } from "@/src/components/ConnectionBadge";
+import { useConnection } from "@/src/connection";
 import Calendar from "@/src/components/Calendar";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
@@ -68,10 +70,12 @@ const DATE_PRESETS = [
 
 export default function Dashboard() {
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
+  const { checkConnection } = useConnection();
   const router = useRouter();
   const [data, setData] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [start, setStart] = useState(todayISO());
   const [end, setEnd] = useState(todayISO());
@@ -105,6 +109,7 @@ export default function Dashboard() {
   const load = useCallback(async (s = start, e = end, bid = selectedBranchId, silent = false) => {
     if (!silent) setLoading(true);
     try {
+      setLoadError(null);
       const qs = new URLSearchParams();
       qs.set("start", s);
       qs.set("end", e);
@@ -112,8 +117,9 @@ export default function Dashboard() {
       const d = await api<Dash>(`/dashboard?${qs.toString()}`);
       setData(d);
       storage.setItem("cached_dashboard_data", d);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Dashboard data load failure:", err);
+      setLoadError(err.message || "Failed to load dashboard data");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -128,7 +134,8 @@ export default function Dashboard() {
 
   const onRefresh = () => {
     setRefreshing(true);
-    load(start, end, selectedBranchId, true);
+    checkConnection();
+    load(start, end, selectedBranchId, false);
   };
 
   const applyPreset = (key: string) => {
@@ -232,6 +239,8 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.headerRight}>
+          <ConnectionBadge style={{ marginRight: 8 }} />
+
           <TouchableOpacity style={styles.notificationBtn} activeOpacity={0.7}>
             <MaterialCommunityIcons name="bell-outline" size={24} color={colors.text} />
             <View style={styles.unreadDot} />
@@ -291,6 +300,35 @@ export default function Dashboard() {
           <View style={styles.loadingContainer}>
             <Loader size={80} />
             <Text style={styles.loadingText}>Fetching active reports...</Text>
+          </View>
+        ) : !data ? (
+          <View style={{ padding: spacing.xl, alignItems: "center", justifyContent: "center", marginTop: 40 }}>
+            <MaterialCommunityIcons name="cloud-off-outline" size={56} color={colors.textMuted} />
+            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.text, marginTop: 12 }}>
+              Unable to Load Data
+            </Text>
+            <Text style={{ fontSize: 13, color: colors.textMuted, textAlign: "center", marginTop: 6, marginBottom: 20 }}>
+              {loadError || "Could not connect to the backend server. Please check your internet connection or server status."}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                checkConnection();
+                load(start, end, selectedBranchId, false);
+              }}
+              style={{
+                backgroundColor: colors.primary,
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: radius.md,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+              }}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="refresh" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>Retry Loading</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.dashboardContent}>

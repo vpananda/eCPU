@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
+import { ConnectionBadge } from "@/src/components/ConnectionBadge";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const LOGO = require("../../assets/images/e3logo.png");
@@ -130,6 +131,34 @@ export default function MoreScreen() {
               <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
             </TouchableOpacity>
           ))}
+        </View>
+
+        <View style={{ paddingHorizontal: spacing.xl, marginTop: spacing.lg }}>
+          <View style={{
+            backgroundColor: colors.card,
+            borderRadius: radius.lg,
+            padding: spacing.md,
+            borderWidth: 1,
+            borderColor: colors.border,
+            ...shadow.card,
+          }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1, marginRight: 8 }}>
+                <View style={{
+                  width: 38, height: 38, borderRadius: 12,
+                  backgroundColor: `${colors.primary}15`,
+                  alignItems: "center", justifyContent: "center"
+                }}>
+                  <MaterialCommunityIcons name="server-network" size={20} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: colors.text }}>Server Connection</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }} numberOfLines={1}>https://ecpu.onrender.com</Text>
+                </View>
+              </View>
+              <ConnectionBadge />
+            </View>
+          </View>
         </View>
 
         <TouchableOpacity testID="more-logout" style={styles.logoutBtn} onPress={onLogout}>

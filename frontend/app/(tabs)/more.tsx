@@ -12,7 +12,7 @@ const LOGO = require("../../assets/images/e3logo.png");
 const ITEMS_BASE = [
   { key: "arrivals", label: "Arrivals", icon: "arrow-down-bold-circle", route: "/arrivals", color: "#2E7D32" },
   { key: "batches", label: "All Batches", icon: "package-variant-closed", route: "/batches", color: "#388E3C" },
-  { key: "payments", label: "Payments", icon: "cash-multiple", route: "/payments", color: "#43A047" },
+  { key: "payments", label: "Cash Book & Ledgers", icon: "book-open-page-variant", route: "/payments", color: "#1E88E5" },
   { key: "sales", label: "Sales Logs", icon: "tag-multiple", route: "/sales", color: "#EF6C00" },
   { key: "expenses", label: "Expenses", icon: "cash-minus", route: "/expenses", color: "#F57C00" },
   { key: "reports", label: "Reports", icon: "chart-bar", route: "/reports", color: "#1565C0" },

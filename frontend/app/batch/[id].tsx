@@ -24,6 +24,23 @@ export default function BatchDetail() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [newDate, setNewDate] = useState("");
+  const [newWeight, setNewWeight] = useState("");
+  const [newRate, setNewRate] = useState("");
+  const [newBags, setNewBags] = useState("");
+  const [newReceivedFrom, setNewReceivedFrom] = useState("");
+  const [newRemarks, setNewRemarks] = useState("");
+
+  const openEditModal = () => {
+    if (data) {
+      setNewDate(data.arrival_date ? data.arrival_date.slice(0, 10) : "");
+      setNewWeight(data.raw_weight != null ? String(data.raw_weight) : "");
+      setNewRate(data.rate_per_kg != null ? String(data.rate_per_kg) : "10");
+      setNewBags(data.bags != null ? String(data.bags) : "1");
+      setNewReceivedFrom(data.received_from || "");
+      setNewRemarks(data.remarks || "");
+    }
+    setEditOpen(true);
+  };
 
   React.useEffect(() => {
     if (data?.arrival_date) {
@@ -71,33 +88,41 @@ export default function BatchDetail() {
     }
   };
 
-  const handleSaveDate = async () => {
+  const handleSave = async () => {
     const reg = /^\d{4}-\d{2}-\d{2}$/;
     if (!reg.test(newDate)) {
-      toast.show("Format must be YYYY-MM-DD", "error");
+      toast.show("Arrival date format must be YYYY-MM-DD", "error");
       return;
     }
-    const parts = newDate.split("-");
-    const y = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10) - 1;
-    const d = parseInt(parts[2], 10);
-    const dateObj = new Date(y, m, d);
-    if (dateObj.getFullYear() !== y || dateObj.getMonth() !== m || dateObj.getDate() !== d) {
-      toast.show("Invalid calendar date", "error");
+    const weightNum = parseFloat(newWeight);
+    if (!newWeight || isNaN(weightNum) || weightNum <= 0) {
+      toast.show("Please enter a valid raw weight (KG)", "error");
       return;
     }
-    
+    const rateNum = parseFloat(newRate);
+    if (!newRate || isNaN(rateNum) || rateNum <= 0) {
+      toast.show("Please enter a valid rate per KG", "error");
+      return;
+    }
+
     setUpdating(true);
     try {
       await api(`/batches/${id}`, {
         method: "PUT",
-        body: { arrival_date: newDate }
+        body: {
+          arrival_date: newDate,
+          raw_weight: weightNum,
+          rate_per_kg: rateNum,
+          bags: newBags ? parseInt(newBags, 10) : 1,
+          received_from: newReceivedFrom,
+          remarks: newRemarks,
+        }
       });
-      toast.show("Arrival date updated successfully");
+      toast.show("Arrival details updated successfully");
       setEditOpen(false);
       await load();
     } catch (e: any) {
-      toast.show(e.message, "error");
+      toast.show(e.message || "Failed to update arrival", "error");
     } finally {
       setUpdating(false);
     }
@@ -145,8 +170,9 @@ export default function BatchDetail() {
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>Batch {data.batch_no}</Text>
         <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => setEditOpen(true)} testID="batch-edit-date">
-            <MaterialCommunityIcons name="calendar-edit" size={22} color={colors.primary} />
+          <TouchableOpacity onPress={openEditModal} testID="batch-edit" style={styles.headerEditBtn}>
+            <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
+            <Text style={styles.headerEditText}>Edit</Text>
           </TouchableOpacity>
           {user?.role === "Admin" && (
             <TouchableOpacity onPress={confirmDelete} testID="batch-delete">
@@ -157,21 +183,101 @@ export default function BatchDetail() {
         </View>
       </View>
 
-      {/* Edit Date Modal */}
+      {/* Edit Arrival Modal */}
       <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
         <View style={styles.modalBg}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Edit Arrival Date</Text>
-            <Text style={styles.modalLabel}>Arrival Date (YYYY-MM-DD)</Text>
-            <TextInput
-              testID="batch-new-date-input"
-              style={styles.modalInput}
-              value={newDate}
-              onChangeText={setNewDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={colors.textLight}
-            />
-            <View style={styles.modalButtons}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+              <Text style={styles.modalTitle}>Edit Arrival Item</Text>
+              <TouchableOpacity onPress={() => setEditOpen(false)}>
+                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+              <Text style={styles.modalLabel}>Arrival Date (YYYY-MM-DD)</Text>
+              <TextInput
+                testID="batch-new-date-input"
+                style={styles.modalInput}
+                value={newDate}
+                onChangeText={setNewDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.textLight}
+              />
+
+              <View style={{ flexDirection: "row", gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalLabel}>Raw Weight (KG)</Text>
+                  <TextInput
+                    testID="batch-new-weight-input"
+                    style={styles.modalInput}
+                    value={newWeight}
+                    onChangeText={setNewWeight}
+                    keyboardType="numeric"
+                    placeholder="e.g. 120"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalLabel}>Rate / KG (₹)</Text>
+                  <TextInput
+                    testID="batch-new-rate-input"
+                    style={styles.modalInput}
+                    value={newRate}
+                    onChangeText={setNewRate}
+                    keyboardType="numeric"
+                    placeholder="e.g. 10"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalLabel}>Bags Count</Text>
+                  <TextInput
+                    testID="batch-new-bags-input"
+                    style={styles.modalInput}
+                    value={newBags}
+                    onChangeText={setNewBags}
+                    keyboardType="numeric"
+                    placeholder="e.g. 1"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalLabel}>Est. Bill Amount</Text>
+                  <View style={[styles.modalInput, { justifyContent: "center", backgroundColor: `${colors.primary}0D` }]}>
+                    <Text style={{ fontWeight: "700", color: colors.primary }}>
+                      ₹{((parseFloat(newWeight) || 0) * (parseFloat(newRate) || 0)).toLocaleString("en-IN")}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <Text style={styles.modalLabel}>Received From</Text>
+              <TextInput
+                testID="batch-new-received-from-input"
+                style={styles.modalInput}
+                value={newReceivedFrom}
+                onChangeText={setNewReceivedFrom}
+                placeholder="Driver / Agent Name"
+                placeholderTextColor={colors.textLight}
+              />
+
+              <Text style={styles.modalLabel}>Remarks</Text>
+              <TextInput
+                testID="batch-new-remarks-input"
+                style={[styles.modalInput, { height: 60 }]}
+                value={newRemarks}
+                onChangeText={setNewRemarks}
+                multiline
+                placeholder="Optional notes..."
+                placeholderTextColor={colors.textLight}
+              />
+            </ScrollView>
+
+            <View style={[styles.modalButtons, { marginTop: spacing.md }]}>
               <TouchableOpacity
                 testID="batch-edit-cancel"
                 style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
@@ -182,9 +288,14 @@ export default function BatchDetail() {
               <TouchableOpacity
                 testID="batch-edit-submit"
                 style={[styles.modalBtn, { backgroundColor: colors.primary }]}
-                onPress={handleSaveDate}
+                onPress={handleSave}
+                disabled={updating}
               >
-                <Text style={{ color: "#fff", fontWeight: "800" }}>Save</Text>
+                {updating ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={{ color: "#fff", fontWeight: "800" }}>Save Changes</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -227,7 +338,12 @@ export default function BatchDetail() {
         {/* Details */}
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Details</Text>
-          <Row label="Customer" value={data.customer?.name || "-"} sub={data.customer?.mobile} />
+          <Row
+            label="Customer"
+            value={data.customer?.name || "-"}
+            sub={data.customer?.mobile}
+            onPress={() => (data.customer_id || data.customer?.id) ? router.push(`/customer/${data.customer_id || data.customer?.id}`) : undefined}
+          />
           {data.received_from && data.received_from !== data.customer?.name ? (
             <Row label="Received From" value={data.received_from} />
           ) : null}
@@ -298,22 +414,40 @@ export default function BatchDetail() {
   );
 }
 
-function Row({ label, value, sub, bold, accent }: { label: string; value: string; sub?: string; bold?: boolean; accent?: boolean }) {
-  return (
+function Row({ label, value, sub, bold, accent, onPress }: { label: string; value: string; sub?: string; bold?: boolean; accent?: boolean; onPress?: () => void }) {
+  const content = (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
       <View style={{ alignItems: "flex-end" }}>
-        <Text style={[styles.rowValue, bold && { fontWeight: "800", fontSize: 15 }, accent && { color: colors.accent }]}>{value}</Text>
+        <Text style={[styles.rowValue, bold && { fontWeight: "800", fontSize: 15 }, accent && { color: colors.accent }, onPress && { color: colors.primary, textDecorationLine: "underline" }]}>{value}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>
     </View>
   );
+  if (onPress) {
+    return <TouchableOpacity onPress={onPress} activeOpacity={0.7}>{content}</TouchableOpacity>;
+  }
+  return content;
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md, gap: spacing.md },
   headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  headerEditBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: `${colors.primary}18`,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  headerEditText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.primary,
+  },
   title: { flex: 1, fontSize: 18, fontWeight: "800", color: colors.text, textAlign: "center" },
   hero: { alignItems: "center", padding: spacing.xl, gap: 4 },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: spacing.xl },

@@ -2,14 +2,10 @@ import { storage } from "@/src/utils/storage";
 
 const getBaseUrl = () => {
   let url = process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (!url || url.includes(":8003")) {
-    if (typeof window !== "undefined" && window.location && window.location.hostname) {
-      url = `http://${window.location.hostname}:8001`;
-    } else {
-      url = "http://192.168.29.110:8001";
-    }
+  if (!url || url.includes("192.168.")) {
+    url = "https://ecpu.onrender.com";
   }
-  return url;
+  return url.replace(/\/+$/, "");
 };
 
 const BASE = getBaseUrl();

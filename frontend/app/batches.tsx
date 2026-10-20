@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -10,6 +10,20 @@ import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
 
 const STATUSES = ["All", "Received", "Loaded", "Drying", "Completed", "Delivered"];
+
+function formatArrivalDate(isoStr?: string | null) {
+  if (!isoStr) return "-";
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return String(isoStr).slice(0, 10);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  } catch {
+    return String(isoStr).slice(0, 10);
+  }
+}
 
 function formatDisplayDateTime(isoStr: string) {
   try {
@@ -31,11 +45,12 @@ function formatDisplayDateTime(isoStr: string) {
 
 export default function BatchesScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ status?: string; start?: string; end?: string }>();
+  const params = useLocalSearchParams<{ status?: string; start?: string; end?: string; customer_id?: string; q?: string }>();
   const { user, selectedBranchId } = useAuth();
 
   const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState(params.q || "");
   const [filter, setFilter] = useState(params.status || "All");
   const [paymentFilter, setPaymentFilter] = useState<"All" | "Pending" | "Paid">("All");
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "balance_desc">("date_desc");
@@ -50,9 +65,9 @@ export default function BatchesScreen() {
     }
     
     if (sortBy === "date_desc") {
-      result.sort((a, b) => new Date(b.created_at || b.start_time).getTime() - new Date(a.created_at || a.start_time).getTime());
+      result.sort((a, b) => new Date(b.arrival_date || b.created_at || b.start_time).getTime() - new Date(a.arrival_date || a.created_at || a.start_time).getTime());
     } else if (sortBy === "date_asc") {
-      result.sort((a, b) => new Date(a.created_at || a.start_time).getTime() - new Date(b.created_at || b.start_time).getTime());
+      result.sort((a, b) => new Date(a.arrival_date || a.created_at || a.start_time).getTime() - new Date(b.arrival_date || b.created_at || b.start_time).getTime());
     } else if (sortBy === "balance_desc") {
       result.sort((a, b) => (b.balance_amount || 0) - (a.balance_amount || 0));
     }
@@ -75,8 +90,10 @@ export default function BatchesScreen() {
       const qs = new URLSearchParams();
       if (filter !== "All") qs.set("status", filter);
       if (selectedBranchId) qs.set("branch_id", selectedBranchId);
+      if (params.customer_id) qs.set("customer_id", params.customer_id);
       if (params.start) qs.set("start", params.start);
       if (params.end) qs.set("end", params.end);
+      if (search.trim()) qs.set("q", search.trim());
       
       const path = `/batches?${qs.toString()}`;
       const d = await api<any[]>(path);
@@ -84,7 +101,7 @@ export default function BatchesScreen() {
     } finally {
       setLoading(false);
     }
-  }, [filter, selectedBranchId, params.start, params.end]);
+  }, [filter, selectedBranchId, params.customer_id, params.start, params.end, search]);
 
   useFocusEffect(
     useCallback(() => {
@@ -100,7 +117,7 @@ export default function BatchesScreen() {
           <MaterialCommunityIcons name="arrow-left" size={24} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={styles.title}>Batches</Text>
+          <Text style={styles.title}>Batches & Arrivals</Text>
           {params.start && params.end && (
             <Text style={styles.subtitle}>{params.start} → {params.end}</Text>
           )}
@@ -108,6 +125,26 @@ export default function BatchesScreen() {
         <TouchableOpacity onPress={() => setFilterOpen(!filterOpen)} testID="batches-filter-toggle">
           <MaterialCommunityIcons name={filterOpen ? "calendar-check" : "calendar-range"} size={24} color={colors.primary} />
         </TouchableOpacity>
+      </View>
+
+      {/* Customer / Batch Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBox}>
+          <MaterialCommunityIcons name="magnify" size={20} color={colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search customer name, phone, batch #..."
+            placeholderTextColor={colors.textLight}
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+          />
+          {search ? (
+            <TouchableOpacity onPress={() => setSearch("")}>
+              <MaterialCommunityIcons name="close-circle" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
       {/* Date Filter Bar */}
@@ -245,37 +282,62 @@ export default function BatchesScreen() {
               activeOpacity={0.85}
             >
               <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                     <Text style={styles.batchNo}>{item.batch_no}</Text>
                     <StatusPill status={item.status} />
                   </View>
                   <Text style={styles.itemBranchText}>
-                    <MaterialCommunityIcons name="map-marker-outline" size={10} color={colors.textMuted} /> {item.branch_name || "Main Branch"}
+                    <MaterialCommunityIcons name="map-marker-outline" size={11} color={colors.textMuted} /> {item.branch_name || "Main Branch"}
                   </Text>
                 </View>
 
-                <Text style={styles.customerName}>{item.customer?.name || "-"}</Text>
+                {/* Customer name and code */}
+                <View style={styles.customerRow}>
+                  <Text style={styles.customerName}>{item.customer?.name || item.customer_name || "-"}</Text>
+                  {(item.customer?.code || item.customer_code) ? (
+                    <View style={styles.custCodeChip}>
+                      <Text style={styles.custCodeChipText}>{item.customer?.code || item.customer_code}</Text>
+                    </View>
+                  ) : null}
+                  {(item.customer?.mobile || item.customer_mobile) ? (
+                    <Text style={styles.custPhone}>({item.customer?.mobile || item.customer_mobile})</Text>
+                  ) : null}
+                </View>
 
+                {/* Product, Weight & Rate */}
                 <View style={styles.metaRow}>
                   <Text style={styles.meta}>
-                    {item.product?.name} • {item.raw_weight} KG{item.machine?.name ? ` • Dryer: ${item.machine.name}` : ""}
+                    {item.product?.name || item.product_name || "Cardamom"} • <Text style={{ fontWeight: "800", color: colors.text }}>{item.raw_weight} KG</Text>
+                    {item.rate_per_kg ? ` • @ ₹${item.rate_per_kg}/kg` : ""}
+                    {item.machine?.name || item.machine_name ? ` • Dryer: ${item.machine?.name || item.machine_name}` : ""}
                   </Text>
                 </View>
 
+                {/* Arrival Date */}
                 <View style={styles.timeRow}>
-                  <MaterialCommunityIcons name="clock-outline" size={11} color={colors.textMuted} style={{ marginRight: 4 }} />
+                  <MaterialCommunityIcons name="calendar" size={12} color={colors.primary} style={{ marginRight: 4 }} />
                   <Text style={styles.timeText}>
-                    Started: {formatDisplayDateTime(item.start_time || item.created_at)}
+                    Arrival Date: <Text style={{ fontWeight: "700", color: colors.text }}>{formatArrivalDate(item.arrival_date || item.created_at)}</Text>
                   </Text>
                 </View>
 
-                <Text style={styles.bill}>
-                  ₹{(item.bill_amount || 0).toLocaleString()}
+                {/* Financial breakdown */}
+                <View style={styles.financialRow}>
+                  <Text style={styles.bill}>
+                    Billed: ₹{(item.bill_amount || 0).toLocaleString()}
+                  </Text>
+                  <Text style={styles.paidText}>
+                    • Paid: ₹{(item.total_paid || 0).toLocaleString()}
+                  </Text>
                   {item.balance_amount > 0 ? (
-                    <Text style={{ color: colors.accent }}> • Bal ₹{item.balance_amount.toLocaleString()}</Text>
-                  ) : null}
-                </Text>
+                    <Text style={styles.balDueText}>
+                      • Bal ₹{item.balance_amount.toLocaleString()}
+                    </Text>
+                  ) : (
+                    <Text style={styles.paidInFullText}>• Paid ✓</Text>
+                  )}
+                </View>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textLight} />
             </TouchableOpacity>
@@ -288,9 +350,28 @@ export default function BatchesScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { fontSize: 20, fontWeight: "800", color: colors.text },
   subtitle: { fontSize: 11, color: colors.textMuted, marginTop: 2, fontWeight: "600" },
+  searchContainer: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xs },
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 8,
+    ...shadow.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.text,
+    padding: 0,
+  },
   filterBar: {
     backgroundColor: colors.card,
     padding: spacing.md,
@@ -312,10 +393,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.textMuted,
   },
-  chipsRow: { paddingHorizontal: spacing.xl, gap: 8, paddingVertical: spacing.sm },
-  chip: { paddingHorizontal: 16, height: 36, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, justifyContent: "center", flexShrink: 0 },
+  chipsRow: { paddingHorizontal: spacing.xl, gap: 8, paddingVertical: spacing.xs },
+  chip: { paddingHorizontal: 16, height: 34, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, justifyContent: "center", flexShrink: 0 },
   chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { fontSize: 13, fontWeight: "700", color: colors.textMuted },
+  chipText: { fontSize: 12, fontWeight: "700", color: colors.textMuted },
   empty: { paddingVertical: 60, alignItems: "center", justifyContent: "center" },
   emptyText: { marginTop: spacing.md, fontSize: 14, color: colors.textMuted, fontWeight: "600" },
   item: {
@@ -327,13 +408,21 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   batchNo: { fontSize: 16, fontWeight: "800", color: colors.text, letterSpacing: -0.2 },
-  customerName: { fontSize: 13, color: colors.text, fontWeight: "700", marginTop: 4 },
+  customerRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" },
+  customerName: { fontSize: 14, color: colors.text, fontWeight: "800" },
+  custCodeChip: { backgroundColor: colors.accent + "20", paddingHorizontal: 6, paddingVertical: 1, borderRadius: radius.sm },
+  custCodeChipText: { fontSize: 10, fontWeight: "800", color: colors.accent },
+  custPhone: { fontSize: 11, color: colors.textMuted },
   metaRow: { marginTop: 4 },
   meta: { fontSize: 12, color: colors.textMuted, fontWeight: "600" },
-  timeRow: { flexDirection: "row", alignItems: "center", marginTop: 6 },
-  timeText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
+  timeRow: { flexDirection: "row", alignItems: "center", marginTop: 4 },
+  timeText: { fontSize: 11, color: colors.textMuted, fontWeight: "500" },
   itemBranchText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
-  bill: { fontSize: 14, fontWeight: "800", color: colors.primary, marginTop: 8 },
+  financialRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4, marginTop: 8 },
+  bill: { fontSize: 13, fontWeight: "800", color: colors.primary },
+  paidText: { fontSize: 12, fontWeight: "700", color: colors.success },
+  balDueText: { fontSize: 12, fontWeight: "800", color: colors.accent },
+  paidInFullText: { fontSize: 12, fontWeight: "700", color: colors.success },
   smallChip: { 
     flexDirection: "row",
     alignItems: "center",

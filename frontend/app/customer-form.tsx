@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
@@ -13,23 +13,59 @@ import { colors, spacing } from "@/src/theme";
 
 export default function CustomerForm() {
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const isEdit = !!id;
   const toast = useToast();
   const { user, branches } = useAuth();
   
   const [form, setForm] = useState({
-    name: "", mobile: "", alt_mobile: "", village: "", taluk: "", district: "", address: "", gst: "", remarks: "", branch_id: "",
+    name: "",
+    mobile: "",
+    alt_mobile: "",
+    village: "",
+    taluk: "",
+    district: "",
+    address: "",
+    gst: "",
+    remarks: "",
+    branch_id: "",
   });
+  const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (user) {
-      if (user.role === "Admin") {
-        setForm(f => ({ ...f, branch_id: f.branch_id || user.branch_id || branches[0]?.id || "" }));
-      } else {
-        setForm(f => ({ ...f, branch_id: user.branch_id || "" }));
+    (async () => {
+      try {
+        if (isEdit && id) {
+          const c = await api<any>(`/customers/${id}`);
+          if (c) {
+            setForm({
+              name: c.name || "",
+              mobile: c.mobile || "",
+              alt_mobile: c.alt_mobile || "",
+              village: c.village || "",
+              taluk: c.taluk || "",
+              district: c.district || "",
+              address: c.address || "",
+              gst: c.gst || "",
+              remarks: c.remarks || "",
+              branch_id: c.branch_id || "",
+            });
+          }
+        } else if (user) {
+          if (user.role === "Admin") {
+            setForm(f => ({ ...f, branch_id: f.branch_id || user.branch_id || branches[0]?.id || "" }));
+          } else {
+            setForm(f => ({ ...f, branch_id: user.branch_id || "" }));
+          }
+        }
+      } catch (e: any) {
+        toast.show(e.message || "Failed to load customer", "error");
+      } finally {
+        setLoading(false);
       }
-    }
-  }, [user, branches]);
+    })();
+  }, [id, isEdit, user, branches]);
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -40,8 +76,13 @@ export default function CustomerForm() {
     }
     setSaving(true);
     try {
-      const c = await api<any>("/customers", { method: "POST", body: form });
-      toast.show(`Customer ${c.code} created`);
+      if (isEdit && id) {
+        await api(`/customers/${id}`, { method: "PUT", body: form });
+        toast.show("Customer updated successfully");
+      } else {
+        const c = await api<any>("/customers", { method: "POST", body: form });
+        toast.show(`Customer ${c.code} created`);
+      }
       router.back();
     } catch (e: any) {
       toast.show(e.message, "error");
@@ -50,19 +91,30 @@ export default function CustomerForm() {
     }
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} testID="customer-form-close">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>New Customer</Text>
+        <Text style={styles.title}>{isEdit ? "Edit Customer" : "New Customer"}</Text>
         <View style={{ width: 22 }} />
       </View>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.xl }} keyboardShouldPersistTaps="handled">
-          <Input testID="cf-name" label="Name *" value={form.name} onChangeText={v => set("name", v)} placeholder="Full name" />
-          <Input testID="cf-mobile" label="Mobile *" value={form.mobile} onChangeText={v => set("mobile", v)} keyboardType="phone-pad" placeholder="10-digit number" maxLength={15} />
+          <Input testID="cf-name" label="Customer Name *" value={form.name} onChangeText={v => set("name", v)} placeholder="Full name" />
+          <Input testID="cf-mobile" label="Phone / Mobile Number *" value={form.mobile} onChangeText={v => set("mobile", v)} keyboardType="phone-pad" placeholder="10-digit number" maxLength={15} />
           
           {user?.role === "Admin" ? (
             <Picker
@@ -82,17 +134,17 @@ export default function CustomerForm() {
             />
           )}
 
-          <Input testID="cf-alt-mobile" label="Alternative Mobile" value={form.alt_mobile} onChangeText={v => set("alt_mobile", v)} keyboardType="phone-pad" />
-          <Input testID="cf-village" label="Village" value={form.village} onChangeText={v => set("village", v)} />
+          <Input testID="cf-alt-mobile" label="Alternative Phone" value={form.alt_mobile} onChangeText={v => set("alt_mobile", v)} keyboardType="phone-pad" />
+          <Input testID="cf-village" label="Village / Town" value={form.village} onChangeText={v => set("village", v)} />
           <View style={{ flexDirection: "row", gap: spacing.md }}>
             <View style={{ flex: 1 }}><Input testID="cf-taluk" label="Taluk" value={form.taluk} onChangeText={v => set("taluk", v)} /></View>
-            <View style={{ flex: 1 }}><Input testID="cf-district" label="District" value={form.district} onChangeText={v => set("district", v)} /></View>
+            <View style={{ flex: 1 }}><Input testID="cf-district" label="City / District" value={form.district} onChangeText={v => set("district", v)} placeholder="City / District" /></View>
           </View>
-          <Input testID="cf-address" label="Address" value={form.address} onChangeText={v => set("address", v)} multiline />
+          <Input testID="cf-address" label="Full Address" value={form.address} onChangeText={v => set("address", v)} multiline />
           <Input testID="cf-gst" label="GST Number" value={form.gst} onChangeText={v => set("gst", v)} placeholder="Optional" autoCapitalize="characters" />
           <Input testID="cf-remarks" label="Remarks" value={form.remarks} onChangeText={v => set("remarks", v)} multiline />
           <View style={{ height: spacing.md }} />
-          <Button testID="cf-save" title="Save Customer" onPress={save} loading={saving} />
+          <Button testID="cf-save" title={isEdit ? "Update Customer" : "Save Customer"} onPress={save} loading={saving} />
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

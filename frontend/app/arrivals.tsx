@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
@@ -20,6 +20,10 @@ type Row = {
   branch_name?: string;
   arrival_date: string;
   raw_weight: number;
+  rate_per_kg?: number;
+  bill_amount?: number;
+  total_paid?: number;
+  balance_amount?: number;
   actual_dry_weight: number | null;
   delivery_date: string | null;
   status: string;
@@ -70,14 +74,15 @@ const TABS: { key: "in" | "processing" | "out"; label: string; icon: any; color:
 export default function ArrivalsScreen() {
   const { selectedBranchId } = useAuth();
   const router = useRouter();
-  const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string }>();
+  const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string; q?: string }>();
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"in" | "processing" | "out">((params.tab as any) || "processing");
+  const [search, setSearch] = useState(params.q || "");
+  const [tab, setTab] = useState<"in" | "processing" | "out">((params.tab as any) || "in");
 
-  const [start, setStart] = useState<string>(params.start || todayISO());
-  const [end, setEnd] = useState<string>(params.end || todayISO());
-  const [activePreset, setActivePreset] = useState<string>(params.start ? "custom" : "today");
+  const [start, setStart] = useState<string>(params.start || "");
+  const [end, setEnd] = useState<string>(params.end || "");
+  const [activePreset, setActivePreset] = useState<string>(params.start ? "custom" : "all");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(start);
@@ -114,19 +119,21 @@ export default function ArrivalsScreen() {
     loadFromCache();
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const qs = new URLSearchParams();
       if (start) qs.set("start", start);
       if (end) qs.set("end", end);
       if (selectedBranchId) qs.set("branch_id", selectedBranchId);
+      if (search.trim()) qs.set("q", search.trim());
       const d = await api<Payload>(`/dashboard/arrivals?${qs.toString()}`);
       setData(d);
       storage.setItem("cached_arrivals_dashboard", d);
     } finally { setLoading(false); }
-  }, [start, end, selectedBranchId]);
+  }, [start, end, selectedBranchId, search]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(!!data); }, [load, !!data]));
 
   const rows: Row[] = tab === "in" ? data?.in || [] : tab === "out" ? data?.out || [] : data?.processing || [];
 
@@ -137,12 +144,32 @@ export default function ArrivalsScreen() {
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={styles.title}>Processing Details</Text>
+          <Text style={styles.title}>Customer Arrivals & Processing</Text>
           {data?.range && (
             <Text style={styles.subtitle}>{data.range.start} → {data.range.end}</Text>
           )}
         </View>
         <View style={{ width: 22 }} />
+      </View>
+
+      {/* Customer & Batch Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBox}>
+          <MaterialCommunityIcons name="magnify" size={18} color={colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search customer name, code, phone, batch #..."
+            placeholderTextColor={colors.textLight}
+            value={search}
+            onChangeText={setSearch}
+            returnKeyType="search"
+          />
+          {search ? (
+            <TouchableOpacity onPress={() => setSearch("")}>
+              <MaterialCommunityIcons name="close-circle" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
 
       {/* Date Presets Row */}
@@ -254,10 +281,12 @@ export default function ArrivalsScreen() {
             const accent = tab === "in" ? colors.primary : tab === "out" ? colors.purple : colors.warning;
             const isProcessingTab = tab === "processing";
             return (
-              <View
+              <TouchableOpacity
                 key={r.batch_id}
                 testID={`arrival-${r.batch_id}`}
                 style={styles.rowCard}
+                onPress={() => router.push(`/batch/${r.batch_id}`)}
+                activeOpacity={0.85}
               >
                 <View style={styles.cardTopRow}>
                   <View style={[styles.avatar, { backgroundColor: accent + "18" }]}>
@@ -293,6 +322,19 @@ export default function ArrivalsScreen() {
                   </View>
                 </View>
 
+                {/* Ledger Financials if available */}
+                {(r.bill_amount !== undefined && r.bill_amount > 0) ? (
+                  <View style={styles.ledgerRow}>
+                    <Text style={styles.ledgerBill}>Billed: ₹{r.bill_amount.toLocaleString()}{r.rate_per_kg ? ` (@ ₹${r.rate_per_kg}/kg)` : ""}</Text>
+                    <Text style={styles.ledgerPaid}>• Recv: ₹{(r.total_paid || 0).toLocaleString()}</Text>
+                    {(r.balance_amount || 0) > 0 ? (
+                      <Text style={styles.ledgerBal}>• Bal ₹{(r.balance_amount || 0).toLocaleString()}</Text>
+                    ) : (
+                      <Text style={styles.ledgerPaidOk}>• Paid ✓</Text>
+                    )}
+                  </View>
+                ) : null}
+
                 {/* Last Line: Branch Name on Left, Machine Name on Right */}
                 <View style={styles.cardBottomRow}>
                   <View style={styles.bottomMetaItem}>
@@ -307,7 +349,7 @@ export default function ArrivalsScreen() {
                     </View>
                   ) : null}
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </ScrollView>
@@ -321,6 +363,14 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { fontSize: 18, fontWeight: "800", color: colors.text },
   subtitle: { fontSize: 11, color: colors.textMuted, fontWeight: "600", marginTop: 2 },
+  searchContainer: { paddingHorizontal: spacing.xl, paddingVertical: spacing.xs },
+  searchBox: { flexDirection: "row", alignItems: "center", backgroundColor: colors.card, borderRadius: radius.pill, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: colors.border, gap: 6, ...shadow.sm },
+  searchInput: { flex: 1, fontSize: 13, color: colors.text, padding: 0 },
+  ledgerRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 4, marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.border + "60" },
+  ledgerBill: { fontSize: 12, fontWeight: "700", color: colors.text },
+  ledgerPaid: { fontSize: 12, fontWeight: "700", color: colors.success },
+  ledgerBal: { fontSize: 12, fontWeight: "800", color: colors.accent },
+  ledgerPaidOk: { fontSize: 12, fontWeight: "700", color: colors.success },
   
   dateFilterContainer: { paddingBottom: spacing.xs },
   dateScroll: { paddingHorizontal: spacing.xl, gap: spacing.xs, alignItems: "center" },

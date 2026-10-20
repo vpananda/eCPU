@@ -9,6 +9,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -26,8 +27,8 @@ import logging
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-DATABASE_URL = os.environ["DATABASE_URL"].strip()
-DB_NAME = os.environ["DB_NAME"].strip()
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DB_NAME = os.environ.get("DB_NAME", "postgres").strip()
 JWT_SECRET = os.environ.get("JWT_SECRET", "ethree-agro-secret-key-change-me-2026").strip()
 JWT_ALGO = "HS256"
 JWT_EXPIRE_MIN = 60 * 24 * 30  # 30 days
@@ -599,6 +600,11 @@ class PostgresDBWrapper:
         self.counters = PostgresCollection(self, "public.counters")
 
     async def open(self):
+        if not self.dsn:
+            raise RuntimeError(
+                "DATABASE_URL is not set in backend/.env! "
+                "Please configure DATABASE_URL (PostgreSQL/Supabase connection string) to start the server."
+            )
         self.pool = AsyncConnectionPool(
             conninfo=self.dsn,
             open=False,
@@ -668,6 +674,7 @@ security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="E3 - Energy Efficient Environment")
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -778,9 +785,9 @@ async def audit(action: str, entity: str, entity_id: str, user: dict, before: An
         "action": action,
         "entity": entity,
         "entity_id": entity_id,
-        "user_id": user["id"],
-        "user_mobile": user["mobile"],
-        "user_role": user["role"],
+        "user_id": user.get("id", ""),
+        "user_mobile": user.get("mobile", ""),
+        "user_role": user.get("role", "Admin"),
         "before": clean_for_json(before),
         "after": clean_for_json(after),
         "timestamp": now_utc().isoformat(),
@@ -872,6 +879,11 @@ class CustomerIn(BaseModel):
     branch_id: Optional[str] = None
 
 
+class MergeCustomerIn(BaseModel):
+    source_customer_id: str
+    target_customer_id: str
+
+
 class ProductIn(BaseModel):
     name: str
     default_rate: float = 0
@@ -958,6 +970,13 @@ class BatchIn(BaseModel):
 
 class BatchUpdate(BaseModel):
     arrival_date: Optional[str] = None
+    raw_weight: Optional[float] = None
+    rate_per_kg: Optional[float] = None
+    bags: Optional[int] = None
+    customer_id: Optional[str] = None
+    product_id: Optional[str] = None
+    remarks: Optional[str] = None
+    received_from: Optional[str] = None
 
 
 class BatchStatusUpdate(BaseModel):
@@ -985,6 +1004,14 @@ class PaymentIn(BaseModel):
     amount: float
     mode: str  # Cash, UPI, Bank, Credit
     remarks: Optional[str] = ""
+    created_at: Optional[str] = None
+
+
+class PaymentUpdate(BaseModel):
+    amount: Optional[float] = None
+    mode: Optional[str] = None
+    remarks: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class SaleIn(BaseModel):
@@ -1677,6 +1704,55 @@ async def list_customers(
     return docs
 
 
+@api.post("/customers/merge")
+async def merge_customers(body: MergeCustomerIn, user: dict = Depends(require_roles("Admin", "Manager"))):
+    src_id = body.source_customer_id
+    tgt_id = body.target_customer_id
+    if src_id == tgt_id:
+        raise HTTPException(status_code=400, detail="Source and target customer cannot be the same")
+
+    src = await db.customers.find_one({"id": src_id}, {"_id": 0})
+    tgt = await db.customers.find_one({"id": tgt_id}, {"_id": 0})
+    if not src or not tgt:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    # 1. Reassign all batches from duplicate (source) to primary (target)
+    await db.query(
+        "UPDATE public.batches SET customer_id = %s::uuid WHERE customer_id = %s::uuid",
+        [tgt_id, src_id],
+        "public.batches"
+    )
+
+    # 2. Reassign all payments
+    await db.query(
+        "UPDATE public.payments SET customer_id = %s::uuid WHERE customer_id = %s::uuid",
+        [tgt_id, src_id],
+        "public.payments"
+    )
+
+    # 3. Reassign all sales
+    await db.query(
+        "UPDATE public.sales SET customer_id = %s::uuid WHERE customer_id = %s::uuid",
+        [tgt_id, src_id],
+        "public.sales"
+    )
+
+    # 4. Remove the source duplicate customer completely
+    await db.customers.delete_one({"id": src_id})
+
+    # 5. Audit log
+    await audit(
+        "merge", "customer", src_id, user,
+        {"from": f"{src.get('name')} ({src.get('code')})"},
+        {"into": f"{tgt.get('name')} ({tgt.get('code')})"}
+    )
+
+    return {
+        "ok": True,
+        "message": f"Successfully merged {src.get('name')} ({src.get('code')}) into {tgt.get('name')} ({tgt.get('code')})"
+    }
+
+
 @api.get("/customers/{cid}")
 async def get_customer(cid: str, user: dict = Depends(get_current_user)):
     c = await db.customers.find_one({"id": cid}, {"_id": 0})
@@ -1687,28 +1763,140 @@ async def get_customer(cid: str, user: dict = Depends(get_current_user)):
     branch = await db.branches.find_one({"id": c.get("branch_id")}, {"_id": 0}) if c.get("branch_id") else None
     c["branch_name"] = branch["name"] if branch else "-"
 
-    # stats
-    batches = await db.batches.find({"customer_id": cid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # stats & complete arrivals history
+    batches_sql = """
+        SELECT 
+            b.*,
+            p.name as product_name,
+            m.name as machine_name,
+            br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.machines m ON b.machine_id = m.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE b.customer_id = %s::uuid
+        ORDER BY COALESCE(b.arrival_date, b.created_at) DESC, b.created_at DESC
+        LIMIT 1000
+    """
+    rows = await db.query(batches_sql, [cid])
+    batches = []
+    for r in rows:
+        d = dict(r)
+        for field in ["id", "customer_id", "product_id", "machine_id", "branch_id"]:
+            if d.get(field):
+                d[field] = str(d[field])
+        if d.get("arrival_date"):
+            d["arrival_date"] = d["arrival_date"].isoformat() if hasattr(d["arrival_date"], "isoformat") else str(d["arrival_date"])
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat() if hasattr(d["created_at"], "isoformat") else str(d["created_at"])
+        if d.get("delivered_at"):
+            d["delivered_at"] = d["delivered_at"].isoformat() if hasattr(d["delivered_at"], "isoformat") else str(d["delivered_at"])
+        if d.get("raw_weight") is not None:
+            d["raw_weight"] = float(d["raw_weight"])
+        if d.get("rate_per_kg") is not None:
+            d["rate_per_kg"] = float(d["rate_per_kg"])
+        if d.get("bill_amount") is not None:
+            d["bill_amount"] = float(d["bill_amount"])
+        if d.get("total_paid") is not None:
+            d["total_paid"] = float(d["total_paid"])
+        if d.get("balance_amount") is not None:
+            d["balance_amount"] = float(d["balance_amount"])
+        batches.append(d)
+
+    # Fetch payments for this customer (both batch-linked and advances)
+    payments_sql = """
+        SELECT 
+            p.id::text as id, p.amount, p.mode, p.remarks, p.created_at, p.batch_id::text as batch_id,
+            b.batch_no
+        FROM public.payments p
+        LEFT JOIN public.batches b ON p.batch_id = b.id
+        WHERE p.customer_id = %s::uuid OR b.customer_id = %s::uuid
+        ORDER BY p.created_at ASC
+    """
+    pay_rows = await db.query(payments_sql, [cid, cid])
+    payments = []
+    for pr in pay_rows:
+        pd = dict(pr)
+        pd["amount"] = float(pd["amount"])
+        if pd.get("created_at"):
+            pd["created_at"] = pd["created_at"].isoformat() if hasattr(pd["created_at"], "isoformat") else str(pd["created_at"])
+        payments.append(pd)
+
     total_visits = len(batches)
-    total_weight = sum(b.get("raw_weight", 0) for b in batches)
-    total_revenue = sum(b.get("bill_amount", 0) for b in batches)
-    total_paid = sum(b.get("total_paid", 0) for b in batches)
-    pending_balance = total_revenue - total_paid
+    total_weight = round(sum(b.get("raw_weight", 0) for b in batches), 2)
+    total_revenue = round(sum(b.get("bill_amount", 0) for b in batches), 2)
+    total_paid = round(sum(p.get("amount", 0) for p in payments), 2)
+    pending_balance = round(total_revenue - total_paid, 2)
     c["stats"] = {
         "total_visits": total_visits, "total_weight": total_weight,
-        "total_revenue": total_revenue, "pending_balance": pending_balance,
+        "total_revenue": total_revenue, "total_paid": total_paid,
+        "pending_balance": pending_balance,
     }
-    c["history"] = batches[:20]
+    c["history"] = batches
+    c["payments"] = payments
+
+    # Build full chronological double-entry accounting ledger
+    ledger = []
+    for b in batches:
+        ledger.append({
+            "id": b["id"],
+            "type": "debit",
+            "date": b.get("arrival_date") or b.get("created_at"),
+            "ref_no": b.get("batch_no"),
+            "description": f"Drying: {b.get('product_name') or 'Spice'} ({b.get('raw_weight', 0)}kg @ ₹{b.get('rate_per_kg', 0)})",
+            "debit": float(b.get("bill_amount", 0)),
+            "credit": 0.0,
+            "mode": None,
+            "remarks": b.get("remarks") or "",
+        })
+    for p in payments:
+        ledger.append({
+            "id": p["id"],
+            "type": "credit",
+            "date": p.get("created_at"),
+            "ref_no": p.get("batch_no") or "Advance",
+            "description": f"Payment ({p.get('mode')})" + (f" - {p.get('remarks')}" if p.get("remarks") else ""),
+            "debit": 0.0,
+            "credit": float(p.get("amount", 0)),
+            "mode": p.get("mode"),
+            "remarks": p.get("remarks") or "",
+        })
+    
+    # Sort chronological
+    ledger.sort(key=lambda x: str(x.get("date") or ""))
+    curr_balance = 0.0
+    for entry in ledger:
+        curr_balance += (entry["debit"] - entry["credit"])
+        entry["balance"] = round(curr_balance, 2)
+
+    c["ledger"] = ledger
     return c
 
 
 @api.post("/customers")
 async def create_customer(body: CustomerIn, user: dict = Depends(get_current_user)):
+    target_branch_id = await resolve_branch_id(user, body.branch_id)
+    if not can_write_to_branch(user, target_branch_id):
+        raise HTTPException(status_code=403, detail="Cannot create in this branch")
+
+    # Check for duplicate customer
+    mobile = body.mobile.strip() if body.mobile else ""
+    if mobile and not mobile.startswith("90001"):
+        existing_mob = await db.customers.find_one({"mobile": mobile, "is_deleted": {"$ne": True}})
+        if existing_mob:
+            raise HTTPException(status_code=400, detail=f"Customer with mobile {mobile} already exists ({existing_mob.get('name')}, {existing_mob.get('code')})")
+
+    existing_name = await db.customers.find_one({
+        "name": body.name.strip(),
+        "branch_id": target_branch_id,
+        "is_deleted": {"$ne": True}
+    })
+    if existing_name:
+        raise HTTPException(status_code=400, detail=f"Customer '{body.name}' already exists in this branch ({existing_name.get('code')})")
+
     seq = await next_seq("customer")
     c = body.dict()
-    c["branch_id"] = await resolve_branch_id(user, c.get("branch_id"))
-    if not can_write_to_branch(user, c["branch_id"]):
-        raise HTTPException(status_code=403, detail="Cannot create in this branch")
+    c["branch_id"] = target_branch_id
     c.update({
         "id": str(uuid.uuid4()),
         "code": f"C{seq:04d}",
@@ -1804,6 +1992,7 @@ async def clean_batch(b: Optional[dict], include_history: bool = True) -> Option
 async def list_batches(user: dict = Depends(get_current_user),
                        q: Optional[str] = None, status: Optional[str] = None,
                        branch_id: Optional[str] = None,
+                       customer_id: Optional[str] = None,
                        start: Optional[str] = None,
                        end: Optional[str] = None,
                        has_balance: Optional[bool] = None):
@@ -1824,19 +2013,25 @@ async def list_batches(user: dict = Depends(get_current_user),
             where_clauses.append("b.branch_id = %s")
             params.append(bid)
             
+    if customer_id:
+        where_clauses.append("b.customer_id = %s::uuid")
+        params.append(customer_id)
+
     if start and end:
         pstart, pend = _parse_range(start, end)
-        where_clauses.append("b.created_at >= %s AND b.created_at < %s")
-        params.extend([pstart, pend])
+        s_date = start[:10]
+        e_date = end[:10]
+        where_clauses.append("((b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date::text >= %s AND b.arrival_date::text <= %s))")
+        params.extend([pstart, pend, s_date, e_date])
         
     if status:
         where_clauses.append("b.status = %s")
         params.append(status)
         
     if q:
-        where_clauses.append("(b.batch_no ILIKE %s OR b.receipt_no ILIKE %s)")
+        where_clauses.append("(b.batch_no ILIKE %s OR b.receipt_no ILIKE %s OR c.name ILIKE %s OR c.mobile ILIKE %s OR c.code ILIKE %s)")
         q_like = f"%{q}%"
-        params.extend([q_like, q_like])
+        params.extend([q_like, q_like, q_like, q_like, q_like])
 
     limit = 500
     if has_balance:
@@ -1856,7 +2051,7 @@ async def list_batches(user: dict = Depends(get_current_user),
         LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
         WHERE {" AND ".join(where_clauses)}
-        ORDER BY b.created_at DESC
+        ORDER BY COALESCE(b.arrival_date, b.created_at) DESC, b.created_at DESC
         LIMIT {limit}
     """
     
@@ -2165,6 +2360,40 @@ async def update_batch_fields(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid arrival_date format, must be YYYY-MM-DD")
 
+    if body.raw_weight is not None and body.raw_weight > 0:
+        upd["raw_weight"] = float(body.raw_weight)
+        upd["estimated_dry_weight"] = float(body.raw_weight)
+        if b.get("status") == "Delivered":
+            upd["actual_dry_weight"] = float(body.raw_weight)
+
+    if body.rate_per_kg is not None and body.rate_per_kg > 0:
+        upd["rate_per_kg"] = float(body.rate_per_kg)
+
+    if body.bags is not None and body.bags >= 0:
+        upd["bags"] = int(body.bags)
+
+    if body.customer_id is not None:
+        upd["customer_id"] = body.customer_id
+
+    if body.product_id is not None:
+        upd["product_id"] = body.product_id
+
+    if body.remarks is not None:
+        upd["remarks"] = body.remarks
+
+    if body.received_from is not None:
+        upd["received_from"] = body.received_from
+
+    # Recalculate bill and balance if weight or rate changed
+    new_weight = upd.get("raw_weight", b.get("raw_weight", 0))
+    new_rate = upd.get("rate_per_kg", b.get("rate_per_kg", 10))
+    loading = b.get("loading_charges", 0)
+    discount = b.get("discount", 0)
+    new_bill = round((float(new_weight) * float(new_rate)) + float(loading) - float(discount), 2)
+    upd["bill_amount"] = new_bill
+    total_paid = float(b.get("total_paid", 0))
+    upd["balance_amount"] = round(new_bill - total_paid, 2)
+
     if not upd:
         return {"ok": True}
 
@@ -2172,7 +2401,7 @@ async def update_batch_fields(
     upd["updated_by"] = user["id"]
 
     await db.batches.update_one({"id": bid}, {"$set": upd})
-    await audit("update_batch", "batch", bid, user, {"arrival_date": b.get("arrival_date")}, upd)
+    await audit("update_batch", "batch", bid, user, b, upd)
     return {"ok": True}
 
 
@@ -2207,6 +2436,7 @@ async def delete_batch(
 async def list_payments(
     user: dict = Depends(get_current_user),
     branch_id: Optional[str] = None,
+    customer_id: Optional[str] = None,
     start: Optional[str] = None,
     end: Optional[str] = None
 ):
@@ -2225,6 +2455,10 @@ async def list_payments(
     if target_branch:
         where_clauses.append("(p.branch_id = %s OR b.branch_id = %s)")
         params.extend([target_branch, target_branch])
+
+    if customer_id:
+        where_clauses.append("(p.customer_id = %s::uuid OR b.customer_id = %s::uuid)")
+        params.extend([customer_id, customer_id])
         
     if start:
         where_clauses.append("p.created_at >= %s")
@@ -2239,6 +2473,8 @@ async def list_payments(
             p.batch_id::text as batch_id, p.customer_id::text as customer_id, p.branch_id::text as branch_id,
             b.batch_no,
             COALESCE(c.name, cb.name) as customer_name,
+            COALESCE(c.code, cb.code) as customer_code,
+            COALESCE(c.mobile, cb.mobile) as customer_mobile,
             COALESCE(br.name, brb.name) as branch_name
         FROM public.payments p
         LEFT JOIN public.batches b ON p.batch_id = b.id
@@ -2248,7 +2484,7 @@ async def list_payments(
         LEFT JOIN public.branches brb ON b.branch_id = brb.id
         WHERE {" AND ".join(where_clauses)}
         ORDER BY p.created_at DESC
-        LIMIT 1000
+        LIMIT 2000
     """
     
     rows = await db.query(sql, params)
@@ -2268,6 +2504,8 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be > 0")
         
+    created_time = body.created_at if body.created_at else now_utc().isoformat()
+
     if body.batch_id:
         b = await db.batches.find_one({"id": body.batch_id}, {"_id": 0})
         if not b:
@@ -2277,7 +2515,7 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
             "mode": body.mode, "remarks": body.remarks or "",
             "customer_id": b.get("customer_id"),
             "branch_id": b.get("branch_id"),
-            "created_at": now_utc().isoformat(), "created_by": user["id"],
+            "created_at": created_time, "created_by": user["id"],
             "updated_at": now_utc().isoformat(), "updated_by": user["id"],
         }
         await db.payments.insert_one(dict(p))
@@ -2301,12 +2539,95 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
             "mode": body.mode, "remarks": body.remarks or "",
             "customer_id": body.customer_id,
             "branch_id": body.branch_id,
-            "created_at": now_utc().isoformat(), "created_by": user["id"],
+            "created_at": created_time, "created_by": user["id"],
             "updated_at": now_utc().isoformat(), "updated_by": user["id"],
         }
         await db.payments.insert_one(dict(p))
         await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"], "type": "advance"})
         return clean(p)
+
+
+@api.put("/payments/{pid}")
+async def update_payment(pid: str, body: PaymentUpdate, user: dict = Depends(get_current_user)):
+    sql = """
+        SELECT p.*, b.id::text as b_id 
+        FROM public.payments p 
+        LEFT JOIN public.batches b ON p.batch_id = b.id 
+        WHERE p.id = %s::uuid
+    """
+    rows = await db.query(sql, [pid])
+    if not rows:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    old_p = dict(rows[0])
+    
+    if user.get("role") not in ("Admin", "Manager"):
+        raise HTTPException(status_code=403, detail="Only Admin or Manager can edit payments")
+
+    set_clauses = ["updated_at = now()", "updated_by = %s::uuid"]
+    params = [user["id"]]
+
+    new_amount = float(old_p["amount"])
+    if body.amount is not None:
+        if body.amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be > 0")
+        set_clauses.append("amount = %s")
+        params.append(body.amount)
+        new_amount = body.amount
+
+    if body.mode is not None:
+        if body.mode not in ("Cash", "UPI", "Bank", "Credit"):
+            raise HTTPException(status_code=400, detail="Invalid payment mode")
+        set_clauses.append("mode = %s::payment_mode")
+        params.append(body.mode)
+
+    if body.remarks is not None:
+        set_clauses.append("remarks = %s")
+        params.append(body.remarks)
+
+    if body.created_at:
+        set_clauses.append("created_at = %s::timestamptz")
+        params.append(body.created_at)
+
+    params.append(pid)
+    upd_sql = f"UPDATE public.payments SET {', '.join(set_clauses)} WHERE id = %s::uuid"
+    await db.execute(upd_sql, params)
+
+    if old_p.get("batch_id"):
+        batch = await db.batches.find_one({"id": str(old_p["batch_id"])}, {"_id": 0})
+        if batch:
+            totals = await recompute_batch_totals(batch)
+            await db.batches.update_one({"id": str(old_p["batch_id"])}, {"$set": totals})
+
+    await audit(
+        "update", "payment", pid, user,
+        {"amount": float(old_p["amount"]), "mode": old_p["mode"]},
+        {"amount": float(new_amount), "mode": body.mode or old_p["mode"]}
+    )
+    
+    updated_rows = await db.query(sql, [pid])
+    return clean(dict(updated_rows[0]))
+
+
+@api.delete("/payments/{pid}")
+async def delete_payment(pid: str, user: dict = Depends(get_current_user)):
+    if user.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Only Admin can delete payments")
+    sql = "SELECT p.* FROM public.payments p WHERE p.id = %s::uuid"
+    rows = await db.query(sql, [pid])
+    if not rows:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    old_p = dict(rows[0])
+    
+    await db.execute("DELETE FROM public.payments WHERE id = %s::uuid", [pid])
+    
+    if old_p.get("batch_id"):
+        batch = await db.batches.find_one({"id": str(old_p["batch_id"])}, {"_id": 0})
+        if batch:
+            totals = await recompute_batch_totals(batch)
+            await db.batches.update_one({"id": str(old_p["batch_id"])}, {"$set": totals})
+
+    await audit("delete", "payment", pid, user, {"amount": float(old_p["amount"])}, None)
+    return {"ok": True, "deleted": pid}
 
 
 # ---------------------------- SALES ----------------------------
@@ -2548,6 +2869,8 @@ def _today_range():
 
 def _parse_range(start: Optional[str], end: Optional[str]):
     """Parse YYYY-MM-DD strings into UTC isoformat range. Default: this month → today."""
+    if start and start.lower() == "all":
+        return "2020-01-01T00:00:00+00:00", "2035-12-31T23:59:59+00:00"
     now = now_utc()
     if start:
         try:
@@ -2578,119 +2901,130 @@ async def dashboard(
 ):
     tstart, tend = _today_range()
     pstart, pend = _parse_range(start, end)
+    
+    role = user.get("role")
+    ubid = user.get("branch_id")
+    target_branch_id = None
     if branch_id:
-        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
+        if role != "Admin" and ubid and ubid != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
-        bq = {"branch_id": branch_id}
-    else:
-        bq = branch_query(user)
+        target_branch_id = branch_id
+    elif role != "Admin" and ubid:
+        target_branch_id = ubid
 
-    # Dispatch tasks concurrently
-    period_batches_task = db.batches.find(
-        {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
-    ).to_list(2000)
-    
-    period_customers_task = db.customers.count_documents(bq)
-    
-    period_deliveries_task = db.batches.find(
-        {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
-    ).to_list(2000)
-    
-    bb_task = db.batches.find(bq, {"_id": 0, "id": 1}).to_list(3000) if bq else None
-    
-    period_expenses_task = db.expenses.find(
-        {**bq, "created_at": {"$gte": pstart, "$lt": pend}}, {"_id": 0}
-    ).to_list(2000)
+    batch_where = ["1=1"]
+    batch_params = []
+    pay_where = ["1=1"]
+    pay_params = []
+    exp_where = ["1=1"]
+    exp_params = []
+    cust_filter = {}
+    machine_filter = {}
 
-    today_batches_task = db.batches.find(
-        {**bq, "created_at": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
-    ).to_list(1000)
+    if target_branch_id:
+        batch_where.append("b.branch_id = %s")
+        batch_params.append(target_branch_id)
+        pay_where.append("p.branch_id = %s")
+        pay_params.append(target_branch_id)
+        exp_where.append("e.branch_id = %s")
+        exp_params.append(target_branch_id)
+        cust_filter["branch_id"] = target_branch_id
+        machine_filter["branch_id"] = target_branch_id
 
-    today_deliveries_task = db.batches.find(
-        {**bq, "status": "Delivered", "delivery.delivery_date": {"$gte": tstart, "$lt": tend}}, {"_id": 0}
-    ).to_list(1000)
+    s_date = pstart[:10]
+    e_date = pend[:10]
 
-    processing_task = db.batches.find(
-        {**bq, "status": {"$in": ["Loaded", "Drying", "Completed"]}}, {"_id": 0}
-    ).to_list(2000)
+    # Fast single-pass SQL aggregation across the entire batches table
+    batch_sql = f"""
+        SELECT
+            COALESCE(SUM(CASE WHEN (b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date) THEN b.raw_weight ELSE 0 END), 0) AS period_received_weight,
+            COALESCE(SUM(CASE WHEN (b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date) THEN b.bill_amount ELSE 0 END), 0) AS period_billed,
+            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN 1 ELSE 0 END), 0) AS period_deliveries,
+            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN b.actual_dry_weight ELSE 0 END), 0) AS period_delivered_weight,
+            COALESCE(SUM(CASE WHEN b.created_at >= %s AND b.created_at < %s THEN b.raw_weight ELSE 0 END), 0) AS today_in_weight,
+            COALESCE(SUM(CASE WHEN b.created_at >= %s AND b.created_at < %s THEN 1 ELSE 0 END), 0) AS today_in_count,
+            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN b.actual_dry_weight ELSE 0 END), 0) AS today_out_weight,
+            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN 1 ELSE 0 END), 0) AS today_out_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN b.raw_weight ELSE 0 END), 0) AS processing_weight,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN 1 ELSE 0 END), 0) AS processing_count,
+            COALESCE(SUM(CASE WHEN b.status = 'Completed' THEN 1 ELSE 0 END), 0) AS drying_completed_count,
+            COALESCE(SUM(b.balance_amount), 0) AS pending_payments,
+            COALESCE(SUM(CASE WHEN b.balance_amount > 0 THEN 1 ELSE 0 END), 0) AS pending_payments_count
+        FROM public.batches b
+        WHERE {" AND ".join(batch_where)}
+    """
+    full_batch_params = [
+        pstart, pend, s_date, e_date,
+        pstart, pend, s_date, e_date,
+        pstart, pend, s_date, e_date,
+        pstart, pend, s_date, e_date,
+        tstart, tend,
+        tstart, tend,
+        tstart, tend,
+        tstart, tend
+    ] + batch_params
 
-    all_batches_task = db.batches.find(bq, {"_id": 0}).to_list(5000)
-    
-    machines_task = db.machines.find(bq, {"_id": 0}).to_list(50)
-    
-    recent_task = db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15)
+    # Direct SQL sum on payments
+    pay_where.append("p.created_at >= %s AND p.created_at < %s")
+    pay_sql = f"""
+        SELECT COALESCE(SUM(p.amount), 0) as total
+        FROM public.payments p
+        WHERE {" AND ".join(pay_where)}
+    """
+    full_pay_params = pay_params + [pstart, pend]
 
-    # Gather first round of queries
+    # Direct SQL sum on expenses
+    exp_where.append("e.created_at >= %s AND e.created_at < %s")
+    exp_sql = f"""
+        SELECT COALESCE(SUM(e.amount), 0) as total
+        FROM public.expenses e
+        WHERE {" AND ".join(exp_where)}
+    """
+    full_exp_params = exp_params + [pstart, pend]
+
+    # Run all lightweight queries in parallel
     tasks = [
-        period_batches_task,
-        period_customers_task,
-        period_deliveries_task,
-        period_expenses_task,
-        today_batches_task,
-        today_deliveries_task,
-        processing_task,
-        all_batches_task,
-        machines_task,
-        recent_task,
+        db.query(batch_sql, full_batch_params),
+        db.query(pay_sql, full_pay_params),
+        db.query(exp_sql, full_exp_params),
+        db.customers.count_documents(cust_filter),
+        db.machines.find(machine_filter, {"_id": 0}).to_list(50),
+        db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15),
     ]
-    if bb_task:
-        tasks.append(bb_task)
 
     results = await asyncio.gather(*tasks)
 
-    # Unpack results
-    period_batches = results[0]
-    period_customers = results[1]
-    period_deliveries_docs = results[2]
-    period_expenses = results[3]
-    today_batches = results[4]
-    today_deliveries_docs = results[5]
-    processing_docs = results[6]
-    all_batches = results[7]
-    machines = results[8]
-    recent = results[9]
+    batch_stats = results[0][0] if results[0] else {}
+    pay_res = results[1][0] if results[1] else {}
+    exp_res = results[2][0] if results[2] else {}
+    period_customers = results[3]
+    machines = results[4]
+    recent = results[5]
+
+    period_received_weight = round(float(batch_stats.get("period_received_weight") or 0), 2)
+    period_billed = round(float(batch_stats.get("period_billed") or 0), 2)
+    period_deliveries = int(batch_stats.get("period_deliveries") or 0)
+    period_delivered_weight = round(float(batch_stats.get("period_delivered_weight") or 0), 2)
     
-    branch_batch_ids = None
-    if bb_task:
-        bb = results[10]
-        branch_batch_ids = [x["id"] for x in bb]
-
-    # Run secondary query (payments)
-    pay_query: Dict[str, Any] = {"created_at": {"$gte": pstart, "$lt": pend}}
-    if branch_batch_ids is not None:
-        pay_query["batch_id"] = {"$in": branch_batch_ids}
+    today_in_weight = round(float(batch_stats.get("today_in_weight") or 0), 2)
+    today_in_count = int(batch_stats.get("today_in_count") or 0)
+    today_out_weight = round(float(batch_stats.get("today_out_weight") or 0), 2)
+    today_out_count = int(batch_stats.get("today_out_count") or 0)
     
-    period_payments = await db.payments.find(pay_query, {"_id": 0}).to_list(2000)
-
-    period_received_weight = round(sum(b.get("raw_weight", 0) for b in period_batches), 2)
-    period_billed = round(sum(b.get("bill_amount", 0) for b in period_batches), 2)
+    processing_weight = round(float(batch_stats.get("processing_weight") or 0), 2)
+    processing_count = int(batch_stats.get("processing_count") or 0)
+    drying_completed_count = int(batch_stats.get("drying_completed_count") or 0)
+    pending_deliveries_count = drying_completed_count
     
-    period_deliveries = len(period_deliveries_docs)
-    period_delivered_weight = round(
-        sum(b.get("actual_dry_weight") or 0 for b in period_deliveries_docs), 2
-    )
+    pending_payments = max(0.00, round(float(batch_stats.get("pending_payments") or 0), 2))
+    pending_payments_count = int(batch_stats.get("pending_payments_count") or 0)
 
-    period_collection = round(sum(p["amount"] for p in period_payments), 2)
-    period_expense = round(sum(e["amount"] for e in period_expenses), 2)
-
-    today_in_weight = round(sum(b.get("raw_weight", 0) for b in today_batches), 2)
-    today_in_count = len(today_batches)
-
-    today_out_weight = round(sum(b.get("actual_dry_weight") or 0 for b in today_deliveries_docs), 2)
-    today_out_count = len(today_deliveries_docs)
-
-    processing_weight = round(sum(b.get("raw_weight", 0) for b in processing_docs), 2)
-    processing_count = len(processing_docs)
-
-    pending_payments = max(0.00, round(sum(b.get("balance_amount", 0) for b in all_batches), 2))
+    period_collection = round(float(pay_res.get("total") or 0), 2)
+    period_expense = round(float(exp_res.get("total") or 0), 2)
 
     machines_running = sum(1 for m in machines if m["status"] == "Running")
     machines_available = sum(1 for m in machines if m["status"] == "Available")
     machines_maintenance = sum(1 for m in machines if m["status"] in ("Maintenance", "Cleaning"))
-
-    drying_completed_count = sum(1 for b in processing_docs if b.get("status") == "Completed")
-    pending_deliveries_count = sum(1 for b in processing_docs if b.get("status") == "Completed")
-    pending_payments_count = sum(1 for b in all_batches if b.get("balance_amount", 0) > 0)
 
     return {
         "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
@@ -2725,10 +3059,10 @@ async def dashboard_arrivals(
     start: Optional[str] = None,
     end: Optional[str] = None,
     branch_id: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 150,
 ):
     """List arrivals + processing + deliveries with customer + branch + weights."""
-    pstart, pend = _parse_range(start, end)
-    
     # Scoping
     where_clauses = ["1=1"]
     params = []
@@ -2744,16 +3078,36 @@ async def dashboard_arrivals(
         if role != "Admin" and bid:
             where_clauses.append("b.branch_id = %s")
             params.append(bid)
+
+    if q:
+        where_clauses.append("(b.batch_no ILIKE %s OR c.name ILIKE %s OR c.code ILIKE %s OR c.mobile ILIKE %s)")
+        q_like = f"%{q}%"
+        params.extend([q_like, q_like, q_like, q_like])
             
-    s_date = start or pstart[:10]
-    e_date = end or pend[:10]
     where_str = " AND ".join(where_clauses)
     
-    # 1. Fetch ins (arrivals in date range)
+    # 1. Fetch ins (arrivals)
+    in_where = [where_str]
+    in_params = list(params)
+    if start and end:
+        pstart, pend = _parse_range(start, end)
+        s_date = start[:10]
+        e_date = end[:10]
+        in_where.append("((b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date::text >= %s AND b.arrival_date::text <= %s))")
+        in_params.extend([pstart, pend, s_date, e_date])
+    elif start:
+        s_date = start[:10]
+        in_where.append("(b.created_at >= %s OR b.arrival_date::text >= %s)")
+        in_params.extend([s_date, s_date])
+    elif end:
+        e_date = end[:10]
+        in_where.append("(b.created_at <= %s OR b.arrival_date::text <= %s)")
+        in_params.extend([e_date, e_date])
+
     in_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
@@ -2764,20 +3118,33 @@ async def dashboard_arrivals(
         LEFT JOIN public.products p ON b.product_id = p.id
         LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
-        WHERE {where_str} AND (
-            (b.created_at >= %s AND b.created_at < %s) OR
-            (b.arrival_date::text >= %s AND b.arrival_date::text <= %s)
-        )
-        ORDER BY b.created_at DESC
-        LIMIT 1000
+        WHERE {" AND ".join(in_where)}
+        ORDER BY COALESCE(b.arrival_date, b.created_at) DESC, b.created_at DESC
+        LIMIT %s
     """
-    in_rows = await db.query(in_sql, params + [pstart, pend, s_date, e_date])
     
-    # 2. Fetch outs (deliveries in date range)
+    # 2. Fetch outs (deliveries)
+    out_where = [where_str, "b.status = 'Delivered'"]
+    out_params = list(params)
+    if start and end:
+        pstart, pend = _parse_range(start, end)
+        s_date = start[:10]
+        e_date = end[:10]
+        out_where.append("((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date::text >= %s AND b.arrival_date::text <= %s))")
+        out_params.extend([pstart, pend, s_date, e_date])
+    elif start:
+        s_date = start[:10]
+        out_where.append("(b.delivered_at >= %s OR b.arrival_date::text >= %s)")
+        out_params.extend([s_date, s_date])
+    elif end:
+        e_date = end[:10]
+        out_where.append("(b.delivered_at <= %s OR b.arrival_date::text <= %s)")
+        out_params.extend([e_date, e_date])
+
     out_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
@@ -2788,17 +3155,16 @@ async def dashboard_arrivals(
         LEFT JOIN public.products p ON b.product_id = p.id
         LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
-        WHERE {where_str} AND b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s
+        WHERE {" AND ".join(out_where)}
         ORDER BY b.delivered_at DESC
-        LIMIT 1000
+        LIMIT %s
     """
-    out_rows = await db.query(out_sql, params + [pstart, pend])
     
     # 3. Fetch active processing batches
     proc_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
@@ -2810,10 +3176,16 @@ async def dashboard_arrivals(
         LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
         WHERE {where_str} AND b.status IN ('Loaded', 'Drying', 'Completed')
-        ORDER BY b.created_at DESC
-        LIMIT 1000
+        ORDER BY COALESCE(b.arrival_date, b.created_at) DESC, b.created_at DESC
+        LIMIT %s
     """
-    proc_rows = await db.query(proc_sql, params)
+    
+    # Fetch in_rows, out_rows, and proc_rows concurrently
+    in_rows, out_rows, proc_rows = await asyncio.gather(
+        db.query(in_sql, in_params + [limit]),
+        db.query(out_sql, out_params + [limit]),
+        db.query(proc_sql, list(params) + [limit]),
+    )
     
     def format_row(r):
         d = dict(r)
@@ -2829,6 +3201,10 @@ async def dashboard_arrivals(
             "branch_name": d.get("branch_name") or "-",
             "arrival_date": d.get("arrival_date") or d["created_at"],
             "raw_weight": float(d.get("raw_weight") or 0),
+            "rate_per_kg": float(d.get("rate_per_kg") or 0),
+            "bill_amount": float(d.get("bill_amount") or 0),
+            "total_paid": float(d.get("total_paid") or 0),
+            "balance_amount": float(d.get("balance_amount") or 0),
             "actual_dry_weight": float(d["actual_dry_weight"]) if d.get("actual_dry_weight") is not None else None,
             "delivery_date": d.get("delivery_date"),
             "status": d["status"],
@@ -2842,8 +3218,11 @@ async def dashboard_arrivals(
     total_out = round(sum((r["actual_dry_weight"] or 0) for r in out_list), 2)
     total_proc = round(sum(r["raw_weight"] for r in proc_list), 2)
     
+    range_start = start if start else "All"
+    range_end = (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10] if (start and end) else (end if end else "Time")
+
     return {
-        "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
+        "range": {"start": range_start, "end": range_end},
         "totals": {
             "in_weight": total_in, "out_weight": total_out, "processing_weight": total_proc,
             "in_count": len(in_list), "out_count": len(out_list), "processing_count": len(proc_list),
@@ -2856,27 +3235,42 @@ async def dashboard_arrivals(
 
 @api.get("/reports/summary")
 async def reports_summary(user: dict = Depends(get_current_user)):
-    all_batches = await db.batches.find({}, {"_id": 0}).to_list(2000)
-    all_pay = await db.payments.find({}, {"_id": 0}).to_list(2000)
-    all_exp = await db.expenses.find({}, {"_id": 0}).to_list(2000)
+    batch_totals_task = db.query("""
+        SELECT 
+            COALESCE(SUM(bill_amount), 0) as total_billed,
+            COALESCE(SUM(CASE WHEN status != 'Delivered' THEN 1 ELSE 0 END), 0) as pending_deliveries,
+            COUNT(*) as total_batches
+        FROM public.batches
+    """)
+    pay_total_task = db.query("SELECT COALESCE(SUM(amount), 0) as total_collection FROM public.payments")
+    exp_summary_task = db.query("SELECT category, COALESCE(SUM(amount), 0) as total FROM public.expenses GROUP BY category")
+    machines_task = db.machines.find({}, {"_id": 0}).to_list(50)
+    util_task = db.query("SELECT machine_id::text as machine_id, COUNT(*) as cnt FROM public.batches WHERE machine_id IS NOT NULL GROUP BY machine_id")
 
-    total_collection = round(sum(p["amount"] for p in all_pay), 2)
-    total_expense = round(sum(e["amount"] for e in all_exp), 2)
-    total_billed = round(sum(b.get("bill_amount", 0) for b in all_batches), 2)
+    b_res, p_res, exp_res, machines, u_res = await asyncio.gather(
+        batch_totals_task, pay_total_task, exp_summary_task, machines_task, util_task
+    )
+
+    total_billed = round(float(b_res[0]["total_billed"] if b_res else 0), 2)
+    pending_deliveries = int(b_res[0]["pending_deliveries"] if b_res else 0)
+    total_batches = int(b_res[0]["total_batches"] if b_res else 0)
+    total_collection = round(float(p_res[0]["total_collection"] if p_res else 0), 2)
     pending_payments = max(0.00, round(total_billed - total_collection, 2))
-    pending_deliveries = sum(1 for b in all_batches if b.get("status") not in ("Delivered",))
 
-    # Machine utilization %
-    machines = await db.machines.find({}, {"_id": 0}).to_list(50)
-    util = []
-    for m in machines:
-        cnt = await db.batches.count_documents({"machine_id": m["id"]})
-        util.append({"name": m["name"], "batches": cnt, "status": m["status"]})
-
-    # Expense by category
     cat_totals: Dict[str, float] = {}
-    for e in all_exp:
-        cat_totals[e["category"]] = round(cat_totals.get(e["category"], 0) + e["amount"], 2)
+    total_expense = 0.0
+    for row in (exp_res or []):
+        cat = row.get("category") or "General"
+        amt = round(float(row.get("total") or 0), 2)
+        cat_totals[cat] = amt
+        total_expense += amt
+    total_expense = round(total_expense, 2)
+
+    machine_batch_counts = {r["machine_id"]: int(r["cnt"]) for r in (u_res or []) if r.get("machine_id")}
+    util = []
+    for m in (machines or []):
+        cnt = machine_batch_counts.get(m["id"], 0)
+        util.append({"name": m["name"], "batches": cnt, "status": m["status"]})
 
     return {
         "total_collection": total_collection,
@@ -2886,7 +3280,7 @@ async def reports_summary(user: dict = Depends(get_current_user)):
         "pending_deliveries": pending_deliveries,
         "machine_utilization": util,
         "expense_by_category": cat_totals,
-        "total_batches": len(all_batches),
+        "total_batches": total_batches,
     }
 
 

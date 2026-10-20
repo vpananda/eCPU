@@ -511,6 +511,7 @@ $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 ALTER TABLE public.branches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.branch_product_rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.machines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.batches ENABLE ROW LEVEL SECURITY;
@@ -542,6 +543,12 @@ CREATE POLICY products_read_policy ON public.products
   FOR SELECT TO authenticated USING (true);
 CREATE POLICY products_write_policy ON public.products
   FOR ALL TO authenticated USING (public.get_user_role() = 'Admin');
+
+-- Branch Product Rates Policies
+CREATE POLICY branch_product_rates_read_policy ON public.branch_product_rates
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY branch_product_rates_write_policy ON public.branch_product_rates
+  FOR ALL TO authenticated USING (public.get_user_role() IN ('Admin', 'Manager'));
 
 -- Settings Policies
 CREATE POLICY settings_read_policy ON public.settings

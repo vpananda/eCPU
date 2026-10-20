@@ -12,6 +12,22 @@ if (process.platform === 'win32' && !process.env.ANDROID_HOME) {
   }
 }
 
+// Automatically detect project Android SDK
+const projectAndroidSdk = path.resolve(__dirname, '..', '..', 'android-sdk');
+if (fs.existsSync(projectAndroidSdk)) {
+  process.env.ANDROID_HOME = projectAndroidSdk;
+  process.env.ANDROID_SDK_ROOT = projectAndroidSdk;
+  console.log(`[INFO] Configured ANDROID_HOME to project Android SDK: ${projectAndroidSdk}`);
+}
+
+// Automatically detect project JDK 17
+const projectJdk17 = path.resolve(__dirname, '..', '..', 'jdk17', 'jdk-17.0.20.1+1');
+if (fs.existsSync(projectJdk17)) {
+  process.env.JAVA_HOME = projectJdk17;
+  process.env.PATH = `${path.join(projectJdk17, 'bin')}${path.delimiter}${process.env.PATH}`;
+  console.log(`[INFO] Configured JAVA_HOME to project OpenJDK 17: ${projectJdk17}`);
+}
+
 
 // 1. Resolve paths
 const rootDir = path.resolve(__dirname, '..');
@@ -38,19 +54,21 @@ fs.mkdirSync(iosDestDir, { recursive: true });
 try {
   // 4. Trigger Expo Prebuild to generate native folders
   console.log('\n--- Running Expo Prebuild (creating native android & ios projects) ---');
-  execSync('npx expo prebuild --clean --no-install', { cwd: rootDir, stdio: 'inherit' });
+  const hasAndroid = fs.existsSync(path.join(rootDir, 'android'));
+  const prebuildCmd = hasAndroid ? 'npx expo prebuild --no-install' : 'npx expo prebuild --clean --no-install';
+  execSync(prebuildCmd, { cwd: rootDir, stdio: 'inherit' });
 
   // 5. Compile Android APK locally
   console.log('\n--- Compiling Android APK (assembleRelease) ---');
   const gradlewCmd = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
   const androidDir = path.join(rootDir, 'android');
   
-  // Ensure local.properties exists with the correct sdk.dir if missing
+  // Ensure local.properties exists with the correct sdk.dir
   const localPropertiesPath = path.join(androidDir, 'local.properties');
-  if (!fs.existsSync(localPropertiesPath) && process.env.ANDROID_HOME) {
-    console.log('[INFO] local.properties not found in Android project. Generating fallback local.properties...');
-    const escapedSdkDir = process.env.ANDROID_HOME.replace(/\\/g, '\\\\');
+  if (process.env.ANDROID_HOME) {
+    const escapedSdkDir = process.env.ANDROID_HOME.replace(/\\/g, '/');
     fs.writeFileSync(localPropertiesPath, `sdk.dir=${escapedSdkDir}\n`, 'utf8');
+    console.log(`[INFO] Written local.properties with sdk.dir: ${escapedSdkDir}`);
   }
 
   // Optimize compilation by limiting active architectures (targets arm64-v8a physical devices, reducing build time by ~75%)
@@ -62,7 +80,29 @@ try {
       /reactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64/g,
       'reactNativeArchitectures=arm64-v8a'
     );
+    if (fs.existsSync(projectJdk17)) {
+      const escapedJavaHome = projectJdk17.replace(/\\/g, '/');
+      if (!content.includes('org.gradle.java.home')) {
+        content += `\norg.gradle.java.home=${escapedJavaHome}\n`;
+      } else {
+        content = content.replace(/org\.gradle\.java\.home=.*/g, `org.gradle.java.home=${escapedJavaHome}`);
+      }
+    }
     fs.writeFileSync(gradlePropertiesPath, content, 'utf8');
+  }
+
+  // Ensure AndroidManifest.xml has android:usesCleartextTraffic="true"
+  const manifestPath = path.join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml');
+  if (fs.existsSync(manifestPath)) {
+    let manifest = fs.readFileSync(manifestPath, 'utf8');
+    if (!manifest.includes('android:usesCleartextTraffic')) {
+      manifest = manifest.replace(
+        '<application ',
+        '<application android:usesCleartextTraffic="true" '
+      );
+      fs.writeFileSync(manifestPath, manifest, 'utf8');
+      console.log('[INFO] Added android:usesCleartextTraffic="true" to AndroidManifest.xml');
+    }
   }
 
   execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });

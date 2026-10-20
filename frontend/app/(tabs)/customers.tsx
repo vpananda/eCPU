@@ -8,7 +8,7 @@ import { useAuth } from "@/src/auth";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
-type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string; branch_id?: string; branch_name?: string; total_arrivals?: number; total_amount?: number; amount_received?: number };
+type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string; branch_id?: string; branch_name?: string; total_arrivals?: number; total_amount?: number; amount_received?: number; is_deleted?: boolean; remarks?: string };
 
 const STATUSES = ["All", "Active", "Inactive"];
 
@@ -35,7 +35,7 @@ export default function CustomersScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filter]);
 
   useFocusEffect(useCallback(() => {
     load(q, filter);
@@ -44,6 +44,8 @@ export default function CustomersScreen() {
   const processedList = React.useMemo(() => {
     let result = list.filter(item => {
       if (selectedBranchId && item.branch_id !== selectedBranchId) return false;
+      if (filter === "Active" && item.is_deleted) return false;
+      if (filter === "Inactive" && !item.is_deleted) return false;
       return true;
     });
 
@@ -107,13 +109,23 @@ export default function CustomersScreen() {
             )}
           </View>
         </View>
-        <TouchableOpacity
-          testID="add-customer-button"
-          style={styles.addBtn}
-          onPress={() => router.push("/customer-form")}
-        >
-          <MaterialCommunityIcons name="plus" size={22} color="#fff" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <TouchableOpacity
+            testID="refresh-customer-button"
+            style={styles.refreshBtn}
+            onPress={() => load(q, filter)}
+            activeOpacity={0.7}
+          >
+            <MaterialCommunityIcons name="refresh" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            testID="add-customer-button"
+            style={styles.addBtn}
+            onPress={() => router.push("/customer-form")}
+          >
+            <MaterialCommunityIcons name="plus" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Status Filter Chips */}
@@ -249,6 +261,8 @@ export default function CustomersScreen() {
         <FlatList
           data={processedList}
           keyExtractor={i => i.id}
+          refreshing={loading}
+          onRefresh={() => load(q, filter)}
           contentContainerStyle={{ padding: spacing.xl, paddingBottom: 120, gap: spacing.md }}
           ListEmptyComponent={() => (
             <View style={styles.empty}>
@@ -260,17 +274,20 @@ export default function CustomersScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity
               testID={`customer-${item.id}`}
-              style={styles.item}
+              style={[styles.item, item.is_deleted && { opacity: 0.6, backgroundColor: colors.bg }]}
               onPress={() => router.push(`/customer/${item.id}`)}
               activeOpacity={0.85}
             >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{(item.name || "?").slice(0, 1).toUpperCase()}</Text>
+              <View style={[styles.avatar, item.is_deleted && { backgroundColor: colors.border }]}>
+                <Text style={[styles.avatarText, item.is_deleted && { color: colors.textMuted }]}>{(item.name || "?").slice(0, 1).toUpperCase()}</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={[styles.name, item.is_deleted && { textDecorationLine: "line-through", color: colors.textMuted }]}>{item.name}</Text>
                   <View style={styles.codeChip}><Text style={styles.codeText}>{item.code}</Text></View>
+                  {item.is_deleted ? (
+                    <View style={styles.mergedChip}><Text style={styles.mergedText}>MERGED</Text></View>
+                  ) : null}
                 </View>
                 <View style={styles.metaRow}>
                   <MaterialCommunityIcons name="phone" size={12} color={colors.textMuted} />
@@ -370,6 +387,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", ...shadow.fab },
+  refreshBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.card, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, ...shadow.card },
+  mergedChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.danger + "18", borderRadius: radius.pill, borderWidth: 1, borderColor: colors.danger + "30" },
+  mergedText: { fontSize: 10, fontWeight: "800", color: colors.danger, letterSpacing: 0.4 },
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
     marginHorizontal: spacing.xl, backgroundColor: colors.card,

@@ -8,6 +8,7 @@ import { api } from "@/src/api";
 import Calendar from "@/src/components/Calendar";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { storage } from "@/src/utils/storage";
 
 const { width } = Dimensions.get("window");
 
@@ -62,6 +63,7 @@ const DATE_PRESETS = [
   { key: "month", label: "This Month" },
   { key: "fy_25_26", label: "25-26" },
   { key: "fy_26_27", label: "26-27" },
+  { key: "all", label: "All Time" },
 ];
 
 export default function Dashboard() {
@@ -91,8 +93,17 @@ export default function Dashboard() {
 
   const isDryerRunning = (data?.machines_running ?? 0) > 0;
 
-  const load = useCallback(async (s = start, e = end, bid = selectedBranchId) => {
-    setLoading(true);
+  useEffect(() => {
+    storage.getItem<Dash | null>("cached_dashboard_data", null).then(cached => {
+      if (cached) {
+        setData(cached);
+        setLoading(false);
+      }
+    });
+  }, []);
+
+  const load = useCallback(async (s = start, e = end, bid = selectedBranchId, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const qs = new URLSearchParams();
       qs.set("start", s);
@@ -100,6 +111,7 @@ export default function Dashboard() {
       if (bid) qs.set("branch_id", bid);
       const d = await api<Dash>(`/dashboard?${qs.toString()}`);
       setData(d);
+      storage.setItem("cached_dashboard_data", d);
     } catch (err) {
       console.error("Dashboard data load failure:", err);
     } finally {
@@ -110,13 +122,13 @@ export default function Dashboard() {
 
   useFocusEffect(
     useCallback(() => {
-      load(start, end, selectedBranchId);
-    }, [load, start, end, selectedBranchId])
+      load(start, end, selectedBranchId, !!data);
+    }, [load, start, end, selectedBranchId, !!data])
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    load(start, end, selectedBranchId);
+    load(start, end, selectedBranchId, true);
   };
 
   const applyPreset = (key: string) => {
@@ -142,6 +154,9 @@ export default function Dashboard() {
     } else if (key === "fy_26_27") {
       s = "2026-04-01";
       e = "2027-03-31";
+    } else if (key === "all") {
+      s = "2025-01-01";
+      e = todayISO();
     }
 
     setStart(s);
@@ -281,7 +296,7 @@ export default function Dashboard() {
           <View style={styles.dashboardContent}>
             {/* 3. Produce Summary Section */}
             <Text style={styles.sectionHeading}>
-              Produce Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})
+              Produce Summary ({activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)})
             </Text>
             <View style={styles.threeCardRow}>
               <TouchableOpacity
@@ -325,7 +340,7 @@ export default function Dashboard() {
             {role !== "Store Incharge" && (
               <>
                 <Text style={[styles.sectionHeading, { marginTop: spacing.lg }]}>
-                  Finance Summary ({start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`})
+                  Finance Summary ({activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)})
                 </Text>
                 <View style={styles.threeCardRow}>
                   <TouchableOpacity

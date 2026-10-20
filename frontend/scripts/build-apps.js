@@ -88,6 +88,12 @@ try {
         content = content.replace(/org\.gradle\.java\.home=.*/g, `org.gradle.java.home=${escapedJavaHome}`);
       }
     }
+    // Adjust JVM args if needed for memory constraint
+    if (!content.includes('org.gradle.jvmargs')) {
+      content += `\norg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=384m\n`;
+    } else {
+      content = content.replace(/org\.gradle\.jvmargs=.*/g, 'org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=384m');
+    }
     fs.writeFileSync(gradlePropertiesPath, content, 'utf8');
   }
 
@@ -105,7 +111,7 @@ try {
     }
   }
 
-  execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });
+  execSync(`${gradlewCmd} assembleRelease --no-daemon`, { cwd: androidDir, stdio: 'inherit' });
 
   // 6. Copy compiled APK to target folder
   const apkSource = path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');

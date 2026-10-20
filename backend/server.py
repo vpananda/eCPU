@@ -1919,11 +1919,20 @@ async def update_customer(cid: str, body: CustomerIn,
     if not can_write_to_branch(user, before.get("branch_id")):
         raise HTTPException(status_code=403, detail="Forbidden")
     upd = body.dict()
-    upd["branch_id"] = before.get("branch_id")  # preserve
+    # Allow Admins to reassign customer to a different branch; for non-admins, preserve existing branch
+    if user.get("role") == "Admin":
+        if body.branch_id and body.branch_id.strip():
+            upd["branch_id"] = body.branch_id.strip()
+        else:
+            upd["branch_id"] = before.get("branch_id")
+    else:
+        upd["branch_id"] = before.get("branch_id")
     upd["updated_at"] = now_utc().isoformat()
     upd["updated_by"] = user["id"]
     await db.customers.update_one({"id": cid}, {"$set": upd})
-    await audit("update", "customer", cid, user, {"name": before["name"]}, {"name": upd["name"]})
+    await audit("update", "customer", cid, user,
+                {"name": before.get("name"), "branch_id": before.get("branch_id")},
+                {"name": upd.get("name"), "branch_id": upd.get("branch_id")})
     return {"ok": True}
 
 

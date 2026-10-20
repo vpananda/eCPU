@@ -9,6 +9,7 @@ import { useToast } from "@/src/components/Toast";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
+import { storage } from "@/src/utils/storage";
 import { colors, spacing } from "@/src/theme";
 
 export default function CustomerForm() {
@@ -34,11 +35,12 @@ export default function CustomerForm() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        if (isEdit && id) {
+    let active = true;
+    if (isEdit && id) {
+      (async () => {
+        try {
           const c = await api<any>(`/customers/${id}`);
-          if (c) {
+          if (c && active) {
             setForm({
               name: c.name || "",
               mobile: c.mobile || "",
@@ -52,20 +54,29 @@ export default function CustomerForm() {
               branch_id: c.branch_id || "",
             });
           }
-        } else if (user) {
-          if (user.role === "Admin") {
-            setForm(f => ({ ...f, branch_id: f.branch_id || user.branch_id || branches[0]?.id || "" }));
-          } else {
-            setForm(f => ({ ...f, branch_id: user.branch_id || "" }));
-          }
+        } catch (e: any) {
+          if (active) toast.show(e.message || "Failed to load customer", "error");
+        } finally {
+          if (active) setLoading(false);
         }
-      } catch (e: any) {
-        toast.show(e.message || "Failed to load customer", "error");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [id, isEdit, user, branches]);
+      })();
+    } else {
+      setLoading(false);
+    }
+    return () => { active = false; };
+  }, [id, isEdit]);
+
+  useEffect(() => {
+    if (!isEdit && user) {
+      setForm(f => {
+        if (f.branch_id) return f;
+        const defaultBranch = user.role === "Admin"
+          ? (user.branch_id || branches[0]?.id || "")
+          : (user.branch_id || "");
+        return { ...f, branch_id: defaultBranch };
+      });
+    }
+  }, [isEdit, user, branches]);
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
 
@@ -78,9 +89,11 @@ export default function CustomerForm() {
     try {
       if (isEdit && id) {
         await api(`/customers/${id}`, { method: "PUT", body: form });
+        await storage.removeItem("cached_customers");
         toast.show("Customer updated successfully");
       } else {
         const c = await api<any>("/customers", { method: "POST", body: form });
+        await storage.removeItem("cached_customers");
         toast.show(`Customer ${c.code} created`);
       }
       router.back();

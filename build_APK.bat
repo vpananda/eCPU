@@ -1,42 +1,41 @@
 @echo off
 title eCPU App Build Launcher
 echo =====================================================================
-echo    eCPU Cardio App Builder - Offline APK and iOS Prep Tool
+echo    eCPU App Builder - Offline APK and iOS Prep Tool
 echo =====================================================================
 echo.
 echo  This tool will:
 echo  1. Stop any background Gradle/Java daemons to release locked files
-echo  2. Wipe old native directories to guarantee a clean build
-echo  3. Parse frontend/package.json to find version
-echo  4. Generate native android and ios projects (expo prebuild)
-echo  5. Compile release APK locally via Gradle
-echo  6. Save outputs to Output/android/v[version]/
+echo  2. Configure JDK 17 and Android SDK environments
+echo  3. Compile release APK locally via Gradle
+echo  4. Save outputs to Output/android/v[version]/
 echo.
 echo =====================================================================
 echo.
 
+:: 1. Force kill any hung background Java / Gradle daemons
+echo [INFO] Stopping any hung background Java processes...
+taskkill /F /IM java.exe >nul 2>&1
+ping 127.0.0.1 -n 2 >nul
+
+:: 2. Set JDK 17
 if exist "%~dp0jdk17\jdk-17.0.20.1+1" (
     set "JAVA_HOME=%~dp0jdk17\jdk-17.0.20.1+1"
     set "PATH=%~dp0jdk17\jdk-17.0.20.1+1\bin;%PATH%"
-    echo [INFO] Configured JAVA_HOME to project JDK 17
+    echo [INFO] Configured JAVA_HOME to project OpenJDK 17
 )
 
+:: 3. Set Android SDK
 if exist "%~dp0android-sdk" (
     set "ANDROID_HOME=%~dp0android-sdk"
     set "ANDROID_SDK_ROOT=%~dp0android-sdk"
     echo [INFO] Configured ANDROID_HOME to project Android SDK
 )
 
-if exist "%~dp0frontend\android\gradlew.bat" (
-    echo [INFO] Stopping running Gradle daemons...
-    call "%~dp0frontend\android\gradlew.bat" --stop >nul 2>nul
-)
+:: 4. Memory settings for modern Gradle + Kotlin + React Native
+set "GRADLE_OPTS=-Xmx3072m -XX:MaxMetaspaceSize=1024m -XX:+UseG1GC"
 
-echo [INFO] Cleaning native android and ios build directories...
-if exist "%~dp0\frontend\android" rd /s /q "%~dp0\frontend\android"
-if exist "%~dp0\frontend\ios" rd /s /q "%~dp0\frontend\ios"
-
-cd /d "%~dp0\frontend"
+cd /d "%~dp0frontend"
 node scripts\build-apps.js
 
 if %errorlevel% neq 0 (
@@ -44,8 +43,9 @@ if %errorlevel% neq 0 (
     echo [ERROR] Build failed. Please verify Java JDK 17 and Android SDK setups.
 ) else (
     echo.
-    echo [SUCCESS] Build process completed successfully.
+    echo [SUCCESS] Build process completed successfully!
 )
 
 echo.
 pause
+

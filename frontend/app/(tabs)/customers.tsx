@@ -8,7 +8,7 @@ import { useAuth } from "@/src/auth";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
-type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string; branch_id?: string; branch_name?: string; total_arrivals?: number; total_amount?: number; amount_received?: number; is_deleted?: boolean; remarks?: string };
+type Customer = { id: string; code: string; name: string; mobile: string; village?: string; taluk?: string; district?: string; branch_id?: string; branch_name?: string; total_arrivals?: number; total_amount?: number; amount_received?: number; is_deleted?: boolean; merged_into?: string; remarks?: string };
 
 const STATUSES = ["All", "Active", "Inactive"];
 
@@ -285,8 +285,10 @@ export default function CustomersScreen() {
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   <Text style={[styles.name, item.is_deleted && { textDecorationLine: "line-through", color: colors.textMuted }]}>{item.name}</Text>
                   <View style={styles.codeChip}><Text style={styles.codeText}>{item.code}</Text></View>
-                  {item.is_deleted ? (
+                  {item.merged_into ? (
                     <View style={styles.mergedChip}><Text style={styles.mergedText}>MERGED</Text></View>
+                  ) : item.is_deleted ? (
+                    <View style={styles.deletedChip}><Text style={styles.deletedText}>DELETED</Text></View>
                   ) : null}
                 </View>
                 <View style={styles.metaRow}>
@@ -388,8 +390,10 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", ...shadow.fab },
   refreshBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.card, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, ...shadow.card },
-  mergedChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.danger + "18", borderRadius: radius.pill, borderWidth: 1, borderColor: colors.danger + "30" },
-  mergedText: { fontSize: 10, fontWeight: "800", color: colors.danger, letterSpacing: 0.4 },
+  mergedChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.purple + "18", borderRadius: radius.pill, borderWidth: 1, borderColor: colors.purple + "30" },
+  mergedText: { fontSize: 10, fontWeight: "800", color: colors.purple, letterSpacing: 0.4 },
+  deletedChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.danger + "18", borderRadius: radius.pill, borderWidth: 1, borderColor: colors.danger + "30" },
+  deletedText: { fontSize: 10, fontWeight: "800", color: colors.danger, letterSpacing: 0.4 },
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
     marginHorizontal: spacing.xl, backgroundColor: colors.card,
@@ -530,3 +534,4 @@ const styles = StyleSheet.create({
   },
   smallChipText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
 });
+

@@ -1,0 +1,18 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # Runs every 12 hours (at 00:00 and 12:00 UTC)
+    - cron: '0 0,12 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Database & API
+        run: |
+          echo "Pinging Supabase to prevent Free tier inactivity pausing..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://hhajhxnxcdkrrywxizib.supabase.co/rest/v1/" || true)
+          echo "Supabase response status: $HTTP_STATUS"
+

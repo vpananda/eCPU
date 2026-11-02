@@ -52,16 +52,19 @@ fs.mkdirSync(androidDestDir, { recursive: true });
 fs.mkdirSync(iosDestDir, { recursive: true });
 
 try {
-  // 4. Trigger Expo Prebuild to generate native folders
-  console.log('\n--- Running Expo Prebuild (creating native android & ios projects) ---');
-  const hasAndroid = fs.existsSync(path.join(rootDir, 'android'));
-  const prebuildCmd = hasAndroid ? 'npx expo prebuild --no-install' : 'npx expo prebuild --clean --no-install';
-  execSync(prebuildCmd, { cwd: rootDir, stdio: 'inherit' });
+  // 4. Trigger Expo Prebuild only if native android folder does not exist
+  const androidDir = path.join(rootDir, 'android');
+  const hasAndroid = fs.existsSync(androidDir) && fs.existsSync(path.join(androidDir, 'gradlew.bat'));
+  if (!hasAndroid) {
+    console.log('\n--- Running Expo Prebuild (creating native android & ios projects) ---');
+    execSync('npx expo prebuild --clean --no-install', { cwd: rootDir, stdio: 'inherit' });
+  } else {
+    console.log('\n--- Native android directory exists; preserving build cache ---');
+  }
 
   // 5. Compile Android APK locally
   console.log('\n--- Compiling Android APK (assembleRelease) ---');
-  const gradlewCmd = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
-  const androidDir = path.join(rootDir, 'android');
+  const gradlewCmd = process.platform === 'win32' ? `"${path.join(androidDir, 'gradlew.bat')}"` : './gradlew';
   
   // Ensure local.properties exists with the correct sdk.dir
   const localPropertiesPath = path.join(androidDir, 'local.properties');
@@ -90,9 +93,9 @@ try {
     }
     // Adjust JVM args if needed for memory constraint
     if (!content.includes('org.gradle.jvmargs')) {
-      content += `\norg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=384m\n`;
+      content += `\norg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=1024m -XX:+UseG1GC\n`;
     } else {
-      content = content.replace(/org\.gradle\.jvmargs=.*/g, 'org.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=384m');
+      content = content.replace(/org\.gradle\.jvmargs=.*/g, 'org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=1024m -XX:+UseG1GC');
     }
     fs.writeFileSync(gradlePropertiesPath, content, 'utf8');
   }
@@ -111,7 +114,7 @@ try {
     }
   }
 
-  execSync(`${gradlewCmd} assembleRelease --no-daemon`, { cwd: androidDir, stdio: 'inherit' });
+  execSync(`${gradlewCmd} assembleRelease`, { cwd: androidDir, stdio: 'inherit' });
 
   // 6. Copy compiled APK to target folder
   const apkSource = path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');

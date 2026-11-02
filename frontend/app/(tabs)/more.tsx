@@ -25,6 +25,7 @@ const ADMIN_ITEMS = [
   { key: "branches", label: "Branches", icon: "office-building", route: "/branches-admin" as const, color: "#6A1B9A" },
   { key: "products", label: "Spices", icon: "leaf", route: "/products-admin" as const, color: "#2E7D32" },
   { key: "expense-categories", label: "Expense Ledgers", icon: "playlist-edit", route: "/expense-categories-admin" as const, color: "#E65100" },
+  { key: "reminders", label: "Payment Reminders & Schedule", icon: "clock-check-outline", route: "/payment-reminders" as const, color: "#00897B" },
 ];
 
 const AUDIT_ITEMS = [

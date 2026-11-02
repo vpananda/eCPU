@@ -2877,6 +2877,121 @@ async def update_expense_cats(body: ExpenseCategoriesIn, user: dict = Depends(ge
     return {"ok": True, "categories": unique_cats}
 
 
+
+# ---------------------------- REMINDERS & SCHEDULE ----------------------------
+DEFAULT_REMINDER_CONFIG = {
+    "enabled": True,
+    "frequency": "weekly",  # "daily" | "weekly" | "fifteen_days" | "monthly"
+    "time": "09:00",
+    "day_of_week": "Monday",
+    "day_of_month": 1,
+    "min_balance": 1.0,
+    "only_pending": True,
+    "branch_id": None,
+    "custom_message": "",
+}
+
+
+@api.get("/reminders/config")
+async def get_reminder_config(user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"key": "reminder_schedule"}, {"_id": 0})
+    return doc["value"] if doc else DEFAULT_REMINDER_CONFIG
+
+
+@api.put("/reminders/config")
+async def update_reminder_config(body: dict, user: dict = Depends(require_roles("Admin", "Manager"))):
+    await db.settings.update_one(
+        {"key": "reminder_schedule"},
+        {"$set": {"value": body}},
+        upsert=True
+    )
+    await audit("update", "settings", "reminder_schedule", user, None, body)
+    return {"ok": True, "config": body}
+
+
+@api.get("/reminders/statements")
+async def get_reminder_statements(
+    branch_id: Optional[str] = None,
+    only_pending: bool = True,
+    min_balance: float = 0.0,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id or (user.get("branch_id") if user.get("role") != "Admin" else None)
+    
+    cust_query = {}
+    if target_branch:
+        cust_query["branch_id"] = target_branch
+    customers = await db.customers.find(cust_query, {"_id": 0}).sort("name", 1).to_list(1000)
+    
+    if target_branch:
+        batch_stats = await db.query("""
+            SELECT 
+                customer_id::text,
+                COALESCE(SUM(bill_amount), 0)::float as total_billed
+            FROM public.batches
+            WHERE branch_id::text = %s
+            GROUP BY customer_id
+        """, [target_branch])
+        
+        payment_stats = await db.query("""
+            SELECT 
+                customer_id::text,
+                COALESCE(SUM(amount), 0)::float as total_payments
+            FROM public.payments
+            WHERE branch_id::text = %s
+            GROUP BY customer_id
+        """, [target_branch])
+    else:
+        batch_stats = await db.query("""
+            SELECT 
+                customer_id::text,
+                COALESCE(SUM(bill_amount), 0)::float as total_billed
+            FROM public.batches
+            GROUP BY customer_id
+        """)
+        
+        payment_stats = await db.query("""
+            SELECT 
+                customer_id::text,
+                COALESCE(SUM(amount), 0)::float as total_payments
+            FROM public.payments
+            GROUP BY customer_id
+        """)
+        
+    b_map = {row["customer_id"]: float(row["total_billed"]) for row in batch_stats}
+    p_map = {row["customer_id"]: float(row["total_payments"]) for row in payment_stats}
+    
+    branches = {b["id"]: b["name"] for b in await db.branches.find({}, {"_id": 0}).to_list(100)}
+    
+    result = []
+    for c in customers:
+        cid = str(c["id"])
+        billed = b_map.get(cid, 0.0)
+        paid = p_map.get(cid, 0.0)
+        balance = round(billed - paid, 2)
+        
+        if only_pending and balance <= min_balance:
+            continue
+            
+        c_branch = branches.get(c.get("branch_id"), "Factory")
+        
+        result.append({
+            "customer_id": cid,
+            "name": c.get("name", "Customer"),
+            "code": c.get("code", ""),
+            "mobile": c.get("mobile", ""),
+            "village": c.get("village", ""),
+            "branch_id": c.get("branch_id"),
+            "branch_name": c_branch,
+            "total_billed": round(billed, 2),
+            "total_received": round(paid, 2),
+            "balance_due": balance,
+        })
+        
+    result.sort(key=lambda x: x["balance_due"], reverse=True)
+    return result
+
+
 # ---------------------------- MAINTENANCE ----------------------------
 @api.get("/maintenance")
 async def list_maintenance(user: dict = Depends(get_current_user)):

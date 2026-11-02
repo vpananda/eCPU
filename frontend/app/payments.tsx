@@ -1292,6 +1292,24 @@ export default function PaymentsScreen() {
             )
           )}
 
+                    {/* Payment Reminders & Schedule Banner */}
+          {viewMode === "customer" && (
+            <TouchableOpacity
+              style={styles.remindersBanner}
+              onPress={() => router.push("/payment-reminders" as any)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.remindersBannerIcon}>
+                <MaterialCommunityIcons name="clock-check-outline" size={18} color="#00897B" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.remindersBannerTitle}>Payment Reminders & Schedule</Text>
+                <Text style={styles.remindersBannerSub}>Send WhatsApp / SMS balance statements (Daily, Weekly, 15 Days, Monthly)</Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#00796B" />
+            </TouchableOpacity>
+          )}
+
           {/* Customer Khata Sort Bar */}
           {viewMode === "customer" && (
             <View style={styles.sortBar}>
@@ -2497,4 +2515,26 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
   },
+
+  remindersBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#E0F2F1",
+    borderWidth: 1,
+    borderColor: "#B2DFDB",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  remindersBannerIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  remindersBannerTitle: { fontSize: 13, fontWeight: "800", color: "#00695C" },
+  remindersBannerSub: { fontSize: 11, color: "#00796B", marginTop: 1 },
 });

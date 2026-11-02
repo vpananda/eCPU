@@ -156,3 +156,41 @@ export function buildPaymentReceiptMessage(p: PaymentNotificationParams): string
     `_Thank you! We have received your payment._`
   );
 }
+
+
+export interface StatementReminderParams {
+  companyName?: string;
+  branchName?: string;
+  customerName: string;
+  date?: string;
+  totalBilled: number | string;
+  totalReceived: number | string;
+  balanceDue: number | string;
+  frequencyLabel?: string;
+  customNote?: string;
+}
+
+export function buildStatementReminderMessage(p: StatementReminderParams): string {
+  const branch = p.branchName ? `📍 Branch: ${p.branchName}\n` : "";
+  const title = p.frequencyLabel
+    ? `📄 *${p.frequencyLabel} / கணக்கு அறிக்கை*`
+    : `📄 *Account Statement / கணக்கு அறிக்கை*`;
+  const dateStr = p.date || new Date().toISOString().slice(0, 10);
+  const note = p.customNote ? `\n📝 Note: ${p.customNote}\n` : "";
+
+  return (
+    `*${p.companyName || "E3 SPICE PROCESSORS"}*\n` +
+    `${branch}` +
+    `${title}\n` +
+    `--------------------------------\n` +
+    `👤 Customer: *${p.customerName}*\n` +
+    `📅 As on: ${dateStr}\n` +
+    `--------------------------------\n` +
+    `📦 Total Incurred / Billed: *₹${Number(p.totalBilled).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n` +
+    `💵 Total Received / Paid: *₹${Number(p.totalReceived).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n` +
+    `⚖️ *Pending Balance Due: ₹${Number(p.balanceDue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n` +
+    `--------------------------------` +
+    `${note}` +
+    `\n_Kindly review and clear any pending balance at your earliest convenience. For queries, please contact our factory incharge. Thank you!_`
+  );
+}

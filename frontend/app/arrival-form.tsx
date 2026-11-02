@@ -203,31 +203,7 @@ export default function ArrivalForm() {
           photos,
         },
       });
-            const custName = selectedCustomer?.name || receivedFrom.trim() || "Customer";
-      const custMobile = selectedCustomer?.mobile || "";
-      const prodName = selectedProduct?.name || "Cardamom";
-      const brName = selectedBranch?.name || "Factory";
-      const arrivalBatchNo = b.batch_no || "";
-      const arrivalReceiptNo = b.receipt_no || "";
-      const arrivalBatchId = b.id || "";
-
-      setSuccessData({
-        batchNo: arrivalBatchNo,
-        receiptNo: arrivalReceiptNo,
-        customerName: custName,
-        mobile: custMobile,
-        productName: prodName,
-        rawWeight: w,
-        bags: parseInt(bags || "0", 10),
-        rate: parseFloat(rate || "12"),
-        receivedFrom: receivedFrom.trim(),
-        branchName: brName,
-        date: arrivalDate,
-        batchId: arrivalBatchId,
-      });
-      setTargetPhone(custMobile);
-
-      toast.show(`Arrival ${arrivalBatchNo} recorded!`);
+            toast.show(`Arrival ${b.batch_no || ""} recorded successfully!`);
       // Reset form fields to record the next arrival immediately
       setCustomerId(null);
       setRawWeight("");
@@ -399,110 +375,7 @@ export default function ArrivalForm() {
         </View>
       </Modal>
     
-      {/* 1-Tap Customer WhatsApp & SMS Notification Modal */}
-      <Modal visible={!!successData} transparent animationType="fade" onRequestClose={() => setSuccessData(null)}>
-        <View style={styles.successBackdrop}>
-          <View style={styles.successCard}>
-            <View style={styles.successIconCircle}>
-              <MaterialCommunityIcons name="check-bold" size={32} color="#fff" />
-            </View>
-            <Text style={styles.successTitle}>Arrival Recorded!</Text>
-            <View style={styles.batchBadge}>
-              <Text style={styles.batchBadgeText}>Batch #{successData?.batchNo || ""}</Text>
-            </View>
-
-            <View style={styles.summaryBox}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Customer</Text>
-                <Text style={styles.summaryValue} numberOfLines={1}>{successData?.customerName}</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Wet Weight</Text>
-                <Text style={[styles.summaryValue, { color: colors.primary, fontWeight: "800" }]}>
-                  {successData?.rawWeight} kg {successData?.bags ? `(${successData.bags} bags)` : ""}
-                </Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Product / Rate</Text>
-                <Text style={styles.summaryValue}>{successData?.productName} @ ₹{successData?.rate}/kg</Text>
-              </View>
-            </View>
-
-            <View style={styles.phoneInputWrap}>
-              <Text style={styles.phoneLabel}>Customer WhatsApp / Mobile No:</Text>
-              <View style={styles.phoneInputBox}>
-                <MaterialCommunityIcons name="phone" size={18} color={colors.textMuted} />
-                <TextInput
-                  style={styles.phoneInput}
-                  value={targetPhone}
-                  onChangeText={setTargetPhone}
-                  placeholder="Enter 10-digit mobile number"
-                  keyboardType="phone-pad"
-                />
-              </View>
-            </View>
-
-            {/* 1-Tap WhatsApp Button */}
-            <TouchableOpacity
-              style={styles.whatsAppActionBtn}
-              activeOpacity={0.85}
-              onPress={async () => {
-                if (!successData) return;
-                const msg = buildArrivalMessage({
-                  companyName: "E3 SPICE PROCESSORS",
-                  branchName: successData.branchName,
-                  customerName: successData.customerName,
-                  batchNo: successData.batchNo,
-                  receiptNo: successData.receiptNo,
-                  date: successData.date,
-                  productName: successData.productName,
-                  rawWeight: successData.rawWeight,
-                  bags: successData.bags,
-                  ratePerKg: successData.rate,
-                  receivedFrom: successData.receivedFrom,
-                });
-                await openWhatsApp(targetPhone, msg);
-              }}
-            >
-              <MaterialCommunityIcons name="whatsapp" size={22} color="#fff" />
-              <Text style={styles.whatsAppActionBtnText}>Send WhatsApp Receipt</Text>
-            </TouchableOpacity>
-
-            {/* 1-Tap SMS Button */}
-            <TouchableOpacity
-              style={styles.smsActionBtn}
-              activeOpacity={0.85}
-              onPress={async () => {
-                if (!successData) return;
-                const msg = buildArrivalMessage({
-                  companyName: "E3 SPICE PROCESSORS",
-                  branchName: successData.branchName,
-                  customerName: successData.customerName,
-                  batchNo: successData.batchNo,
-                  receiptNo: successData.receiptNo,
-                  date: successData.date,
-                  productName: successData.productName,
-                  rawWeight: successData.rawWeight,
-                  bags: successData.bags,
-                  ratePerKg: successData.rate,
-                  receivedFrom: successData.receivedFrom,
-                });
-                await openSMS(targetPhone, msg);
-              }}
-            >
-              <MaterialCommunityIcons name="message-text-outline" size={18} color="#1565C0" />
-              <Text style={styles.smsActionBtnText}>Send via SMS</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.dismissBtn}
-              onPress={() => setSuccessData(null)}
-            >
-              <Text style={styles.dismissBtnText}>+ Record Next Arrival</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      
 
     </SafeAreaView>
   );

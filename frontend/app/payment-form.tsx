@@ -167,22 +167,8 @@ export default function PaymentForm() {
           created_at: paymentDate ? `${paymentDate}T12:00:00Z` : undefined,
         },
       });
-      const cust = filteredCustomers.find(c => c.id === customerId);
-      const br = displayBranches.find(b => b.id === branchId);
-      const batchObj = customerBatches.find(b => b.id === batchId);
-
-      setSuccessData({
-        customerName: cust?.name || "Customer",
-        mobile: cust?.mobile || "",
-        branchName: br?.name || "Factory",
-        amount: a,
-        mode: mode,
-        date: paymentDate || todayISO(),
-        batchNo: batchObj ? batchObj.name.split(" ")[0] : "General Account Credit",
-        remarks: remarks,
-      });
-      setTargetPhone(cust?.mobile || "");
-      toast.show(batchId ? "Payment applied to batch" : "Payment recorded successfully!");
+      toast.show(batchId ? "Payment applied to batch" : "Advance / payment recorded");
+      router.back();
     } catch (e: any) {
       toast.show(e.message || "Failed to save payment", "error");
     } finally {
@@ -282,115 +268,7 @@ export default function PaymentForm() {
         </KeyboardAvoidingView>
       )}
     
-      {/* 1-Tap Customer WhatsApp & SMS Notification Modal */}
-      <Modal visible={!!successData} transparent animationType="fade" onRequestClose={() => { setSuccessData(null); router.back(); }}>
-        <View style={styles.successBackdrop}>
-          <View style={styles.successCard}>
-            <View style={styles.successIconCircle}>
-              <MaterialCommunityIcons name="check-bold" size={32} color="#fff" />
-            </View>
-            <Text style={styles.successTitle}>Payment Recorded!</Text>
-            
-            <View style={styles.amountBadge}>
-              <Text style={styles.amountBadgeText}>+₹{Number(successData?.amount || 0).toFixed(2)}</Text>
-              <View style={styles.modePill}>
-                <Text style={styles.modePillText}>{successData?.mode}</Text>
-              </View>
-            </View>
-
-            <View style={styles.summaryBox}>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Customer</Text>
-                <Text style={styles.summaryValue} numberOfLines={1}>{successData?.customerName}</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Reference</Text>
-                <Text style={styles.summaryValue}>{successData?.batchNo}</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={styles.summaryLabel}>Date</Text>
-                <Text style={styles.summaryValue}>{successData?.date}</Text>
-              </View>
-              {successData?.remarks ? (
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryLabel}>Remarks</Text>
-                  <Text style={styles.summaryValue} numberOfLines={1}>{successData.remarks}</Text>
-                </View>
-              ) : null}
-            </View>
-
-            <View style={styles.phoneInputWrap}>
-              <Text style={styles.phoneLabel}>Customer WhatsApp / Mobile No:</Text>
-              <View style={styles.phoneInputBox}>
-                <MaterialCommunityIcons name="phone" size={18} color={colors.textMuted} />
-                <TextInput
-                  style={styles.phoneInput}
-                  value={targetPhone}
-                  onChangeText={setTargetPhone}
-                  placeholder="Enter 10-digit mobile number"
-                  keyboardType="phone-pad"
-                />
-              </View>
-            </View>
-
-            {/* 1-Tap WhatsApp Button */}
-            <TouchableOpacity
-              style={styles.whatsAppActionBtn}
-              activeOpacity={0.85}
-              onPress={async () => {
-                if (!successData) return;
-                const msg = buildPaymentReceiptMessage({
-                  companyName: "E3 SPICE PROCESSORS",
-                  branchName: successData.branchName,
-                  customerName: successData.customerName,
-                  amount: successData.amount,
-                  mode: successData.mode,
-                  date: successData.date,
-                  batchNo: successData.batchNo,
-                  remarks: successData.remarks,
-                });
-                await openWhatsApp(targetPhone, msg);
-              }}
-            >
-              <MaterialCommunityIcons name="whatsapp" size={22} color="#fff" />
-              <Text style={styles.whatsAppActionBtnText}>Send WhatsApp Receipt</Text>
-            </TouchableOpacity>
-
-            {/* 1-Tap SMS Button */}
-            <TouchableOpacity
-              style={styles.smsActionBtn}
-              activeOpacity={0.85}
-              onPress={async () => {
-                if (!successData) return;
-                const msg = buildPaymentReceiptMessage({
-                  companyName: "E3 SPICE PROCESSORS",
-                  branchName: successData.branchName,
-                  customerName: successData.customerName,
-                  amount: successData.amount,
-                  mode: successData.mode,
-                  date: successData.date,
-                  batchNo: successData.batchNo,
-                  remarks: successData.remarks,
-                });
-                await openSMS(targetPhone, msg);
-              }}
-            >
-              <MaterialCommunityIcons name="message-text-outline" size={18} color="#1565C0" />
-              <Text style={styles.smsActionBtnText}>Send via SMS</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.dismissBtn}
-              onPress={() => {
-                setSuccessData(null);
-                router.back();
-              }}
-            >
-              <Text style={styles.dismissBtnText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      
 
     </SafeAreaView>
   );

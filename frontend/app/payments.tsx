@@ -948,24 +948,15 @@ export default function PaymentsScreen() {
         </Text>
       </View>
 
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      {isAdminOrManager && (
         <TouchableOpacity
-          onPress={() => shareReceiptWhatsApp(item)}
-          style={[styles.editActionBtn, { backgroundColor: "#E8F5E9" }]}
+          onPress={() => openEdit(item)}
+          style={styles.editActionBtn}
           activeOpacity={0.7}
         >
-          <MaterialCommunityIcons name="whatsapp" size={17} color="#25D366" />
+          <MaterialCommunityIcons name="pencil-outline" size={18} color={colors.primary} />
         </TouchableOpacity>
-        {isAdminOrManager && (
-          <TouchableOpacity
-            onPress={() => openEdit(item)}
-            style={styles.editActionBtn}
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="pencil-outline" size={18} color={colors.primary} />
-          </TouchableOpacity>
-        )}
-      </View>
+      )}
     </View>
   );
 
@@ -1242,20 +1233,11 @@ export default function PaymentsScreen() {
                               </Text>
                               <Text style={styles.ledgerName}>Drying Income</Text>
                             </View>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                              <TouchableOpacity
-                                onPress={() => shareReceiptWhatsApp(item)}
-                                style={[styles.editActionBtn, { backgroundColor: "#E8F5E9" }]}
-                                activeOpacity={0.7}
-                              >
-                                <MaterialCommunityIcons name="whatsapp" size={16} color="#25D366" />
+                            {isAdminOrManager && (
+                              <TouchableOpacity onPress={() => openEdit(item)} style={styles.editActionBtn}>
+                                <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
                               </TouchableOpacity>
-                              {isAdminOrManager && (
-                                <TouchableOpacity onPress={() => openEdit(item)} style={styles.editActionBtn}>
-                                  <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
-                                </TouchableOpacity>
-                              )}
-                            </View>
+                            )}
                           </View>
                         ))}
 

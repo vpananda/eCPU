@@ -331,22 +331,8 @@ export default function ArrivalsScreen() {
                     </View>
                   </View>
 
-                  <View style={{ alignItems: "flex-end", gap: 2 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
-                      {tab === "in" && (
-                        <TouchableOpacity
-                          style={styles.waArrivalBtn}
-                          onPress={(e) => {
-                            e.stopPropagation?.();
-                            shareArrivalWhatsApp(r);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
-                        </TouchableOpacity>
-                      )}
-                    </View>
+                  <View style={{ alignItems: "flex-end" }}>
+                    <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
                     <Text style={styles.weightLabel}>{weightLabel}</Text>
                   </View>
                 </View>

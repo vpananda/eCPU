@@ -81,24 +81,32 @@ export default function CustomerForm() {
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
 
   const save = async () => {
-    if (!form.name || !form.mobile) {
+    if (!form.name.trim() || !form.mobile.trim()) {
       toast.show("Name and mobile are required", "error");
       return;
     }
     setSaving(true);
     try {
+      const trimmedName = form.name.trim();
+      const trimmedVillage = form.village.trim();
+      let finalName = trimmedName;
+      if (trimmedVillage && !trimmedName.toLowerCase().includes(trimmedVillage.toLowerCase())) {
+        finalName = `${trimmedName} ${trimmedVillage}`;
+      }
+      const payload = { ...form, name: finalName };
+
       if (isEdit && id) {
-        await api(`/customers/${id}`, { method: "PUT", body: form });
+        await api(`/customers/${id}`, { method: "PUT", body: payload });
         await storage.removeItem("cached_customers");
         toast.show("Customer updated successfully");
       } else {
-        const c = await api<any>("/customers", { method: "POST", body: form });
+        const c = await api<any>("/customers", { method: "POST", body: payload });
         await storage.removeItem("cached_customers");
-        toast.show(`Customer ${c.code} created`);
+        toast.show(`Customer ${c.name} (${c.code}) created successfully`);
       }
       router.back();
     } catch (e: any) {
-      toast.show(e.message, "error");
+      toast.show(e.message || "Failed to save customer", "error");
     } finally {
       setSaving(false);
     }

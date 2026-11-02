@@ -841,7 +841,26 @@ async def next_seq(name: str) -> int:
     res = await db.counters.find_one_and_update(
         {"_id": name}, {"$inc": {"seq": 1}}, upsert=True, return_document=True
     )
-    return res["seq"] if res else 1
+    val = res["seq"] if res else 1
+    try:
+        if name == "customer":
+            max_row = await db.query("SELECT COALESCE(MAX(CAST(SUBSTRING(code FROM 2) AS INTEGER)), 0) FROM public.customers WHERE code ~ '^C[0-9]+$'")
+            if max_row and max_row[0][0] >= val:
+                val = max_row[0][0] + 1
+                await db.counters.update_one({"_id": "customer"}, {"$set": {"seq": val}})
+        elif name == "batch":
+            max_row = await db.query("SELECT COALESCE(MAX(CAST(SUBSTRING(batch_no FROM 2) AS INTEGER)), 0) FROM public.batches WHERE batch_no ~ '^B[0-9]+$'")
+            if max_row and max_row[0][0] >= val:
+                val = max_row[0][0] + 1
+                await db.counters.update_one({"_id": "batch"}, {"$set": {"seq": val}})
+        elif name == "receipt":
+            max_row = await db.query("SELECT COALESCE(MAX(CAST(SUBSTRING(receipt_no FROM 2) AS INTEGER)), 0) FROM public.batches WHERE receipt_no ~ '^R[0-9]+$'")
+            if max_row and max_row[0][0] >= val:
+                val = max_row[0][0] + 1
+                await db.counters.update_one({"_id": "receipt"}, {"$set": {"seq": val}})
+    except Exception as ex:
+        logger.warning(f"Error checking max seq for {name}: {ex}")
+    return val
 
 
 # ---------------------------- MODELS ----------------------------
@@ -1932,12 +1951,18 @@ async def create_customer(body: CustomerIn, user: dict = Depends(get_current_use
     if existing_name:
         raise HTTPException(status_code=400, detail=f"Customer '{body.name}' already exists in this branch ({existing_name.get('code')})")
 
-    seq = await next_seq("customer")
+    while True:
+        seq = await next_seq("customer")
+        code = f"C{seq:04d}"
+        existing_code = await db.customers.find_one({"code": code})
+        if not existing_code:
+            break
+
     c = body.dict()
     c["branch_id"] = target_branch_id
     c.update({
         "id": str(uuid.uuid4()),
-        "code": f"C{seq:04d}",
+        "code": code,
         "created_at": now_utc().isoformat(),
         "created_by": user["id"],
         "updated_at": now_utc().isoformat(),

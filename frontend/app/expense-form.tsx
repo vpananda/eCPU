@@ -11,6 +11,9 @@ import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
+const MODES = ["Cash", "UPI", "Bank", "Credit"];
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
 async function pickFromLibrary(): Promise<string | null> {
   try {
     // @ts-ignore
@@ -58,6 +61,8 @@ export default function ExpenseForm() {
   const [amount, setAmount] = useState("");
   const [vendor, setVendor] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [paymentMode, setPaymentMode] = useState("Cash");
+  const [expenseDate, setExpenseDate] = useState(todayISO());
   const [photos, setPhotos] = useState<string[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
   
@@ -101,6 +106,8 @@ export default function ExpenseForm() {
           setAmount(String(exp.amount));
           setVendor(exp.vendor || "");
           setRemarks(exp.remarks || "");
+          setPaymentMode(exp.payment_mode || "Cash");
+          setExpenseDate(exp.expense_date ? exp.expense_date.slice(0, 10) : todayISO());
           setPhotos(exp.bill_photos || (exp.bill_photo ? [exp.bill_photo] : []));
           setBranchId(exp.branch_id || null);
         })
@@ -121,6 +128,8 @@ export default function ExpenseForm() {
         amount: a,
         vendor,
         remarks,
+        payment_mode: paymentMode,
+        expense_date: expenseDate || todayISO(),
         bill_photos: photos,
         branch_id: branchId || undefined
       };
@@ -208,8 +217,26 @@ export default function ExpenseForm() {
             />
 
             <Input testID="expense-amount" label="Amount (₹) *" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} placeholder="0.00" />
-            <Input testID="expense-vendor" label="Vendor" value={vendor} onChangeText={setVendor} placeholder="Optional" />
-            <Input testID="expense-remarks" label="Remarks" value={remarks} onChangeText={setRemarks} multiline />
+            <Input testID="expense-date" label="Expense Date (YYYY-MM-DD) *" value={expenseDate} onChangeText={setExpenseDate} placeholder="YYYY-MM-DD" />
+
+            <Text style={styles.label}>Payment Mode *</Text>
+            <View style={styles.modeRow}>
+              {MODES.map(m => (
+                <TouchableOpacity
+                  key={m}
+                  style={[styles.modePill, paymentMode === m && styles.modePillActive]}
+                  onPress={() => setPaymentMode(m)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.modeText, paymentMode === m && styles.modeTextActive]}>
+                    {m}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Input testID="expense-vendor" label="Vendor / Paid To" value={vendor} onChangeText={setVendor} placeholder="e.g. Diesel bunks, KSEB, Operator wages" />
+            <Input testID="expense-remarks" label="Remarks / Details" value={remarks} onChangeText={setRemarks} multiline placeholder="Additional notes..." />
 
             {/* Photos (Optional Multiple Photos) */}
             <Text style={styles.label}>Photos / Bill Copies (Optional)</Text>
@@ -291,6 +318,32 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
   title: { fontSize: 20, fontWeight: "800", color: colors.text },
   label: { fontSize: 12, fontWeight: "700", color: colors.textMuted, marginBottom: 8, letterSpacing: 0.3, textTransform: "uppercase" },
+  modeRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  modePill: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
+  modePillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  modeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  modeTextActive: {
+    color: "#fff",
+  },
   deleteBtn: { borderColor: colors.danger, borderWidth: 1.5 },
   photoRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.md, marginTop: 4 },
   photoWrap: { position: "relative" },

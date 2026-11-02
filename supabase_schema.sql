@@ -268,15 +268,27 @@ CREATE TABLE public.audit_logs (
   timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- INDEXES FOR OPTIMAL SEARCHES
+-- INDEXES FOR OPTIMAL SEARCHES & AGGREGATIONS
 CREATE INDEX idx_profiles_branch_id ON public.profiles(branch_id);
 CREATE INDEX idx_customers_code_mobile ON public.customers(code, mobile);
+CREATE INDEX idx_customers_branch_created ON public.customers(branch_id, is_deleted, created_at DESC);
 CREATE INDEX idx_batches_no_receipt ON public.batches(batch_no, receipt_no);
 CREATE INDEX idx_batches_status ON public.batches(status);
 CREATE INDEX idx_batches_branch_id ON public.batches(branch_id);
+CREATE INDEX idx_batches_branch_created ON public.batches(branch_id, created_at DESC);
+CREATE INDEX idx_batches_arrival_date ON public.batches(arrival_date);
+CREATE INDEX idx_batches_delivered_at ON public.batches(delivered_at) WHERE delivered_at IS NOT NULL;
+CREATE INDEX idx_batches_status_branch ON public.batches(status, branch_id);
+CREATE INDEX idx_batches_customer_id ON public.batches(customer_id);
+CREATE INDEX idx_batches_balance ON public.batches(balance_amount) WHERE balance_amount > 0;
 CREATE INDEX idx_payments_batch_id ON public.payments(batch_id);
+CREATE INDEX idx_payments_branch_created ON public.payments(branch_id, created_at DESC);
+CREATE INDEX idx_payments_customer_id ON public.payments(customer_id);
 CREATE INDEX idx_expenses_branch_date ON public.expenses(branch_id, expense_date);
+CREATE INDEX idx_expenses_branch_created ON public.expenses(branch_id, created_at DESC);
 CREATE INDEX idx_maintenance_machine_id ON public.maintenance(machine_id);
+CREATE INDEX idx_machines_branch_status ON public.machines(branch_id, status);
+CREATE INDEX idx_audit_logs_timestamp ON public.audit_logs(timestamp DESC);
 
 -- ==========================================
 -- 5. TRIGGER FUNCTIONS FOR AUTO-GENERATED SEQUENCES

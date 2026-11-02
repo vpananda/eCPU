@@ -28,12 +28,12 @@ function todayISO() {
 export default function ExpenseReportScreen() {
   const router = useRouter();
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, selectedBranchId, setSelectedBranchId, branches: authBranches } = useAuth();
   const isAdmin = user?.role === "Admin";
 
   const [start, setStart] = useState(firstOfCurrentMonthISO());
   const [end, setEnd] = useState(todayISO());
-  const [branchId, setBranchId] = useState<string | null>(null);
+  const [branchId, setBranchId] = useState<string>(selectedBranchId || "");
   const [category, setCategory] = useState<string | null>(null);
 
   const [branches, setBranches] = useState<any[]>([]);
@@ -60,11 +60,16 @@ export default function ExpenseReportScreen() {
       .catch(e => toast.show(e.message || "Failed to load filters", "error"));
   }, [isAdmin, user]);
 
+  useEffect(() => {
+    setBranchId(selectedBranchId || "");
+  }, [selectedBranchId]);
+
   const loadData = useCallback(async () => {
     setRefreshing(true);
     try {
+      const activeBranch = branchId || selectedBranchId;
       let url = `/expenses?start=${start}&end=${end}`;
-      if (branchId) url += `&branch_id=${branchId}`;
+      if (activeBranch) url += `&branch_id=${activeBranch}`;
       const data = await api<any[]>(url);
       setExpenses(data);
     } catch (e: any) {
@@ -73,7 +78,7 @@ export default function ExpenseReportScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [start, end, branchId, toast]);
+  }, [start, end, branchId, selectedBranchId, toast]);
 
   useFocusEffect(
     useCallback(() => {

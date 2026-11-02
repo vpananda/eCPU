@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { openWhatsApp, buildArrivalMessage } from "@/src/utils/notifications";
 import Calendar from "@/src/components/Calendar";
 import { storage } from "@/src/utils/storage";
 
@@ -134,6 +135,20 @@ export default function ArrivalsScreen() {
   }, [start, end, selectedBranchId, search]);
 
   useFocusEffect(useCallback(() => { load(!!data); }, [load, !!data]));
+
+    const shareArrivalWhatsApp = async (r: Row) => {
+    const msg = buildArrivalMessage({
+      companyName: "E3 SPICE PROCESSORS",
+      branchName: r.branch_name || "Factory",
+      customerName: r.customer_name,
+      batchNo: r.batch_no,
+      date: fmtDate(r.arrival_date),
+      productName: r.product || "Cardamom",
+      rawWeight: r.raw_weight,
+      ratePerKg: r.rate_per_kg || 12,
+    });
+    await openWhatsApp(r.customer_mobile || "", msg);
+  };
 
   const rows: Row[] = tab === "in" ? data?.in || [] : tab === "out" ? data?.out || [] : data?.processing || [];
 
@@ -316,8 +331,22 @@ export default function ArrivalsScreen() {
                     </View>
                   </View>
 
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
+                  <View style={{ alignItems: "flex-end", gap: 2 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
+                      {tab === "in" && (
+                        <TouchableOpacity
+                          style={styles.waArrivalBtn}
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            shareArrivalWhatsApp(r);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
                     <Text style={styles.weightLabel}>{weightLabel}</Text>
                   </View>
                 </View>
@@ -461,4 +490,5 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: "center", paddingVertical: 60, gap: 6 },
   emptyText: { fontSize: 14, color: colors.textMuted, fontWeight: "600", marginTop: 12, textAlign: "center" },
+  waArrivalBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center" },
 });

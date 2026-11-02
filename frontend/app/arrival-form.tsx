@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Image, ActivityIndicator, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Image, ActivityIndicator, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -11,6 +11,8 @@ import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { openWhatsApp, openSMS, buildArrivalMessage } from "@/src/utils/notifications";
+
 
 type Customer = { id: string; code: string; name: string; mobile: string; branch_id?: string };
 type Product = { id: string; name: string; default_rate: number; branch_rates?: Record<string, number> };
@@ -76,6 +78,22 @@ export default function ArrivalForm() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoSheet, setPhotoSheet] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [successData, setSuccessData] = useState<{
+    batchNo: string;
+    receiptNo: string;
+    customerName: string;
+    mobile: string;
+    productName: string;
+    rawWeight: number;
+    bags: number;
+    rate: number;
+    receivedFrom: string;
+    branchName: string;
+    date: string;
+    batchId?: string;
+  } | null>(null);
+  const [targetPhone, setTargetPhone] = useState("");
+
 
   const displayBranches = isAdmin
     ? branches
@@ -185,7 +203,31 @@ export default function ArrivalForm() {
           photos,
         },
       });
-      toast.show(`Arrival ${b.batch_no || ""} recorded successfully!`);
+            const custName = selectedCustomer?.name || receivedFrom.trim() || "Customer";
+      const custMobile = selectedCustomer?.mobile || "";
+      const prodName = selectedProduct?.name || "Cardamom";
+      const brName = selectedBranch?.name || "Factory";
+      const arrivalBatchNo = b.batch_no || "";
+      const arrivalReceiptNo = b.receipt_no || "";
+      const arrivalBatchId = b.id || "";
+
+      setSuccessData({
+        batchNo: arrivalBatchNo,
+        receiptNo: arrivalReceiptNo,
+        customerName: custName,
+        mobile: custMobile,
+        productName: prodName,
+        rawWeight: w,
+        bags: parseInt(bags || "0", 10),
+        rate: parseFloat(rate || "12"),
+        receivedFrom: receivedFrom.trim(),
+        branchName: brName,
+        date: arrivalDate,
+        batchId: arrivalBatchId,
+      });
+      setTargetPhone(custMobile);
+
+      toast.show(`Arrival ${arrivalBatchNo} recorded!`);
       // Reset form fields to record the next arrival immediately
       setCustomerId(null);
       setRawWeight("");
@@ -356,6 +398,112 @@ export default function ArrivalForm() {
           </View>
         </View>
       </Modal>
+    
+      {/* 1-Tap Customer WhatsApp & SMS Notification Modal */}
+      <Modal visible={!!successData} transparent animationType="fade" onRequestClose={() => setSuccessData(null)}>
+        <View style={styles.successBackdrop}>
+          <View style={styles.successCard}>
+            <View style={styles.successIconCircle}>
+              <MaterialCommunityIcons name="check-bold" size={32} color="#fff" />
+            </View>
+            <Text style={styles.successTitle}>Arrival Recorded!</Text>
+            <View style={styles.batchBadge}>
+              <Text style={styles.batchBadgeText}>Batch #{successData?.batchNo || ""}</Text>
+            </View>
+
+            <View style={styles.summaryBox}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Customer</Text>
+                <Text style={styles.summaryValue} numberOfLines={1}>{successData?.customerName}</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Wet Weight</Text>
+                <Text style={[styles.summaryValue, { color: colors.primary, fontWeight: "800" }]}>
+                  {successData?.rawWeight} kg {successData?.bags ? `(${successData.bags} bags)` : ""}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Product / Rate</Text>
+                <Text style={styles.summaryValue}>{successData?.productName} @ ₹{successData?.rate}/kg</Text>
+              </View>
+            </View>
+
+            <View style={styles.phoneInputWrap}>
+              <Text style={styles.phoneLabel}>Customer WhatsApp / Mobile No:</Text>
+              <View style={styles.phoneInputBox}>
+                <MaterialCommunityIcons name="phone" size={18} color={colors.textMuted} />
+                <TextInput
+                  style={styles.phoneInput}
+                  value={targetPhone}
+                  onChangeText={setTargetPhone}
+                  placeholder="Enter 10-digit mobile number"
+                  keyboardType="phone-pad"
+                />
+              </View>
+            </View>
+
+            {/* 1-Tap WhatsApp Button */}
+            <TouchableOpacity
+              style={styles.whatsAppActionBtn}
+              activeOpacity={0.85}
+              onPress={async () => {
+                if (!successData) return;
+                const msg = buildArrivalMessage({
+                  companyName: "E3 SPICE PROCESSORS",
+                  branchName: successData.branchName,
+                  customerName: successData.customerName,
+                  batchNo: successData.batchNo,
+                  receiptNo: successData.receiptNo,
+                  date: successData.date,
+                  productName: successData.productName,
+                  rawWeight: successData.rawWeight,
+                  bags: successData.bags,
+                  ratePerKg: successData.rate,
+                  receivedFrom: successData.receivedFrom,
+                });
+                await openWhatsApp(targetPhone, msg);
+              }}
+            >
+              <MaterialCommunityIcons name="whatsapp" size={22} color="#fff" />
+              <Text style={styles.whatsAppActionBtnText}>Send WhatsApp Receipt</Text>
+            </TouchableOpacity>
+
+            {/* 1-Tap SMS Button */}
+            <TouchableOpacity
+              style={styles.smsActionBtn}
+              activeOpacity={0.85}
+              onPress={async () => {
+                if (!successData) return;
+                const msg = buildArrivalMessage({
+                  companyName: "E3 SPICE PROCESSORS",
+                  branchName: successData.branchName,
+                  customerName: successData.customerName,
+                  batchNo: successData.batchNo,
+                  receiptNo: successData.receiptNo,
+                  date: successData.date,
+                  productName: successData.productName,
+                  rawWeight: successData.rawWeight,
+                  bags: successData.bags,
+                  ratePerKg: successData.rate,
+                  receivedFrom: successData.receivedFrom,
+                });
+                await openSMS(targetPhone, msg);
+              }}
+            >
+              <MaterialCommunityIcons name="message-text-outline" size={18} color="#1565C0" />
+              <Text style={styles.smsActionBtnText}>Send via SMS</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.dismissBtn}
+              onPress={() => setSuccessData(null)}
+            >
+              <Text style={styles.dismissBtnText}>+ Record Next Arrival</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -394,4 +542,25 @@ const styles = StyleSheet.create({
   sheetSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   sheetCancel: { marginTop: spacing.md, paddingVertical: 12, borderRadius: radius.pill, borderWidth: 1.5, borderColor: colors.border, alignItems: "center" },
   sheetCancelText: { fontSize: 14, fontWeight: "700", color: colors.textMuted },
+
+  successBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: spacing.xl },
+  successCard: { width: "100%", maxWidth: 420, backgroundColor: "#fff", borderRadius: radius.xl, padding: spacing.xl, alignItems: "center", ...shadow.card },
+  successIconCircle: { width: 64, height: 64, borderRadius: 32, backgroundColor: "#2E7D32", alignItems: "center", justifyContent: "center", marginBottom: spacing.md, ...shadow.card },
+  successTitle: { fontSize: 20, fontWeight: "800", color: colors.text, marginBottom: 4 },
+  batchBadge: { backgroundColor: colors.primary50, paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.pill, marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.primaryLight + "40" },
+  batchBadgeText: { fontSize: 13, fontWeight: "800", color: colors.primaryDark },
+  summaryBox: { width: "100%", backgroundColor: "#f9fbf9", borderRadius: radius.lg, borderWidth: 1, borderColor: "#e8efe8", padding: spacing.md, gap: 8, marginBottom: spacing.lg },
+  summaryItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  summaryLabel: { fontSize: 12, color: colors.textMuted, fontWeight: "600" },
+  summaryValue: { fontSize: 13, fontWeight: "700", color: colors.text, maxWidth: "65%" },
+  phoneInputWrap: { width: "100%", marginBottom: spacing.lg },
+  phoneLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, textTransform: "uppercase", marginBottom: 6, letterSpacing: 0.3 },
+  phoneInputBox: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: spacing.md, height: 46, backgroundColor: "#fcfdfc" },
+  phoneInput: { flex: 1, fontSize: 15, fontWeight: "600", color: colors.text },
+  whatsAppActionBtn: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, backgroundColor: "#25D366", paddingVertical: 14, borderRadius: radius.lg, marginBottom: spacing.sm, ...shadow.card },
+  whatsAppActionBtnText: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  smsActionBtn: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#E3F2FD", paddingVertical: 12, borderRadius: radius.lg, marginBottom: spacing.md },
+  smsActionBtnText: { color: "#1565C0", fontSize: 14, fontWeight: "700" },
+  dismissBtn: { paddingVertical: 8, paddingHorizontal: spacing.md },
+  dismissBtnText: { fontSize: 14, fontWeight: "700", color: colors.primary },
 });

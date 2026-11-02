@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "e3",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "primaryColor": "#2E7D32",
     "description": "E3 — Energy · Efficient · Environment. Smart drying plant management for modern agriculture.",
     "ios": {
@@ -20,14 +19,15 @@
       }
     },
     "android": {
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#E8F5E9"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.emergent.cardamombatchpro.h3n1hn",
-      "permissions": ["READ_EXTERNAL_STORAGE", "CAMERA"]
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "CAMERA"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -44,7 +44,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#2E7D32"
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

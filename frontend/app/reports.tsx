@@ -1,35 +1,53 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect, useSegments } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 export default function Reports() {
   const router = useRouter();
   const segments = useSegments();
+  const { selectedBranchId, branches } = useAuth();
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const isTab = (segments as string[]).includes("(tabs)");
 
-  const load = useCallback(async () => {
-    try { setD(await api<any>("/reports/summary")); }
-    finally { setLoading(false); }
-  }, []);
+  const load = useCallback(async (bid = selectedBranchId) => {
+    setLoading(true);
+    try {
+      const qs = bid ? `?branch_id=${bid}` : "";
+      setD(await api<any>(`/reports/summary${qs}`));
+    } catch (e) {
+      console.error("Reports load failure", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedBranchId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(selectedBranchId); }, [load, selectedBranchId]));
+
+  useEffect(() => {
+    load(selectedBranchId);
+  }, [selectedBranchId, load]);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={[styles.header, isTab && { paddingHorizontal: spacing.xl, justifyContent: "flex-start", gap: spacing.sm }]}>
         {!isTab && (
-          <TouchableOpacity onPress={() => router.back()} testID="reports-back">
+          <TouchableOpacity onPress={() => router.back()} testID="reports-back" style={{ marginRight: spacing.sm }}>
             <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
           </TouchableOpacity>
         )}
-        <Text style={styles.title}>Reports</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Reports</Text>
+          <Text style={styles.subTitle}>
+            {selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name || "Branch") : "All Branches"}
+          </Text>
+        </View>
       </View>
 
       {loading || !d ? (
@@ -127,6 +145,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
   title: { fontSize: 20, fontWeight: "800", color: colors.text },
+  subTitle: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   hero: { backgroundColor: colors.primary, marginHorizontal: spacing.xl, borderRadius: radius.xxl, padding: spacing.xl, ...shadow.card, marginBottom: spacing.lg },
   heroLabel: { color: "#B9F6CA", fontSize: 12, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
   heroValue: { color: "#fff", fontSize: 32, fontWeight: "800", marginTop: 4 },

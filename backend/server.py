@@ -608,6 +608,12 @@ class PostgresDBWrapper:
         self.pool = AsyncConnectionPool(
             conninfo=self.dsn,
             open=False,
+            min_size=1,
+            max_size=10,
+            max_idle=300.0,
+            max_lifetime=1800.0,
+            timeout=30.0,
+            check=AsyncConnectionPool.check_connection,
             kwargs={"row_factory": dict_row}
         )
         await self.pool.open()
@@ -678,7 +684,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origin_regex=r".*",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1030,6 +1036,7 @@ class ExpenseIn(BaseModel):
     category: str
     amount: float
     vendor: Optional[str] = ""
+    payment_mode: Optional[str] = "Cash"
     bill_photo: Optional[str] = ""
     bill_photos: Optional[List[str]] = []
     remarks: Optional[str] = ""
@@ -1041,6 +1048,7 @@ class ExpenseUpdate(BaseModel):
     category: Optional[str] = None
     amount: Optional[float] = None
     vendor: Optional[str] = None
+    payment_mode: Optional[str] = None
     bill_photos: Optional[List[str]] = None
     remarks: Optional[str] = None
     expense_date: Optional[str] = None
@@ -1168,15 +1176,45 @@ async def seed():
     )
 
 
+async def db_keepalive_worker():
+    """Background worker that pings the database every 10 minutes to prevent idle connection closure and Supabase inactivity pausing."""
+    while True:
+        try:
+            await asyncio.sleep(600)
+            if db.pool:
+                await db.query("SELECT 1;")
+                logger.info("Database keep-alive ping successful.")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Database keep-alive ping warning: {e}")
+
+
+@app.get("/health")
+@api.get("/health")
+async def health_check():
+    """Public health check for uptime monitors, Render/Railway, and Supabase keep-alive."""
+    try:
+        await db.query("SELECT 1 as alive;")
+        return {"status": "ok", "database": "connected", "timestamp": datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Database unreachable: {e}")
+
+
 @app.on_event("startup")
 async def startup():
     await db.open()
     await seed()
-    logger.info("EThree Agro backend started; seed complete.")
+    app.state.keepalive_task = asyncio.create_task(db_keepalive_worker())
+    logger.info("EThree Agro backend started; seed and keepalive worker active.")
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    task = getattr(app.state, "keepalive_task", None)
+    if task:
+        task.cancel()
     await db.close()
 
 
@@ -3243,18 +3281,61 @@ async def dashboard_arrivals(
 
 
 @api.get("/reports/summary")
-async def reports_summary(user: dict = Depends(get_current_user)):
-    batch_totals_task = db.query("""
+async def reports_summary(
+    branch_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id
+    if target_branch:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != target_branch:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        if user.get("role") != "Admin":
+            target_branch = user.get("branch_id")
+
+    b_where = "WHERE branch_id = %s" if target_branch else ""
+    b_params = [target_branch] if target_branch else []
+
+    p_where = "WHERE branch_id = %s" if target_branch else ""
+    p_params = [target_branch] if target_branch else []
+
+    e_where = "WHERE branch_id = %s" if target_branch else ""
+    e_params = [target_branch] if target_branch else []
+
+    m_filter = {"branch_id": target_branch} if target_branch else {}
+
+    batch_totals_task = db.query(f"""
         SELECT 
             COALESCE(SUM(bill_amount), 0) as total_billed,
             COALESCE(SUM(CASE WHEN status != 'Delivered' THEN 1 ELSE 0 END), 0) as pending_deliveries,
             COUNT(*) as total_batches
         FROM public.batches
-    """)
-    pay_total_task = db.query("SELECT COALESCE(SUM(amount), 0) as total_collection FROM public.payments")
-    exp_summary_task = db.query("SELECT category, COALESCE(SUM(amount), 0) as total FROM public.expenses GROUP BY category")
-    machines_task = db.machines.find({}, {"_id": 0}).to_list(50)
-    util_task = db.query("SELECT machine_id::text as machine_id, COUNT(*) as cnt FROM public.batches WHERE machine_id IS NOT NULL GROUP BY machine_id")
+        {b_where}
+    """, b_params)
+
+    pay_total_task = db.query(f"""
+        SELECT COALESCE(SUM(amount), 0) as total_collection 
+        FROM public.payments
+        {p_where}
+    """, p_params)
+
+    exp_summary_task = db.query(f"""
+        SELECT category, COALESCE(SUM(amount), 0) as total 
+        FROM public.expenses 
+        {e_where}
+        GROUP BY category
+    """, e_params)
+
+    machines_task = db.machines.find(m_filter, {"_id": 0}).to_list(50)
+
+    u_where = "WHERE machine_id IS NOT NULL AND branch_id = %s" if target_branch else "WHERE machine_id IS NOT NULL"
+    u_params = [target_branch] if target_branch else []
+    util_task = db.query(f"""
+        SELECT machine_id::text as machine_id, COUNT(*) as cnt 
+        FROM public.batches 
+        {u_where}
+        GROUP BY machine_id
+    """, u_params)
 
     b_res, p_res, exp_res, machines, u_res = await asyncio.gather(
         batch_totals_task, pay_total_task, exp_summary_task, machines_task, util_task

@@ -1,8 +1,14 @@
+import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 
 export const getBaseUrl = () => {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+  }
   let url = process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (!url || url.includes("192.168.")) {
+  if (!url) {
     url = "https://ecpu.onrender.com";
   }
   return url.replace(/\/+$/, "");
@@ -31,7 +37,7 @@ export async function pingBackend(timeoutMs = 12000): Promise<{ ok: boolean; lat
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(`${BASE}/api/`, {
+    const res = await fetch(`${getBaseUrl()}/api/`, {
       method: "GET",
       signal: controller.signal,
     });
@@ -64,7 +70,7 @@ export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T>
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(`${BASE}/api${path}`, {
+    const res = await fetch(`${getBaseUrl()}/api${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,

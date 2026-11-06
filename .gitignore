@@ -87,3 +87,4 @@ jdk17/
 credentials.json
 *.key
 .credentials
+*.apk

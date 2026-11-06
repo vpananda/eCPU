@@ -95,7 +95,13 @@ try {
     if (!content.includes('org.gradle.jvmargs')) {
       content += `\norg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=1024m -XX:+UseG1GC\n`;
     } else {
-      content = content.replace(/org\.gradle\.jvmargs=.*/g, 'org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=1024m -XX:+UseG1GC');
+      content = content.replace(/org\.gradle\.jvmargs=.*/g, 'org.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -XX:+UseG1GC');
+    content = content.replace(/org\.gradle\.parallel=.*/g, 'org.gradle.parallel=false');
+    if (!content.includes('org.gradle.workers.max')) {
+      content += '\norg.gradle.workers.max=2\n';
+    } else {
+      content = content.replace(/org\.gradle\.workers\.max=.*/g, 'org.gradle.workers.max=2');
+    }
     }
     fs.writeFileSync(gradlePropertiesPath, content, 'utf8');
   }

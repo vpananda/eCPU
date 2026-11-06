@@ -50,7 +50,7 @@ UUID_FIELDS = {
     "batches": ["id", "customer_id", "product_id", "machine_id", "branch_id", "created_by", "updated_by"],
     "batch_status_history": ["id", "batch_id", "changed_by"],
     "payments": ["id", "batch_id", "customer_id", "branch_id", "created_by"],
-    "expenses": ["id", "branch_id", "created_by"],
+    "expenses": ["id", "branch_id", "machine_id", "created_by"],
     "maintenance": ["id", "machine_id", "created_by"],
     "audit_logs": ["id", "user_id"],
     "user_sessions": ["user_id"],
@@ -934,6 +934,10 @@ class MachineIn(BaseModel):
     capacity: float = 0
     status: str = "Available"  # Available, Running, Maintenance, Cleaning
     branch_id: Optional[str] = None
+    is_outsourced: bool = False
+    vendor_name: Optional[str] = ""
+    vendor_phone: Optional[str] = ""
+    vendor_rate_per_kg: float = 0.0
 
 
 class MachineStatusUpdate(BaseModel):
@@ -945,6 +949,10 @@ class MachineUpdate(BaseModel):
     capacity: Optional[float] = None
     status: Optional[str] = None
     branch_id: Optional[str] = None
+    is_outsourced: Optional[bool] = None
+    vendor_name: Optional[str] = None
+    vendor_phone: Optional[str] = None
+    vendor_rate_per_kg: Optional[float] = None
 
 
 class MachineLoadIn(BaseModel):
@@ -1061,6 +1069,7 @@ class ExpenseIn(BaseModel):
     remarks: Optional[str] = ""
     expense_date: Optional[str] = None
     branch_id: Optional[str] = None
+    machine_id: Optional[str] = None
 
 
 class ExpenseUpdate(BaseModel):
@@ -1072,6 +1081,7 @@ class ExpenseUpdate(BaseModel):
     remarks: Optional[str] = None
     expense_date: Optional[str] = None
     branch_id: Optional[str] = None
+    machine_id: Optional[str] = None
 
 
 class ExpenseCategoriesIn(BaseModel):
@@ -1099,7 +1109,7 @@ DEFAULT_MACHINES = [
 ]
 DEFAULT_EXPENSE_CATS = [
     "Electricity", "Diesel", "Machine Maintenance", "Repair", "Transport",
-    "Packing", "Salary", "Tea", "Office Expense", "Miscellaneous",
+    "Packing", "Salary", "Tea", "Office Expense", "Outsourced Drying", "Miscellaneous",
 ]
 DEFAULT_USERS = [
     ("Admin User", "9999999999", "admin123", "Admin"),
@@ -1121,6 +1131,10 @@ async def seed():
     # Add bill_photos TEXT[] DEFAULT '{}' column to public.expenses if not exists
     await db.execute("""
         ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS bill_photos TEXT[] DEFAULT '{}';
+    """)
+    # Add machine_id column to public.expenses for tracking outsourced dryer payouts
+    await db.execute("""
+        ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS machine_id UUID REFERENCES public.machines(id) ON DELETE SET NULL;
     """)
     # Create counters table if not exists
     await db.execute("""
@@ -1178,10 +1192,19 @@ async def seed():
                                          {"$set": {"branch_id": default_branch_id}})
 
     # 6. Settings
-    if not await db.settings.find_one({"key": "expense_categories"}):
+    exp_cats_doc = await db.settings.find_one({"key": "expense_categories"})
+    if not exp_cats_doc:
         await db.settings.insert_one({
             "key": "expense_categories", "value": DEFAULT_EXPENSE_CATS,
         })
+    else:
+        existing_cats = list(exp_cats_doc.get("value") or [])
+        if "Outsourced Drying" not in existing_cats:
+            existing_cats.append("Outsourced Drying")
+            await db.settings.update_one(
+                {"key": "expense_categories"},
+                {"$set": {"value": existing_cats}}
+            )
     # Always upsert company info so rebrand takes effect
     await db.settings.update_one(
         {"key": "company"},
@@ -1511,11 +1534,77 @@ async def list_machines(user: dict = Depends(get_current_user), branch_id: Optio
     return machines
 
 
+@api.get("/machines/{mid}")
+async def get_machine(mid: str, user: dict = Depends(get_current_user)):
+    m = await db.machines.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    branches = await db.branches.find({}, {"_id": 0}).to_list(100)
+    branch_map = {b["id"]: b["name"] for b in branches}
+    m["branch_name"] = branch_map.get(m.get("branch_id"), "")
+    drying_batches = await db.batches.find({"machine_id": m["id"], "status": "Drying"}, {"_id": 0}).to_list(100)
+    if drying_batches:
+        first_b = drying_batches[0]
+        first_cust = await db.customers.find_one({"id": first_b["customer_id"]}, {"_id": 0})
+        m["current_batch"] = {
+            "id": first_b["id"], "batch_no": first_b["batch_no"],
+            "customer_name": first_cust["name"] if first_cust else "",
+            "expected_delivery_date": first_b.get("expected_delivery_date"),
+            "status": first_b["status"],
+        }
+
+    # Outsourcing ledger & history
+    if m.get("is_outsourced"):
+        # 1. Fetch batches processed in this machine
+        batches = await db.query("""
+            SELECT 
+                b.id, b.batch_no, b.raw_weight, b.actual_dry_weight, b.estimated_dry_weight, b.status, 
+                b.arrival_date, b.created_at, b.expected_delivery_date,
+                c.name as customer_name, c.mobile as customer_mobile
+            FROM public.batches b
+            LEFT JOIN public.customers c ON b.customer_id = c.id
+            WHERE b.machine_id = %s
+            ORDER BY COALESCE(b.arrival_date, b.created_at) DESC, b.created_at DESC
+        """, [mid])
+
+        total_kg = round(sum(float(b.get("raw_weight") or 0) for b in (batches or [])), 2)
+        rate_per_kg = float(m.get("vendor_rate_per_kg") or 0.0)
+        total_cost = round(total_kg * rate_per_kg, 2)
+
+        # 2. Fetch payouts to this vendor/machine
+        vendor_name = m.get("vendor_name") or ""
+        payouts = await db.query("""
+            SELECT id, amount, payment_mode, expense_date, remarks, created_at
+            FROM public.expenses
+            WHERE machine_id = %s OR (category = 'Outsourced Drying' AND vendor ILIKE %s)
+            ORDER BY expense_date DESC, created_at DESC
+        """, [mid, vendor_name or m.get("name")])
+
+        total_paid = round(sum(float(p.get("amount") or 0) for p in (payouts or [])), 2)
+        balance_payable = max(0.0, round(total_cost - total_paid, 2))
+
+        m["outsourcing_ledger"] = {
+            "total_processed_kg": total_kg,
+            "vendor_rate_per_kg": rate_per_kg,
+            "total_job_cost": total_cost,
+            "total_paid": total_paid,
+            "balance_payable": balance_payable,
+            "batches": batches or [],
+            "payouts": payouts or [],
+        }
+
+    return m
+
+
 @api.post("/machines")
-async def add_machine(body: MachineIn, user: dict = Depends(require_roles("Admin"))):
+async def add_machine(body: MachineIn, user: dict = Depends(require_roles("Admin", "Manager"))):
     m = {"id": str(uuid.uuid4()), "name": body.name, "capacity": body.capacity,
          "status": body.status, "current_batch_id": None,
          "branch_id": await resolve_branch_id(user, body.branch_id),
+         "is_outsourced": bool(body.is_outsourced),
+         "vendor_name": body.vendor_name or "",
+         "vendor_phone": body.vendor_phone or "",
+         "vendor_rate_per_kg": float(body.vendor_rate_per_kg or 0.0),
          "created_at": now_utc().isoformat(), "created_by": user["id"],
          "updated_at": now_utc().isoformat(), "updated_by": user["id"]}
     await db.machines.insert_one(dict(m))
@@ -1539,7 +1628,7 @@ async def update_machine_status(mid: str, body: MachineStatusUpdate,
 
 
 @api.put("/machines/{mid}")
-async def update_machine(mid: str, body: MachineUpdate, user: dict = Depends(require_roles("Admin"))):
+async def update_machine(mid: str, body: MachineUpdate, user: dict = Depends(require_roles("Admin", "Manager"))):
     m = await db.machines.find_one({"id": mid}, {"_id": 0})
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
@@ -1550,6 +1639,10 @@ async def update_machine(mid: str, body: MachineUpdate, user: dict = Depends(req
     if body.status is not None: upd["status"] = body.status
     if body.branch_id is not None:
         upd["branch_id"] = body.branch_id or None
+    if body.is_outsourced is not None: upd["is_outsourced"] = bool(body.is_outsourced)
+    if body.vendor_name is not None: upd["vendor_name"] = body.vendor_name
+    if body.vendor_phone is not None: upd["vendor_phone"] = body.vendor_phone
+    if body.vendor_rate_per_kg is not None: upd["vendor_rate_per_kg"] = float(body.vendor_rate_per_kg)
 
     if upd:
         upd["updated_at"] = now_utc().isoformat()
@@ -1560,7 +1653,7 @@ async def update_machine(mid: str, body: MachineUpdate, user: dict = Depends(req
 
 
 @api.delete("/machines/{mid}")
-async def delete_machine(mid: str, user: dict = Depends(require_roles("Admin"))):
+async def delete_machine(mid: str, user: dict = Depends(require_roles("Admin", "Manager"))):
     m = await db.machines.find_one({"id": mid}, {"_id": 0})
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
@@ -2596,9 +2689,9 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
         await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"]})
         return clean(p)
     else:
-        # Advance payment
+        # Customer Account payment (automatically applies FIFO to unpaid batches & keeps excess as advance)
         if not body.customer_id or not body.branch_id:
-            raise HTTPException(status_code=400, detail="customer_id and branch_id are required for advance payments")
+            raise HTTPException(status_code=400, detail="customer_id and branch_id are required")
         cust = await db.customers.find_one({"id": body.customer_id})
         if not cust:
             raise HTTPException(status_code=404, detail="Customer not found")
@@ -2606,17 +2699,56 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
         if not branch:
             raise HTTPException(status_code=404, detail="Branch not found")
             
-        p = {
-            "id": str(uuid.uuid4()), "batch_id": None, "amount": body.amount,
-            "mode": body.mode, "remarks": body.remarks or "",
-            "customer_id": body.customer_id,
-            "branch_id": body.branch_id,
-            "created_at": created_time, "created_by": user["id"],
-            "updated_at": now_utc().isoformat(), "updated_by": user["id"],
-        }
-        await db.payments.insert_one(dict(p))
-        await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"], "type": "advance"})
-        return clean(p)
+        unpaid_batches_sql = """
+            SELECT * FROM public.batches 
+            WHERE customer_id = %s::uuid AND balance_amount > 0
+            ORDER BY COALESCE(arrival_date, created_at) ASC, created_at ASC
+        """
+        unpaid_rows = await db.query(unpaid_batches_sql, [body.customer_id], "public.batches")
+        
+        remaining_to_allocate = float(body.amount)
+        first_p = None
+        
+        for ub in unpaid_rows:
+            if remaining_to_allocate <= 0:
+                break
+            batch_bal = float(ub.get("balance_amount") or 0)
+            if batch_bal <= 0:
+                continue
+            alloc = min(remaining_to_allocate, batch_bal)
+            p = {
+                "id": str(uuid.uuid4()), "batch_id": str(ub["id"]), "amount": alloc,
+                "mode": body.mode, "remarks": body.remarks or "",
+                "customer_id": body.customer_id,
+                "branch_id": str(ub.get("branch_id") or body.branch_id),
+                "created_at": created_time, "created_by": user["id"],
+                "updated_at": now_utc().isoformat(), "updated_by": user["id"],
+            }
+            await db.payments.insert_one(dict(p))
+            totals = await recompute_batch_totals(ub)
+            await db.batches.update_one({"id": str(ub["id"])}, {"$set": totals})
+            if not first_p:
+                first_p = p
+            remaining_to_allocate = round(remaining_to_allocate - alloc, 2)
+            
+        # If any remaining amount (greater than total balance) or customer had no unpaid batches:
+        if remaining_to_allocate > 0 or not unpaid_rows:
+            p = {
+                "id": str(uuid.uuid4()), "batch_id": None, "amount": remaining_to_allocate if unpaid_rows else body.amount,
+                "mode": body.mode, "remarks": body.remarks or ("Advance payment" if unpaid_rows else ""),
+                "customer_id": body.customer_id,
+                "branch_id": body.branch_id,
+                "created_at": created_time, "created_by": user["id"],
+                "updated_at": now_utc().isoformat(), "updated_by": user["id"],
+            }
+            await db.payments.insert_one(dict(p))
+            if not first_p:
+                first_p = p
+                
+        await audit("create", "payment", (first_p or {}).get("id", ""), user, None, {
+            "amount": body.amount, "mode": body.mode, "customer_id": body.customer_id
+        })
+        return clean(first_p)
 
 
 @api.put("/payments/{pid}")
@@ -3134,10 +3266,15 @@ async def dashboard(
             COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN 1 ELSE 0 END), 0) AS today_out_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN b.raw_weight ELSE 0 END), 0) AS processing_weight,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN 1 ELSE 0 END), 0) AS processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN b.raw_weight ELSE 0 END), 0) AS inhouse_processing_weight,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS inhouse_processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN b.raw_weight ELSE 0 END), 0) AS outsourced_processing_weight,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS outsourced_processing_count,
             COALESCE(SUM(CASE WHEN b.status = 'Completed' THEN 1 ELSE 0 END), 0) AS drying_completed_count,
             COALESCE(SUM(b.balance_amount), 0) AS pending_payments,
             COALESCE(SUM(CASE WHEN b.balance_amount > 0 THEN 1 ELSE 0 END), 0) AS pending_payments_count
         FROM public.batches b
+        LEFT JOIN public.machines m ON b.machine_id = m.id
         WHERE {" AND ".join(batch_where)}
     """
     full_batch_params = [
@@ -3200,6 +3337,10 @@ async def dashboard(
     
     processing_weight = round(float(batch_stats.get("processing_weight") or 0), 2)
     processing_count = int(batch_stats.get("processing_count") or 0)
+    inhouse_processing_weight = round(float(batch_stats.get("inhouse_processing_weight") or 0), 2)
+    inhouse_processing_count = int(batch_stats.get("inhouse_processing_count") or 0)
+    outsourced_processing_weight = round(float(batch_stats.get("outsourced_processing_weight") or 0), 2)
+    outsourced_processing_count = int(batch_stats.get("outsourced_processing_count") or 0)
     drying_completed_count = int(batch_stats.get("drying_completed_count") or 0)
     pending_deliveries_count = drying_completed_count
     
@@ -3212,6 +3353,8 @@ async def dashboard(
     machines_running = sum(1 for m in machines if m["status"] == "Running")
     machines_available = sum(1 for m in machines if m["status"] == "Available")
     machines_maintenance = sum(1 for m in machines if m["status"] in ("Maintenance", "Cleaning"))
+    inhouse_machines_running = sum(1 for m in machines if m["status"] == "Running" and not m.get("is_outsourced"))
+    outsourced_machines_running = sum(1 for m in machines if m["status"] == "Running" and m.get("is_outsourced"))
 
     return {
         "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
@@ -3219,6 +3362,10 @@ async def dashboard(
             "in_weight": today_in_weight, "in_count": today_in_count,
             "out_weight": today_out_weight, "out_count": today_out_count,
             "processing_weight": processing_weight, "processing_count": processing_count,
+            "inhouse_processing_weight": inhouse_processing_weight,
+            "inhouse_processing_count": inhouse_processing_count,
+            "outsourced_processing_weight": outsourced_processing_weight,
+            "outsourced_processing_count": outsourced_processing_count,
         },
         "period_customers": period_customers,
         "period_received_weight": period_received_weight,
@@ -3235,6 +3382,8 @@ async def dashboard(
         "machines_running": machines_running,
         "machines_available": machines_available,
         "machines_maintenance": machines_maintenance,
+        "inhouse_machines_running": inhouse_machines_running,
+        "outsourced_machines_running": outsourced_machines_running,
         "total_machines": len(machines),
         "recent_activities": recent,
     }
@@ -3502,6 +3651,78 @@ async def reports_summary(
         cnt = machine_batch_counts.get(m["id"], 0)
         util.append({"name": m["name"], "batches": cnt, "status": m["status"]})
 
+    # Outsourced processing summary
+    out_machines = [m for m in (machines or []) if m.get("is_outsourced")]
+    out_total_kg = 0.0
+    out_total_cost = 0.0
+    out_total_paid = 0.0
+    out_details = []
+
+    if out_machines:
+        out_ids = [m["id"] for m in out_machines]
+        b_out_where = "WHERE machine_id = ANY(%s)"
+        b_out_params: list = [out_ids]
+        if target_branch:
+            b_out_where += " AND branch_id = %s"
+            b_out_params.append(target_branch)
+
+        b_out_rows = await db.query(f"""
+            SELECT machine_id::text, COALESCE(SUM(raw_weight), 0) as total_kg, COUNT(*) as batch_cnt
+            FROM public.batches
+            {b_out_where}
+            GROUP BY machine_id
+        """, b_out_params)
+        b_out_map = {r["machine_id"]: {"kg": float(r["total_kg"]), "cnt": int(r["batch_cnt"])} for r in (b_out_rows or [])}
+
+        e_out_where = "WHERE category = 'Outsourced Drying'"
+        e_out_params: list = []
+        if target_branch:
+            e_out_where += " AND branch_id = %s"
+            e_out_params.append(target_branch)
+
+        e_out_rows = await db.query(f"""
+            SELECT machine_id::text, vendor, COALESCE(SUM(amount), 0) as paid
+            FROM public.expenses
+            {e_out_where}
+            GROUP BY machine_id, vendor
+        """, e_out_params)
+
+        for m in out_machines:
+            m_stat = b_out_map.get(m["id"], {"kg": 0.0, "cnt": 0})
+            m_kg = m_stat["kg"]
+            m_rate = float(m.get("vendor_rate_per_kg") or 0.0)
+            m_cost = round(m_kg * m_rate, 2)
+            m_paid = sum(
+                float(r["paid"]) for r in (e_out_rows or [])
+                if r.get("machine_id") == m["id"] or (m.get("vendor_name") and r.get("vendor") == m.get("vendor_name"))
+            )
+            m_paid = round(m_paid, 2)
+            m_bal = max(0.0, round(m_cost - m_paid, 2))
+
+            out_total_kg += m_kg
+            out_total_cost += m_cost
+            out_total_paid += m_paid
+            out_details.append({
+                "machine_id": m["id"],
+                "machine_name": m["name"],
+                "vendor_name": m.get("vendor_name") or m["name"],
+                "vendor_phone": m.get("vendor_phone") or "",
+                "rate_per_kg": m_rate,
+                "processed_kg": m_kg,
+                "batches_count": m_stat["cnt"],
+                "total_cost": m_cost,
+                "total_paid": m_paid,
+                "balance_payable": m_bal,
+            })
+
+    outsourced_summary = {
+        "total_kg": round(out_total_kg, 2),
+        "total_cost": round(out_total_cost, 2),
+        "total_paid": round(out_total_paid, 2),
+        "balance_payable": max(0.0, round(out_total_cost - out_total_paid, 2)),
+        "machines": out_details,
+    }
+
     return {
         "total_collection": total_collection,
         "total_expense": total_expense,
@@ -3511,6 +3732,7 @@ async def reports_summary(
         "machine_utilization": util,
         "expense_by_category": cat_totals,
         "total_batches": total_batches,
+        "outsourced_summary": outsourced_summary,
     }
 
 

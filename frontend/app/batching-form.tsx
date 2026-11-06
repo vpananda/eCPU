@@ -13,6 +13,10 @@ type Machine = {
   name: string;
   capacity: number;
   status: string;
+  is_outsourced?: boolean;
+  vendor_name?: string;
+  vendor_phone?: string;
+  vendor_rate_per_kg?: number;
 };
 
 type Batch = {
@@ -58,6 +62,11 @@ export default function BatchingForm() {
   const [selectedMachineId, setSelectedMachineId] = useState("");
   const [selectedBatchIds, setSelectedBatchIds] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  const [machineFilter, setMachineFilter] = useState<"All" | "In-House" | "Outsourced">("All");
+
+  const inhouseMachines = React.useMemo(() => machines.filter(m => !m.is_outsourced), [machines]);
+  const outsourcedMachines = React.useMemo(() => machines.filter(m => !!m.is_outsourced), [machines]);
+  const selectedMachine = React.useMemo(() => machines.find(m => m.id === selectedMachineId), [machines, selectedMachineId]);
 
   // Date and Time picker states
   const [processTime, setProcessTime] = useState(new Date());
@@ -172,6 +181,68 @@ export default function BatchingForm() {
 
   const selectedCount = Object.keys(selectedBatchIds).filter(id => selectedBatchIds[id]).length;
 
+  const renderMachineItem = (m: Machine) => {
+    const isSelected = selectedMachineId === m.id;
+    const isOut = !!m.is_outsourced;
+    return (
+      <TouchableOpacity
+        key={m.id}
+        style={[
+          styles.machineCard,
+          isOut && styles.machineCardOutsourced,
+          isSelected && (isOut ? styles.machineCardOutsourcedSelected : styles.machineCardSelected),
+        ]}
+        onPress={() => setSelectedMachineId(m.id)}
+        activeOpacity={0.9}
+      >
+        <View
+          style={[
+            styles.machineIconBox,
+            { backgroundColor: isSelected ? (isOut ? "#FFE082" : colors.primary50) : (isOut ? "#FFF8E1" : "#f5f5f5") },
+          ]}
+        >
+          <MaterialCommunityIcons
+            name={isOut ? "truck-delivery-outline" : "generator-portable"}
+            size={22}
+            color={isSelected ? (isOut ? "#E65100" : colors.primary) : (isOut ? "#E65100" : colors.textMuted)}
+          />
+        </View>
+        <View style={{ flex: 1, marginLeft: spacing.sm }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text style={[styles.machineName, isSelected && (isOut ? { color: "#E65100" } : styles.machineNameSelected)]}>
+              {m.name}
+            </Text>
+            <View style={[styles.miniBadge, isOut ? styles.miniBadgeOutsourced : styles.miniBadgeInhouse]}>
+              <Text style={[styles.miniBadgeText, isOut ? styles.miniBadgeTextOutsourced : styles.miniBadgeTextInhouse]}>
+                {isOut ? "Vendor" : "In-House"}
+              </Text>
+            </View>
+          </View>
+
+          {isOut && m.vendor_name ? (
+            <Text style={styles.vendorNameSubtext} numberOfLines={1}>
+              <MaterialCommunityIcons name="office-building" size={11} color="#E65100" /> {m.vendor_name}
+            </Text>
+          ) : null}
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
+            <Text style={styles.machineCap}>Capacity: {m.capacity} KG</Text>
+            {isOut && m.vendor_rate_per_kg ? (
+              <Text style={styles.vendorRateSubtext}>• Rate: ₹{m.vendor_rate_per_kg}/KG</Text>
+            ) : null}
+          </View>
+        </View>
+        {isSelected && (
+          <MaterialCommunityIcons
+            name="check-circle"
+            size={22}
+            color={isOut ? "#E65100" : colors.primary}
+          />
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       {/* Header */}
@@ -193,34 +264,95 @@ export default function BatchingForm() {
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
             
             {/* 1. MACHINE SELECTOR */}
-            <Text style={styles.sectionTitle}>1. Select Dryer Machine</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs }}>
+              <Text style={styles.sectionTitle}>1. Select Dryer Machine</Text>
+              {selectedMachine && (
+                <View style={[styles.selectedPill, selectedMachine.is_outsourced ? styles.selectedPillOutsourced : styles.selectedPillInhouse]}>
+                  <Text style={[styles.selectedPillText, selectedMachine.is_outsourced ? { color: "#E65100" } : { color: colors.primary }]}>
+                    {selectedMachine.is_outsourced ? "Vendor Dryer" : "In-House Dryer"}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Quick Segment Filter: All vs In-House vs Vendor */}
+            {machines.length > 0 && (
+              <View style={styles.segmentRow}>
+                <TouchableOpacity
+                  style={[styles.segmentTab, machineFilter === "All" && styles.segmentTabActive]}
+                  onPress={() => setMachineFilter("All")}
+                >
+                  <Text style={[styles.segmentTabText, machineFilter === "All" && styles.segmentTabTextActive]}>
+                    All ({machines.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.segmentTab, machineFilter === "In-House" && styles.segmentTabActiveInhouse]}
+                  onPress={() => setMachineFilter("In-House")}
+                >
+                  <MaterialCommunityIcons name="factory" size={13} color={machineFilter === "In-House" ? "#fff" : colors.primary} />
+                  <Text style={[styles.segmentTabText, machineFilter === "In-House" && styles.segmentTabTextActiveWhite]}>
+                    In-House ({inhouseMachines.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.segmentTab, machineFilter === "Outsourced" && styles.segmentTabActiveOutsourced]}
+                  onPress={() => setMachineFilter("Outsourced")}
+                >
+                  <MaterialCommunityIcons name="truck-delivery-outline" size={13} color={machineFilter === "Outsourced" ? "#fff" : "#E65100"} />
+                  <Text style={[styles.segmentTabText, machineFilter === "Outsourced" && styles.segmentTabTextActiveWhite]}>
+                    Vendor ({outsourcedMachines.length})
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {machines.length === 0 ? (
               <View style={styles.warnBox}>
                 <MaterialCommunityIcons name="alert-circle-outline" size={20} color={colors.danger} />
                 <Text style={styles.warnText}>No available dryers found at this branch. Free up a dryer to load a new batch.</Text>
               </View>
             ) : (
-              <View style={styles.machineList}>
-                {machines.map(m => {
-                  const isSelected = selectedMachineId === m.id;
-                  return (
-                    <TouchableOpacity
-                      key={m.id}
-                      style={[styles.machineCard, isSelected && styles.machineCardSelected]}
-                      onPress={() => setSelectedMachineId(m.id)}
-                      activeOpacity={0.9}
-                    >
-                      <View style={[styles.machineIconBox, { backgroundColor: isSelected ? colors.primary50 : "#f5f5f5" }]}>
-                        <MaterialCommunityIcons name="generator-portable" size={22} color={isSelected ? colors.primary : colors.textMuted} />
+              <View style={{ gap: spacing.md }}>
+                {/* In-House Group */}
+                {(machineFilter === "All" || machineFilter === "In-House") && inhouseMachines.length > 0 && (
+                  <View style={styles.subGroupContainer}>
+                    <View style={styles.subGroupHeader}>
+                      <MaterialCommunityIcons name="factory" size={15} color={colors.primary} />
+                      <Text style={styles.subGroupTitle}>IN-HOUSE DRYERS</Text>
+                      <View style={styles.subGroupPill}>
+                        <Text style={styles.subGroupPillText}>{inhouseMachines.length} Available</Text>
                       </View>
-                      <View style={{ flex: 1, marginLeft: spacing.sm }}>
-                        <Text style={[styles.machineName, isSelected && styles.machineNameSelected]}>{m.name}</Text>
-                        <Text style={styles.machineCap}>Capacity: {m.capacity} KG</Text>
+                    </View>
+                    <View style={styles.machineList}>
+                      {inhouseMachines.map(renderMachineItem)}
+                    </View>
+                  </View>
+                )}
+
+                {/* Outsourced Group */}
+                {(machineFilter === "All" || machineFilter === "Outsourced") && (
+                  <View style={styles.subGroupContainer}>
+                    <View style={[styles.subGroupHeader, styles.subGroupHeaderOutsourced]}>
+                      <MaterialCommunityIcons name="truck-delivery-outline" size={15} color="#E65100" />
+                      <Text style={[styles.subGroupTitle, { color: "#E65100" }]}>VENDOR / OUTSOURCED DRYERS</Text>
+                      <View style={[styles.subGroupPill, { backgroundColor: "#FFE082" }]}>
+                        <Text style={[styles.subGroupPillText, { color: "#E65100" }]}>{outsourcedMachines.length} Available</Text>
                       </View>
-                      {isSelected && <MaterialCommunityIcons name="check-circle" size={22} color={colors.primary} />}
-                    </TouchableOpacity>
-                  );
-                })}
+                    </View>
+                    {outsourcedMachines.length > 0 ? (
+                      <View style={styles.machineList}>
+                        {outsourcedMachines.map(renderMachineItem)}
+                      </View>
+                    ) : (
+                      <View style={styles.vendorEmptyBox}>
+                        <Text style={styles.vendorEmptyText}>No available outsourced vendor dryers at this branch.</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
             )}
 
@@ -427,12 +559,153 @@ const styles = StyleSheet.create({
   },
   machineCardSelected: {
     borderColor: colors.primary,
-    backgroundColor: `${colors.primary}05`,
+    backgroundColor: `${colors.primary}08`,
+  },
+  machineCardOutsourced: {
+    borderColor: "#FFE082",
+    backgroundColor: "#FFFCF5",
+  },
+  machineCardOutsourcedSelected: {
+    borderColor: "#E65100",
+    backgroundColor: "#FFF8E1",
   },
   machineIconBox: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   machineName: { fontSize: 15, fontWeight: "800", color: colors.text },
   machineNameSelected: { color: colors.primary },
   machineCap: { fontSize: 12, color: colors.textMuted, marginTop: 2, fontWeight: "500" },
+  miniBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  miniBadgeInhouse: {
+    backgroundColor: `${colors.primary}15`,
+  },
+  miniBadgeOutsourced: {
+    backgroundColor: "#FFE082",
+  },
+  miniBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  miniBadgeTextInhouse: {
+    color: colors.primary,
+  },
+  miniBadgeTextOutsourced: {
+    color: "#E65100",
+  },
+  vendorNameSubtext: {
+    fontSize: 11,
+    color: "#E65100",
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  vendorRateSubtext: {
+    fontSize: 11,
+    color: "#E65100",
+    fontWeight: "700",
+  },
+  selectedPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  selectedPillInhouse: {
+    backgroundColor: `${colors.primary}10`,
+    borderColor: `${colors.primary}30`,
+  },
+  selectedPillOutsourced: {
+    backgroundColor: "#FFF3E0",
+    borderColor: "#FFE082",
+  },
+  selectedPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  segmentRow: {
+    flexDirection: "row",
+    backgroundColor: "#F1F5F9",
+    borderRadius: radius.md,
+    padding: 3,
+    marginBottom: spacing.md,
+  },
+  segmentTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+    gap: 4,
+  },
+  segmentTabActive: {
+    backgroundColor: "#fff",
+    ...shadow.sm,
+  },
+  segmentTabActiveInhouse: {
+    backgroundColor: colors.primary,
+    ...shadow.sm,
+  },
+  segmentTabActiveOutsourced: {
+    backgroundColor: "#E65100",
+    ...shadow.sm,
+  },
+  segmentTabText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  segmentTabTextActive: {
+    color: colors.text,
+  },
+  segmentTabTextActiveWhite: {
+    color: "#fff",
+  },
+  subGroupContainer: {
+    gap: spacing.xs,
+  },
+  subGroupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+  },
+  subGroupHeaderOutsourced: {
+    marginTop: spacing.xs,
+  },
+  subGroupTitle: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.primary,
+    letterSpacing: 0.5,
+  },
+  subGroupPill: {
+    backgroundColor: `${colors.primary}15`,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 8,
+  },
+  subGroupPillText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+  vendorEmptyBox: {
+    padding: spacing.md,
+    backgroundColor: "#FFFDF9",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#FFE082",
+    alignItems: "center",
+  },
+  vendorEmptyText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#E65100",
+  },
   dateTimeField: {
     flexDirection: "row",
     alignItems: "center",

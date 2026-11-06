@@ -52,19 +52,29 @@ export default function ExpenseForm() {
   const router = useRouter();
   const toast = useToast();
   const { user, branches: authBranches } = useAuth();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    category?: string;
+    vendor?: string;
+    branch_id?: string;
+    machine_id?: string;
+    suggest_amount?: string;
+    remarks?: string;
+  }>();
+  const id = params.id;
 
   const isAdmin = user?.role === "Admin";
 
   const [cats, setCats] = useState<string[]>([]);
-  const [category, setCategory] = useState("");
-  const [amount, setAmount] = useState("");
-  const [vendor, setVendor] = useState("");
-  const [remarks, setRemarks] = useState("");
+  const [category, setCategory] = useState(params.category || "");
+  const [amount, setAmount] = useState(params.suggest_amount || "");
+  const [vendor, setVendor] = useState(params.vendor || "");
+  const [remarks, setRemarks] = useState(params.remarks || "");
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [expenseDate, setExpenseDate] = useState(todayISO());
   const [photos, setPhotos] = useState<string[]>([]);
-  const [branchId, setBranchId] = useState<string | null>(null);
+  const [branchId, setBranchId] = useState<string | null>(params.branch_id || null);
+  const [machineId, setMachineId] = useState<string | null>(params.machine_id || null);
   
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -89,13 +99,23 @@ export default function ExpenseForm() {
     api<string[]>("/expense-categories")
       .then(c => {
         setCats(c);
-        if (c.length && !id) setCategory(c[0]);
+        if (c.length && !id && !params.category) setCategory(c[0]);
+        else if (params.category) setCategory(params.category);
       })
       .catch(e => toast.show(e.message || "Failed to load categories", "error"))
       .finally(() => {
         if (!id) setLoading(false);
       });
-  }, [id]);
+  }, [id, params.category]);
+
+  useEffect(() => {
+    if (params.category) setCategory(params.category);
+    if (params.vendor) setVendor(params.vendor);
+    if (params.branch_id) setBranchId(params.branch_id);
+    if (params.machine_id) setMachineId(params.machine_id);
+    if (params.suggest_amount) setAmount(params.suggest_amount);
+    if (params.remarks) setRemarks(params.remarks);
+  }, [params.category, params.vendor, params.branch_id, params.machine_id, params.suggest_amount, params.remarks]);
 
   useEffect(() => {
     if (id) {
@@ -131,7 +151,8 @@ export default function ExpenseForm() {
         payment_mode: paymentMode,
         expense_date: expenseDate || todayISO(),
         bill_photos: photos,
-        branch_id: branchId || undefined
+        branch_id: branchId || undefined,
+        machine_id: machineId || undefined,
       };
       if (id) {
         await api(`/expenses/${id}`, {

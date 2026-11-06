@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { Platform, Alert } from "react-native";
 import * as Linking from "expo-linking";
-import { api, setToken, clearToken, getToken } from "@/src/api";
+import { api, setToken, clearToken, getToken, setOnUnauthorized } from "@/src/api";
 import { startGoogleLogin, fetchSessionData, exchangeWithBackend, extractSessionId } from "@/src/google-auth";
 import { storage } from "@/src/utils/storage";
 
@@ -42,6 +42,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      setUser(null);
+    });
+  }, []);
 
   const loadBranches = useCallback(async () => {
     try {
@@ -91,8 +97,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(me);
       await storage.setItem("ethree_auth_user_json", JSON.stringify(me));
     } catch (e: any) {
-      const msg = e.message || "";
-      const isAuthError = msg.includes("401") || msg.includes("403") || msg.includes("Unauthorized") || msg.includes("Forbidden") || msg.includes("404");
+      const msg = (e.message || "").toLowerCase();
+      const isAuthError =
+        msg.includes("401") ||
+        msg.includes("403") ||
+        msg.includes("unauthorized") ||
+        msg.includes("forbidden") ||
+        msg.includes("404") ||
+        msg.includes("invalid token") ||
+        msg.includes("missing token") ||
+        msg.includes("token expired") ||
+        msg.includes("session expired");
       if (isAuthError) {
         await clearToken();
         await storage.removeItem("ethree_auth_user_json");

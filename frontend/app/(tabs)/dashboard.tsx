@@ -23,6 +23,10 @@ type Dash = {
     out_count: number;
     processing_weight: number;
     processing_count: number;
+    inhouse_processing_weight?: number;
+    inhouse_processing_count?: number;
+    outsourced_processing_weight?: number;
+    outsourced_processing_count?: number;
   };
   period_customers: number;
   period_received_weight: number;
@@ -38,6 +42,8 @@ type Dash = {
   machines_running: number;
   machines_available: number;
   machines_maintenance: number;
+  inhouse_machines_running?: number;
+  outsourced_machines_running?: number;
   total_machines: number;
   recent_activities: any[];
 };
@@ -95,7 +101,9 @@ export default function Dashboard() {
     ? branches.find(b => b.id === selectedBranchId)?.name || "Selected Branch"
     : "All Branches";
 
-  const isDryerRunning = (data?.machines_running ?? 0) > 0;
+  const isDryerRunning = (data?.machines_running ?? 0) > 0 || (data?.today_arrival?.processing_weight ?? 0) > 0;
+  const isInhouseRunning = (data?.inhouse_machines_running ?? 0) > 0 || (data?.today_arrival?.inhouse_processing_weight ?? 0) > 0;
+  const isOutsourceRunning = (data?.outsourced_machines_running ?? 0) > 0 || (data?.today_arrival?.outsourced_processing_weight ?? 0) > 0;
 
   useEffect(() => {
     storage.getItem<Dash | null>("cached_dashboard_data", null).then(cached => {
@@ -332,54 +340,120 @@ export default function Dashboard() {
           </View>
         ) : (
           <View style={styles.dashboardContent}>
-            {/* 3. Produce Summary Section */}
-            <Text style={styles.sectionHeading}>
-              Produce Summary ({activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)})
-            </Text>
-            <View style={styles.threeCardRow}>
-              <TouchableOpacity
-                style={styles.smallKpiCard}
-                onPress={() => router.push("/arrivals?tab=in")}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.kpiIconWrap, { backgroundColor: `${colors.primary}12` }]}>
-                  <MaterialCommunityIcons name="download" size={18} color={colors.primary} />
-                </View>
-                <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_received_weight || 0, "", " KG")}</Text>
-                <Text style={styles.smallKpiLabel}>Received</Text>
-              </TouchableOpacity>
+            {/* 3. Produce & Drying Operations Hub */}
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitleText}>PRODUCE SUMMARY</Text>
+              <Text style={styles.sectionDateText}>
+                {activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)}
+              </Text>
+            </View>
 
-              <TouchableOpacity
-                style={styles.smallKpiCard}
-                onPress={() => router.push("/arrivals?tab=processing")}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.kpiIconWrap, { backgroundColor: "#FFF3E0" }]}>
-                  <MaterialCommunityIcons name="engine-outline" size={18} color="#E65100" />
-                </View>
-                <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.today_arrival?.processing_weight || 0, "", " KG")}</Text>
-                <Text style={styles.smallKpiLabel}>Processing</Text>
-              </TouchableOpacity>
+            <View style={styles.produceHubContainer}>
+              {/* Inbound & Outbound Bar */}
+              <View style={styles.hubInOutRow}>
+                <TouchableOpacity
+                  style={styles.hubInOutCard}
+                  onPress={() => router.push("/arrivals?tab=in")}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.hubIconCircle, { backgroundColor: "#E8F5E9" }]}>
+                    <MaterialCommunityIcons name="arrow-bottom-left" size={18} color="#2E7D32" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.hubMicroLabel}>TOTAL RECEIVED</Text>
+                    <Text style={styles.hubMainWeight}>{fmtNum(data?.period_received_weight || 0, "", " KG")}</Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.smallKpiCard}
-                onPress={() => router.push("/arrivals?tab=out")}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.kpiIconWrap, { backgroundColor: "#F3E5F5" }]}>
-                  <MaterialCommunityIcons name="upload" size={18} color="#7B1FA2" />
-                </View>
-                <Text style={styles.smallKpiValue} numberOfLines={1}>{fmtNum(data?.period_delivered_weight || 0, "", " KG")}</Text>
-                <Text style={styles.smallKpiLabel}>Delivered</Text>
-              </TouchableOpacity>
+                <View style={styles.hubInOutDivider} />
+
+                <TouchableOpacity
+                  style={styles.hubInOutCard}
+                  onPress={() => router.push("/arrivals?tab=out")}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.hubIconCircle, { backgroundColor: "#F3E5F5" }]}>
+                    <MaterialCommunityIcons name="arrow-top-right" size={18} color="#7B1FA2" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.hubMicroLabel}>TOTAL DELIVERED</Text>
+                    <Text style={[styles.hubMainWeight, { color: "#7B1FA2" }]}>
+                      {fmtNum(data?.period_delivered_weight || 0, "", " KG")}
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Drying Division Header */}
+              <View style={styles.hubDivisionBar}>
+                <Text style={styles.hubDivisionTitle}>DRYING OPERATIONS BREAKDOWN</Text>
+              </View>
+
+              {/* Drying Cards Grid: In-House vs Outsource */}
+              <View style={styles.hubDryingGrid}>
+                {/* In-House Drying Tile */}
+                <TouchableOpacity
+                  style={[styles.hubDryingTile, { borderColor: "#C8E6C9", backgroundColor: "#FAFCFA" }]}
+                  onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.hubDryingTileHeader}>
+                    <View style={styles.hubDryingTagInhouse}>
+                      <MaterialCommunityIcons name="factory" size={13} color="#2E7D32" />
+                      <Text style={styles.hubDryingTagTextInhouse}>IN-HOUSE</Text>
+                    </View>
+                    <View style={[styles.statusDotMini, { backgroundColor: isInhouseRunning ? "#2E7D32" : "#94A3B8" }]} />
+                  </View>
+
+                  <Text style={[styles.hubDryingWeight, { color: "#1B5E20" }]} numberOfLines={1}>
+                    {fmtNum(data?.today_arrival?.inhouse_processing_weight || 0, "", " KG")}
+                  </Text>
+                  <Text style={styles.hubDryingSubtitle}>Plant Dryers</Text>
+                  <View style={styles.hubDryingBadge}>
+                    <Text style={styles.hubDryingBadgeText}>
+                      {data?.today_arrival?.inhouse_processing_count || 0} batches • {data?.inhouse_machines_running || 0} dryers
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Outsource Drying Tile */}
+                <TouchableOpacity
+                  style={[styles.hubDryingTile, { borderColor: "#FFE0B2", backgroundColor: "#FFFDF9" }]}
+                  onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.hubDryingTileHeader}>
+                    <View style={styles.hubDryingTagOutsource}>
+                      <MaterialCommunityIcons name="truck-delivery-outline" size={13} color="#E65100" />
+                      <Text style={styles.hubDryingTagTextOutsource}>OUTSOURCE</Text>
+                    </View>
+                    <View style={[styles.statusDotMini, { backgroundColor: isOutsourceRunning ? "#E65100" : "#94A3B8" }]} />
+                  </View>
+
+                  <Text style={[styles.hubDryingWeight, { color: "#E65100" }]} numberOfLines={1}>
+                    {fmtNum(data?.today_arrival?.outsourced_processing_weight || 0, "", " KG")}
+                  </Text>
+                  <Text style={styles.hubDryingSubtitle}>Vendor Contract</Text>
+                  <View style={[styles.hubDryingBadge, { backgroundColor: "#FFF3E0" }]}>
+                    <Text style={[styles.hubDryingBadgeText, { color: "#E65100" }]}>
+                      {data?.today_arrival?.outsourced_processing_count || 0} batches • {data?.outsourced_machines_running || 0} vendors
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* 4. Finance Summary Section (Hidden for Store Incharge) */}
             {role !== "Store Incharge" && (
               <>
-                <Text style={[styles.sectionHeading, { marginTop: spacing.lg }]}>
-                  Finance Summary ({activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)})
-                </Text>
+                <View style={[styles.sectionHeaderRow, { marginTop: spacing.xl }]}>
+                  <Text style={styles.sectionTitleText}>FINANCE SUMMARY</Text>
+                  <Text style={styles.sectionDateText}>
+                    {activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)}
+                  </Text>
+                </View>
                 <View style={styles.threeCardRow}>
                   <TouchableOpacity
                     testID="db-billed-kpi"
@@ -423,82 +497,96 @@ export default function Dashboard() {
               </>
             )}
 
-            {/* 4. Live Processing Card (Primary Card) */}
+            {/* 4. Currently Processing Sections (In-House vs Outsource Separate Cards) */}
             {data?.today_arrival && (
-              isDryerRunning ? (
+              <View style={{ marginTop: spacing.md, marginBottom: spacing.md }}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionTitleText}>CURRENTLY PROCESSING</Text>
+                  <Text style={styles.sectionDateText}>{activeBranchName}</Text>
+                </View>
+
+                {/* Card 1: In-House Dryers Processing */}
                 <TouchableOpacity
                   onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
-                  style={styles.liveCard}
-                  activeOpacity={0.9}
+                  style={[
+                    styles.separateLiveCard,
+                    { borderLeftColor: colors.primary, marginBottom: spacing.md },
+                    !isInhouseRunning && styles.liveCardDisabled,
+                  ]}
+                  activeOpacity={0.85}
                 >
-                  <View style={styles.liveCardTop}>
-                    <View style={styles.liveBadge}>
-                      <View style={styles.liveDot} />
-                      <Text style={styles.liveBadgeText}>LIVE DRYING</Text>
+                  <View style={styles.liveSeparateHeader}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={[styles.kpiIconWrap, { backgroundColor: "#E8F5E9" }]}>
+                        <MaterialCommunityIcons name="factory" size={20} color={colors.primary} />
+                      </View>
+                      <View>
+                        <Text style={[styles.liveSeparateTitle, { color: colors.primary }]}>In-House Dryers</Text>
+                        <Text style={styles.liveSeparateSub}>Internal plant machinery</Text>
+                      </View>
                     </View>
-                    <Text style={styles.liveCardTitle}>Currently Processing</Text>
-                  </View>
-
-                  <View style={styles.liveStatsRow}>
-                    <View style={styles.liveStat}>
-                      <Text style={styles.liveStatLabel}>Customers in Dryer</Text>
-                      <Text style={styles.liveStatValue}>{data.today_arrival.processing_count ?? 0}</Text>
-                    </View>
-                    <View style={styles.liveStatDivider} />
-                    <View style={styles.liveStat}>
-                      <Text style={styles.liveStatLabel}>Total Weight</Text>
-                      <Text style={styles.liveStatValue}>{fmtNum(data.today_arrival.processing_weight ?? 0, "", " KG")}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.progressContainer}>
-                    <View style={styles.progressHeader}>
-                      <Text style={styles.progressLabel}>Dryer Capacity Utilization</Text>
-                      <Text style={styles.progressValText}>
-                        {Math.round(data.today_arrival.processing_weight ?? 0)} / 5000 KG ({Math.round(((data.today_arrival.processing_weight ?? 0) / 5000) * 100)}%)
+                    <View style={[styles.liveStatusPill, isInhouseRunning ? styles.livePillActive : styles.livePillIdle]}>
+                      <View style={[styles.liveStatusDot, isInhouseRunning ? styles.liveDotActive : styles.liveDotIdle]} />
+                      <Text style={[styles.liveStatusText, isInhouseRunning ? styles.liveTextActive : styles.liveTextIdle]}>
+                        {isInhouseRunning ? "LIVE DRYING" : "IDLE"}
                       </Text>
                     </View>
-                    <View style={styles.progressBarBg}>
-                      <View
-                        style={[
-                          styles.progressBarFill,
-                          {
-                            width: `${Math.min(
-                              100,
-                              data.today_arrival.processing_weight
-                                ? (data.today_arrival.processing_weight / 5000) * 100
-                                : 0
-                            )}%`,
-                          },
-                        ]}
-                      />
-                    </View>
                   </View>
 
-                  <View style={styles.liveCardBottom}>
-                    <View style={styles.etaRow}>
-                      <MaterialCommunityIcons name="clock-outline" size={16} color={colors.textMuted} />
-                      <Text style={styles.etaText}>Estimated Completion: <Text style={styles.etaHighlight}>Today 5:30 PM</Text></Text>
+                  <View style={styles.liveSeparateBody}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.liveSeparateWeight, { color: colors.text }]}>
+                        {fmtNum(data.today_arrival.inhouse_processing_weight ?? 0, "", " KG")}
+                      </Text>
+                      <Text style={styles.liveSeparateSub}>
+                        {data.today_arrival.inhouse_processing_count ?? 0} batches drying • {data.inhouse_machines_running ?? 0} dryers active
+                      </Text>
                     </View>
+                    <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />
                   </View>
                 </TouchableOpacity>
-              ) : (
-                <View style={[styles.liveCard, styles.liveCardDisabled]}>
-                  <View style={styles.liveCardTop}>
-                    <View style={[styles.liveBadge, styles.inactiveBadge]}>
-                      <View style={[styles.liveDot, styles.inactiveDot]} />
-                      <Text style={[styles.liveBadgeText, styles.inactiveBadgeText]}>IDLE</Text>
+
+                {/* Card 2: Outsource Dryers Processing */}
+                <TouchableOpacity
+                  onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
+                  style={[
+                    styles.separateLiveCard,
+                    { borderLeftColor: "#E65100" },
+                    !isOutsourceRunning && styles.liveCardDisabled,
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.liveSeparateHeader}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={[styles.kpiIconWrap, { backgroundColor: "#FFF3E0" }]}>
+                        <MaterialCommunityIcons name="truck-delivery-outline" size={20} color="#E65100" />
+                      </View>
+                      <View>
+                        <Text style={[styles.liveSeparateTitle, { color: "#E65100" }]}>Outsource Dryers</Text>
+                        <Text style={styles.liveSeparateSub}>Vendor contract processing</Text>
+                      </View>
                     </View>
-                    <Text style={styles.liveCardTitle}>Currently Processing</Text>
+                    <View style={[styles.liveStatusPill, isOutsourceRunning ? styles.livePillOutsourceActive : styles.livePillIdle]}>
+                      <View style={[styles.liveStatusDot, isOutsourceRunning ? styles.liveDotOutsourceActive : styles.liveDotIdle]} />
+                      <Text style={[styles.liveStatusText, isOutsourceRunning ? styles.liveTextOutsourceActive : styles.liveTextIdle]}>
+                        {isOutsourceRunning ? "LIVE DRYING" : "IDLE"}
+                      </Text>
+                    </View>
                   </View>
 
-                  <View style={styles.noDryerContainer}>
-                    <MaterialCommunityIcons name="tumble-dryer" size={40} color={colors.textLight} />
-                    <Text style={styles.noDryerText}>No Dryers Running</Text>
-                    <Text style={styles.noDryerSubtext}>Start a batch to view real-time drying metrics.</Text>
+                  <View style={styles.liveSeparateBody}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.liveSeparateWeight, { color: "#E65100" }]}>
+                        {fmtNum(data.today_arrival.outsourced_processing_weight ?? 0, "", " KG")}
+                      </Text>
+                      <Text style={styles.liveSeparateSub}>
+                        {data.today_arrival.outsourced_processing_count ?? 0} batches drying • {data.outsourced_machines_running ?? 0} vendors active
+                      </Text>
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />
                   </View>
-                </View>
-              )
+                </TouchableOpacity>
+              </View>
             )}
 
             {/* 5. Quick Actions Section */}
@@ -1095,6 +1183,62 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: colors.text,
   },
+  liveCardBranchSubtitle: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  processingSplitGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginVertical: spacing.md,
+  },
+  processingSplitCard: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderLeftWidth: 3.5,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  splitCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginBottom: 4,
+  },
+  splitCardTagInhouse: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.primary,
+    letterSpacing: 0.3,
+  },
+  splitCardTagOutsource: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#E65100",
+    letterSpacing: 0.3,
+  },
+  splitWeightValue: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: colors.text,
+    letterSpacing: -0.3,
+    marginBottom: 2,
+  },
+  splitSubText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  kpiSubBreakdown: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   liveStatsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1607,10 +1751,259 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "800",
   },
+  /* Unified Produce & Drying Operations Hub */
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs + 2,
+  },
+  sectionTitleText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#334155",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  sectionDateText: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  produceHubContainer: {
+    marginHorizontal: spacing.xl,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    ...shadow.card,
+    overflow: "hidden",
+    marginBottom: spacing.md,
+  },
+  hubInOutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#F8FAFC",
+  },
+  hubInOutCard: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  hubIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hubMicroLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748B",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  hubMainWeight: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.primary,
+    letterSpacing: -0.3,
+  },
+  hubInOutDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: "#E2E8F0",
+    marginHorizontal: 10,
+  },
+  hubDivisionBar: {
+    backgroundColor: "#F1F5F9",
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  hubDivisionTitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#475569",
+    letterSpacing: 0.8,
+  },
+  hubDryingGrid: {
+    flexDirection: "row",
+    padding: 12,
+    gap: 10,
+    backgroundColor: "#FFFFFF",
+  },
+  hubDryingTile: {
+    flex: 1,
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1.5,
+    justifyContent: "space-between",
+    minHeight: 115,
+  },
+  hubDryingTileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  hubDryingTagInhouse: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#E8F5E9",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  hubDryingTagTextInhouse: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#2E7D32",
+    letterSpacing: 0.5,
+  },
+  hubDryingTagOutsource: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFF3E0",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  hubDryingTagTextOutsource: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#E65100",
+    letterSpacing: 0.5,
+  },
+  statusDotMini: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+  },
+  hubDryingWeight: {
+    fontSize: 17,
+    fontWeight: "800",
+    letterSpacing: -0.3,
+  },
+  hubDryingSubtitle: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  hubDryingBadge: {
+    backgroundColor: "#E8F5E9",
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: "flex-start",
+    marginTop: 8,
+  },
+  hubDryingBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#2E7D32",
+  },
+
+  /* Finance 3-card Row */
   threeCardRow: {
     flexDirection: "row",
+    marginHorizontal: spacing.xl,
     gap: spacing.sm,
     marginBottom: spacing.md,
+  },
+
+  /* Professional Live Processing Separate Cards */
+  separateLiveCard: {
+    marginHorizontal: spacing.xl,
+    backgroundColor: colors.card,
+    borderRadius: radius.xxl,
+    padding: spacing.lg,
+    borderLeftWidth: 4,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  liveSeparateHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.md,
+  },
+  liveSeparateTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  liveSeparateBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  liveSeparateWeight: {
+    fontSize: 22,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  liveSeparateSub: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  liveStatusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  liveStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  liveStatusText: {
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  livePillActive: {
+    backgroundColor: "#E8F5E9",
+  },
+  liveDotActive: {
+    backgroundColor: colors.primary,
+  },
+  liveTextActive: {
+    color: colors.primary,
+  },
+  livePillOutsourceActive: {
+    backgroundColor: "#FFF3E0",
+  },
+  liveDotOutsourceActive: {
+    backgroundColor: "#E65100",
+  },
+  liveTextOutsourceActive: {
+    color: "#E65100",
+  },
+  livePillIdle: {
+    backgroundColor: "#F1F5F9",
+  },
+  liveDotIdle: {
+    backgroundColor: colors.textLight,
+  },
+  liveTextIdle: {
+    color: colors.textMuted,
   },
   smallKpiCard: {
     flex: 1,

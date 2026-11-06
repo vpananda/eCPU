@@ -11,6 +11,7 @@ import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import Calendar from "@/src/components/Calendar";
 import { openWhatsApp, openSMS, buildPaymentReceiptMessage } from "@/src/utils/notifications";
 
 
@@ -19,6 +20,36 @@ const MODES = ["Cash", "UPI", "Bank", "Credit"];
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
+
+function formatFriendlyDate(isoStr: string) {
+  if (!isoStr) return "Select date";
+  try {
+    const parts = isoStr.split("-");
+    if (parts.length === 3) {
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-IN", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        });
+      }
+    }
+  } catch {}
+  return isoStr;
+}
+
+type CustomerStats = {
+  total_visits: number;
+  total_weight: number;
+  total_revenue: number;
+  total_paid: number;
+  pending_balance: number;
+  name?: string;
+  code?: string;
+  mobile?: string;
+};
 
 export default function PaymentForm() {
   const router = useRouter();
@@ -36,34 +67,24 @@ export default function PaymentForm() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [branchId, setBranchId] = useState<string | null>(null);
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [customerBatches, setCustomerBatches] = useState<any[]>([]);
+  const [customerStats, setCustomerStats] = useState<CustomerStats | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [amount, setAmount] = useState("");
   const [mode, setMode] = useState("Cash");
   const [paymentDate, setPaymentDate] = useState(todayISO());
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [tempDate, setTempDate] = useState(todayISO());
   const [remarks, setRemarks] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [successData, setSuccessData] = useState<{
-    customerName: string;
-    mobile: string;
-    branchName: string;
-    amount: number;
-    mode: string;
-    date: string;
-    batchNo?: string;
-    remarks?: string;
-  } | null>(null);
   const [targetPhone, setTargetPhone] = useState("");
-
 
   useEffect(() => {
     if (params.customer_id) setCustomerId(params.customer_id);
     if (params.branch_id) setBranchId(params.branch_id);
-    if (params.batch_id) setBatchId(params.batch_id);
     if (params.suggest_amount) setAmount(params.suggest_amount);
-  }, [params.customer_id, params.branch_id, params.batch_id, params.suggest_amount]);
+  }, [params.customer_id, params.branch_id, params.suggest_amount]);
 
   const displayBranches = isAdmin
     ? branches
@@ -119,23 +140,32 @@ export default function PaymentForm() {
     }
   }, [branchId, customerId, filteredCustomers]);
 
-  // Load pending batches when customer is selected
+  // Load customer financial summary & ledger stats when customer is selected
   useEffect(() => {
     if (customerId) {
-      api(`/customers/${customerId}`)
+      setLoadingStats(true);
+      api<any>(`/customers/${customerId}`)
         .then(c => {
-          const batches = (c.history || []).map((b: any) => ({
-            id: b.id,
-            name: `${b.batch_no} (${b.product_name || "Spice"} · Bal: ₹${Number(b.balance_amount || 0).toLocaleString("en-IN")})`,
-            balance: b.balance_amount || 0,
-          }));
-          setCustomerBatches(batches);
+          const st = c.stats || {};
+          setCustomerStats({
+            total_visits: st.total_visits || 0,
+            total_weight: st.total_weight || 0,
+            total_revenue: st.total_revenue || 0,
+            total_paid: st.total_paid || 0,
+            pending_balance: st.pending_balance || 0,
+            name: c.name,
+            code: c.code,
+            mobile: c.mobile,
+          });
         })
         .catch(() => {
-          setCustomerBatches([]);
+          setCustomerStats(null);
+        })
+        .finally(() => {
+          setLoadingStats(false);
         });
     } else {
-      setCustomerBatches([]);
+      setCustomerStats(null);
     }
   }, [customerId]);
 
@@ -158,7 +188,6 @@ export default function PaymentForm() {
       await api("/payments", {
         method: "POST",
         body: {
-          batch_id: batchId || null,
           customer_id: customerId,
           branch_id: branchId,
           amount: a,
@@ -167,7 +196,7 @@ export default function PaymentForm() {
           created_at: paymentDate ? `${paymentDate}T12:00:00Z` : undefined,
         },
       });
-      toast.show(batchId ? "Payment applied to batch" : "Advance / payment recorded");
+      toast.show("Payment recorded and customer ledger updated");
       router.back();
     } catch (e: any) {
       toast.show(e.message || "Failed to save payment", "error");
@@ -201,19 +230,86 @@ export default function PaymentForm() {
               options={filteredCustomers.map(c => ({ id: c.id, name: `${c.name} (${c.mobile || c.code})` }))}
             />
 
-            {/* Optional Batch Selector */}
-            {customerBatches.length > 0 ? (
-              <Picker
-                testID="payment-batch"
-                label="Apply to Specific Batch (Optional)"
-                placeholder="Advance / General Account Credit"
-                value={batchId}
-                onChange={setBatchId}
-                options={[
-                  { id: "", name: "— General Credit / Advance Payment —" },
-                  ...customerBatches,
-                ]}
-              />
+            {/* Customer Financial Ledger Summary Card */}
+            {loadingStats ? (
+              <View style={styles.statsLoadingBox}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.statsLoadingText}>Loading customer ledger summary...</Text>
+              </View>
+            ) : customerStats ? (
+              <View style={styles.customerSummaryCard}>
+                <View style={styles.summaryTopRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+                    <MaterialCommunityIcons name="account-circle-outline" size={18} color={colors.primary} />
+                    <Text style={styles.summaryCustTitle} numberOfLines={1}>
+                      {customerStats.name} ({customerStats.code || customerStats.mobile || "Customer"})
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.ledgerLinkBtn}
+                    onPress={() => router.push(`/customer/${customerId}`)}
+                    activeOpacity={0.7}
+                  >
+                    <MaterialCommunityIcons name="book-open-outline" size={13} color={colors.primary} />
+                    <Text style={styles.ledgerLinkText}>View Ledger</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 3 Metrics: Total Arrival, Received Amount, Balance Amount */}
+                <View style={styles.summaryMetricsRow}>
+                  {/* Total Arrival Bill */}
+                  <View style={styles.summaryMetricItem}>
+                    <Text style={styles.metricLabel}>Total Arrival</Text>
+                    <Text style={styles.metricValue}>₹{customerStats.total_revenue.toLocaleString("en-IN")}</Text>
+                    <Text style={styles.metricSub}>
+                      {customerStats.total_weight.toLocaleString("en-IN")} KG • {customerStats.total_visits} arrivals
+                    </Text>
+                  </View>
+
+                  <View style={styles.metricDivider} />
+
+                  {/* Received Amount */}
+                  <View style={styles.summaryMetricItem}>
+                    <Text style={styles.metricLabel}>Received Amount</Text>
+                    <Text style={[styles.metricValue, { color: colors.success }]}>
+                      ₹{customerStats.total_paid.toLocaleString("en-IN")}
+                    </Text>
+                    <Text style={styles.metricSub}>Total Collected</Text>
+                  </View>
+
+                  <View style={styles.metricDivider} />
+
+                  {/* Balance Amount */}
+                  <View style={styles.summaryMetricItem}>
+                    <Text style={styles.metricLabel}>Balance Amount</Text>
+                    <Text
+                      style={[
+                        styles.metricValue,
+                        customerStats.pending_balance > 0 ? { color: colors.danger } : { color: colors.success },
+                      ]}
+                    >
+                      ₹{Math.abs(customerStats.pending_balance).toLocaleString("en-IN")}
+                    </Text>
+                    <Text style={[styles.metricSub, customerStats.pending_balance > 0 && { color: colors.danger, fontWeight: "700" }]}>
+                      {customerStats.pending_balance > 0 ? "Pending Due" : "Advance Credit"}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Quick Autofill Exact Balance Button */}
+                {customerStats.pending_balance > 0 && (
+                  <TouchableOpacity
+                    style={styles.autofillBtn}
+                    onPress={() => setAmount(String(customerStats.pending_balance))}
+                    activeOpacity={0.7}
+                  >
+                    <MaterialCommunityIcons name="lightning-bolt" size={14} color={colors.primary} />
+                    <Text style={styles.autofillBtnText}>
+                      Autofill Balance: ₹{customerStats.pending_balance.toLocaleString("en-IN")}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             ) : null}
 
             <Input
@@ -225,14 +321,54 @@ export default function PaymentForm() {
               placeholder="0.00"
             />
 
-            {/* Payment Date */}
-            <Input
-              testID="payment-date"
-              label="Payment Date (YYYY-MM-DD)"
-              value={paymentDate}
-              onChangeText={setPaymentDate}
-              placeholder="YYYY-MM-DD"
-            />
+            {/* Real-Time Balance Calculator */}
+            {customerStats && parseFloat(amount) > 0 && (
+              <View style={styles.calcBox}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                  <MaterialCommunityIcons name="calculator-variant-outline" size={15} color={colors.primary} />
+                  <Text style={styles.calcLabel}>Account Impact After Payment:</Text>
+                </View>
+                {customerStats.pending_balance - parseFloat(amount) > 0 ? (
+                  <Text style={styles.calcResultPending}>
+                    Remaining Balance Due: ₹{(customerStats.pending_balance - parseFloat(amount)).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  </Text>
+                ) : customerStats.pending_balance - parseFloat(amount) === 0 ? (
+                  <Text style={styles.calcResultCleared}>
+                    ✓ Balance will be FULLY CLEARED (₹0.00)
+                  </Text>
+                ) : (
+                  <Text style={styles.calcResultAdvance}>
+                    ✓ Advance Credit for Next Arrival: ₹{(parseFloat(amount) - customerStats.pending_balance).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {/* Payment Date with Calendar Picker */}
+            <View style={{ marginBottom: spacing.md }}>
+              <Text style={styles.label}>Payment Date *</Text>
+              <TouchableOpacity
+                testID="payment-date"
+                style={styles.dateSelector}
+                onPress={() => {
+                  setTempDate(paymentDate || todayISO());
+                  setCalendarOpen(true);
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={styles.dateIconBox}>
+                  <MaterialCommunityIcons name="calendar-month-outline" size={20} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={styles.dateSelectorValue}>{formatFriendlyDate(paymentDate)}</Text>
+                  <Text style={styles.dateSelectorIso}>{paymentDate}</Text>
+                </View>
+                <View style={styles.dateActionChip}>
+                  <MaterialCommunityIcons name="calendar" size={15} color={colors.primary} />
+                  <Text style={styles.dateActionChipText}>Select Date</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
 
             <Text style={styles.label}>Payment Mode *</Text>
             <View style={styles.modeGrid}>
@@ -259,7 +395,7 @@ export default function PaymentForm() {
             <View style={{ gap: spacing.md, marginTop: spacing.lg }}>
               <Button
                 testID="payment-submit"
-                title={batchId ? "Record Batch Payment" : "Record Customer Payment"}
+                title="Record Customer Payment"
                 onPress={submit}
                 loading={saving}
               />
@@ -267,8 +403,138 @@ export default function PaymentForm() {
           </ScrollView>
         </KeyboardAvoidingView>
       )}
-    
-      
+
+      {/* Calendar Date Picker Modal */}
+      <Modal
+        visible={calendarOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setCalendarOpen(false)}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerSheetHandle} />
+
+            <View style={styles.pickerHeader}>
+              <View>
+                <Text style={styles.pickerSheetTitle}>Select Payment Date</Text>
+                <Text style={styles.pickerSheetSub}>Choose transaction date for payment record</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setCalendarOpen(false)}
+                style={styles.pickerCloseBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Quick Presets */}
+            <View style={styles.presetsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.presetChip,
+                  tempDate === todayISO() && styles.presetChipActive,
+                ]}
+                onPress={() => setTempDate(todayISO())}
+              >
+                <MaterialCommunityIcons
+                  name="calendar-today"
+                  size={14}
+                  color={tempDate === todayISO() ? "#fff" : colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.presetChipText,
+                    tempDate === todayISO() && styles.presetChipTextActive,
+                  ]}
+                >
+                  Today
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.presetChip,
+                  tempDate === (() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() - 1);
+                    return d.toISOString().slice(0, 10);
+                  })() && styles.presetChipActive,
+                ]}
+                onPress={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 1);
+                  setTempDate(d.toISOString().slice(0, 10));
+                }}
+              >
+                <MaterialCommunityIcons
+                  name="history"
+                  size={14}
+                  color={
+                    tempDate === (() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      return d.toISOString().slice(0, 10);
+                    })()
+                      ? "#fff"
+                      : colors.primary
+                  }
+                />
+                <Text
+                  style={[
+                    styles.presetChipText,
+                    tempDate === (() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      return d.toISOString().slice(0, 10);
+                    })() && styles.presetChipTextActive,
+                  ]}
+                >
+                  Yesterday
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Calendar */}
+            <Calendar
+              startDate={tempDate}
+              endDate={tempDate}
+              onSelectRange={(s) => {
+                if (s) setTempDate(s);
+              }}
+            />
+
+            {/* Selected Date Preview */}
+            <View style={styles.selectedDatePreview}>
+              <MaterialCommunityIcons name="check-circle" size={16} color={colors.primary} />
+              <Text style={styles.selectedDatePreviewText}>
+                Selected: <Text style={{ fontWeight: "800", color: colors.text }}>{formatFriendlyDate(tempDate)}</Text> ({tempDate})
+              </Text>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.pickerSheetActions}>
+              <TouchableOpacity
+                style={styles.pickerSheetCancel}
+                onPress={() => setCalendarOpen(false)}
+              >
+                <Text style={styles.pickerSheetCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.pickerSheetApply}
+                onPress={() => {
+                  setPaymentDate(tempDate);
+                  setCalendarOpen(false);
+                }}
+              >
+                <MaterialCommunityIcons name="check" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.pickerSheetApplyText}>Confirm Date</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -289,6 +555,298 @@ const styles = StyleSheet.create({
   },
   modeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   modeText: { fontSize: 13, fontWeight: "800", color: colors.textMuted },
+
+  statsLoadingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: spacing.md,
+    backgroundColor: "#F8FAFC",
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
+  },
+  statsLoadingText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+  customerSummaryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    ...shadow.sm,
+  },
+  summaryTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    marginBottom: 10,
+  },
+  summaryCustTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  ledgerLinkBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: `${colors.primary}12`,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  ledgerLinkText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  summaryMetricsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  summaryMetricItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  metricDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: "#E2E8F0",
+  },
+  metricLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.textMuted,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  metricValue: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  metricSub: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  autofillBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    backgroundColor: `${colors.primary}10`,
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: `${colors.primary}25`,
+  },
+  autofillBtnText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+  calcBox: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: -8,
+    marginBottom: spacing.md,
+    gap: 4,
+  },
+  calcLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  calcResultPending: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.danger,
+  },
+  calcResultCleared: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.success,
+  },
+  calcResultAdvance: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+
+  dateSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  dateIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: `${colors.primary}15`,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dateSelectorValue: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  dateSelectorIso: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  dateActionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: `${colors.primary}12`,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  dateActionChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+
+  modalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  pickerSheet: {
+    backgroundColor: "#fff",
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: spacing.xl,
+    paddingBottom: Platform.OS === "ios" ? 40 : spacing.xl,
+    maxHeight: "90%",
+    ...shadow.card,
+  },
+  pickerSheetHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: spacing.md,
+  },
+  pickerSheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  pickerSheetSub: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  pickerCloseBtn: {
+    padding: 4,
+  },
+  presetsRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: 6,
+  },
+  presetChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "#F8FAFC",
+  },
+  presetChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  presetChipText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  presetChipTextActive: {
+    color: "#fff",
+  },
+  selectedDatePreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: `${colors.primary}10`,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+  },
+  selectedDatePreviewText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  pickerSheetActions: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  pickerSheetCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
+  pickerSheetCancelText: {
+    color: colors.textMuted,
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  pickerSheetApply: {
+    flex: 1.5,
+    flexDirection: "row",
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.card,
+  },
+  pickerSheetApplyText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
+  },
 
   successBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", padding: spacing.xl },
   successCard: { width: "100%", maxWidth: 420, backgroundColor: "#fff", borderRadius: radius.xl, padding: spacing.xl, alignItems: "center", ...shadow.card },

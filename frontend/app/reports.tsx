@@ -89,6 +89,86 @@ export default function Reports() {
             <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />
           </TouchableOpacity>
 
+          {/* Outsourced Drying & Payouts Summary */}
+          {d.outsourced_summary && (
+            <View style={[styles.card, { borderColor: "#FFE082", borderWidth: 1.5, backgroundColor: "#FFFDF7" }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "#FFE082", alignItems: "center", justifyContent: "center" }}>
+                    <MaterialCommunityIcons name="truck-delivery-outline" size={18} color="#E65100" />
+                  </View>
+                  <View>
+                    <Text style={[styles.sectionTitle, { marginBottom: 0, color: "#E65100" }]}>Outsourced Processing & Payouts</Text>
+                    <Text style={{ fontSize: 11, color: colors.textMuted }}>Vendor dryers job-work & settlement</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 4 Summary Stats */}
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.md, backgroundColor: "#FFF8E1", padding: 12, borderRadius: radius.lg, borderWidth: 1, borderColor: "#FFE082" }}>
+                <View style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: "700", textTransform: "uppercase" }}>Processed</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "800", color: "#E65100", marginTop: 2 }}>
+                    {Number(d.outsourced_summary.total_kg || 0).toLocaleString("en-IN")} kg
+                  </Text>
+                </View>
+                <View style={{ width: 1, height: 28, backgroundColor: "#FFE082" }} />
+                <View style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: "700", textTransform: "uppercase" }}>Total Cost</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text, marginTop: 2 }}>
+                    ₹{Number(d.outsourced_summary.total_cost || 0).toLocaleString("en-IN")}
+                  </Text>
+                </View>
+                <View style={{ width: 1, height: 28, backgroundColor: "#FFE082" }} />
+                <View style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: "700", textTransform: "uppercase" }}>Paid</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "800", color: colors.success, marginTop: 2 }}>
+                    ₹{Number(d.outsourced_summary.total_paid || 0).toLocaleString("en-IN")}
+                  </Text>
+                </View>
+                <View style={{ width: 1, height: 28, backgroundColor: "#FFE082" }} />
+                <View style={{ flex: 1, alignItems: "center" }}>
+                  <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: "700", textTransform: "uppercase" }}>Balance</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "800", color: d.outsourced_summary.balance_payable > 0 ? "#C62828" : colors.success, marginTop: 2 }}>
+                    ₹{Number(d.outsourced_summary.balance_payable || 0).toLocaleString("en-IN")}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Vendor Breakdown */}
+              {(d.outsourced_summary.machines || []).length === 0 ? (
+                <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: "center", paddingVertical: 8 }}>
+                  No outsourced dryers configured yet.
+                </Text>
+              ) : (
+                (d.outsourced_summary.machines || []).map((m: any) => (
+                  <TouchableOpacity
+                    key={m.machine_id}
+                    style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 10, borderTopWidth: 1, borderTopColor: "#FFE082" }}
+                    onPress={() => router.push(`/machine/${m.machine_id}`)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "800", color: colors.text }}>{m.machine_name}</Text>
+                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>
+                        {m.vendor_name} • ₹{m.rate_per_kg}/kg • {m.batches_count} batches
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={{ fontSize: 13, fontWeight: "800", color: "#E65100" }}>
+                        {Number(m.processed_kg || 0).toLocaleString("en-IN")} kg
+                      </Text>
+                      <Text style={{ fontSize: 11, fontWeight: "700", color: m.balance_payable > 0 ? "#C62828" : colors.success, marginTop: 1 }}>
+                        Bal: ₹{Number(m.balance_payable || 0).toLocaleString("en-IN")}
+                      </Text>
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={18} color={colors.textLight} style={{ marginLeft: 6 }} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          )}
+
           {/* Alerts */}
           <View style={styles.alertGrid}>
             <View style={[styles.alert, { backgroundColor: colors.danger + "15" }]}>

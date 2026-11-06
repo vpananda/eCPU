@@ -29,6 +29,11 @@ export async function clearToken() {
   await storage.secureRemove(TOKEN_KEY);
 }
 
+let onUnauthorizedCallback: (() => void) | null = null;
+export function setOnUnauthorized(cb: () => void) {
+  onUnauthorizedCallback = cb;
+}
+
 /**
  * Pings the backend to check reachability and measure round-trip latency.
  */
@@ -86,6 +91,13 @@ export async function api<T = any>(path: string, opts: ApiOpts = {}): Promise<T>
       data = text;
     }
     if (!res.ok) {
+      if (res.status === 401) {
+        await clearToken();
+        await storage.removeItem("ethree_auth_user_json");
+        if (onUnauthorizedCallback) {
+          try { onUnauthorizedCallback(); } catch {}
+        }
+      }
       const msg = (data && (data.detail || data.message)) || `Request failed (${res.status})`;
       throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
     }

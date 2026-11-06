@@ -20,7 +20,7 @@ const STATUS_OPTIONS = [
 
 export default function MachineForm() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, outsourced } = useLocalSearchParams<{ id: string; outsourced?: string }>();
   const isEdit = !!id;
   const toast = useToast();
   const { user, branches } = useAuth();
@@ -30,6 +30,10 @@ export default function MachineForm() {
     capacity: "",
     status: "Available",
     branch_id: "",
+    is_outsourced: outsourced === "1",
+    vendor_name: "",
+    vendor_phone: "",
+    vendor_rate_per_kg: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -37,14 +41,17 @@ export default function MachineForm() {
     (async () => {
       try {
         if (isEdit) {
-          const machines = await api<any[]>("/machines");
-          const m = machines.find(item => item.id === id);
+          const m = await api<any>(`/machines/${id}`);
           if (m) {
             setForm({
-              name: m.name,
+              name: m.name || "",
               capacity: m.capacity != null ? String(m.capacity) : "",
-              status: m.status,
+              status: m.status || "Available",
               branch_id: m.branch_id || "",
+              is_outsourced: Boolean(m.is_outsourced),
+              vendor_name: m.vendor_name || "",
+              vendor_phone: m.vendor_phone || "",
+              vendor_rate_per_kg: m.vendor_rate_per_kg != null ? String(m.vendor_rate_per_kg) : "",
             });
           }
         } else if (user) {
@@ -60,7 +67,7 @@ export default function MachineForm() {
     })();
   }, [id, isEdit, user, branches]);
 
-  const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k: keyof typeof form, v: any) => setForm(f => ({ ...f, [k]: v }));
 
   const save = async () => {
     if (!form.name || !form.capacity) {
@@ -73,13 +80,22 @@ export default function MachineForm() {
       return;
     }
 
+    if (form.is_outsourced && !(form.vendor_name || "").trim()) {
+      toast.show("Please enter the vendor/dryer name for outsourced machine", "error");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
-        name: form.name,
+        name: form.name.trim(),
         capacity: cap,
         status: form.status,
         branch_id: form.branch_id || null,
+        is_outsourced: Boolean(form.is_outsourced),
+        vendor_name: form.is_outsourced ? (form.vendor_name || "").trim() : "",
+        vendor_phone: form.is_outsourced ? (form.vendor_phone || "").trim() : "",
+        vendor_rate_per_kg: form.is_outsourced && form.vendor_rate_per_kg ? parseFloat(form.vendor_rate_per_kg) : 0,
       };
 
       if (isEdit) {
@@ -109,7 +125,72 @@ export default function MachineForm() {
       </View>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.xl }} keyboardShouldPersistTaps="handled">
-          <Input testID="mf-name" label="Name *" value={form.name} onChangeText={v => set("name", v)} placeholder="Dryer Name" />
+          {/* Machine Source Type Selector */}
+          <Text style={styles.fieldLabel}>Machine Classification *</Text>
+          <View style={styles.typeSelectorRow}>
+            <TouchableOpacity
+              style={[styles.typeOptionBtn, !form.is_outsourced && styles.typeOptionBtnActive]}
+              onPress={() => set("is_outsourced", false)}
+            >
+              <MaterialCommunityIcons
+                name="factory"
+                size={20}
+                color={!form.is_outsourced ? "#fff" : colors.textMuted}
+              />
+              <Text style={[styles.typeOptionText, !form.is_outsourced && styles.typeOptionTextActive]}>
+                In-House Machine
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.typeOptionBtn, form.is_outsourced && styles.typeOptionBtnOutsourcedActive]}
+              onPress={() => set("is_outsourced", true)}
+            >
+              <MaterialCommunityIcons
+                name="truck-delivery-outline"
+                size={20}
+                color={form.is_outsourced ? "#fff" : colors.textMuted}
+              />
+              <Text style={[styles.typeOptionText, form.is_outsourced && styles.typeOptionTextActive]}>
+                Outsourced Dryer
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Conditional Vendor Fields for Outsourced Machines */}
+          {form.is_outsourced && (
+            <View style={styles.vendorBox}>
+              <View style={styles.vendorHeader}>
+                <MaterialCommunityIcons name="information" size={16} color="#E65100" />
+                <Text style={styles.vendorHeaderText}>Outsourcing Vendor Details</Text>
+              </View>
+              <Input
+                testID="mf-vendor-name"
+                label="Vendor / Dryer Name *"
+                value={form.vendor_name}
+                onChangeText={v => set("vendor_name", v)}
+                placeholder="e.g. KM Dryers Moolathurai"
+              />
+              <Input
+                testID="mf-vendor-phone"
+                label="Vendor Phone Number"
+                value={form.vendor_phone}
+                onChangeText={v => set("vendor_phone", v)}
+                keyboardType="phone-pad"
+                placeholder="e.g. 9876543210"
+              />
+              <Input
+                testID="mf-vendor-rate"
+                label="Vendor Job-Work Cost / KG (₹)"
+                value={form.vendor_rate_per_kg}
+                onChangeText={v => set("vendor_rate_per_kg", v)}
+                keyboardType="numeric"
+                placeholder="e.g. 10.00"
+              />
+            </View>
+          )}
+
+          <Input testID="mf-name" label="Machine Name *" value={form.name} onChangeText={v => set("name", v)} placeholder={form.is_outsourced ? "e.g. EXT - KM Dryer 1" : "e.g. Dryer #1"} />
           <Input testID="mf-capacity" label="Capacity (kg) *" value={form.capacity} onChangeText={v => set("capacity", v)} keyboardType="numeric" placeholder="Capacity in kg" />
           
           <Picker
@@ -151,4 +232,39 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
   title: { fontSize: 20, fontWeight: "800", color: colors.text },
+  fieldLabel: { fontSize: 13, fontWeight: "700", color: colors.textMuted, marginBottom: 8 },
+  typeSelectorRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
+  typeOptionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1.5,
+    borderColor: "#E2E8F0",
+  },
+  typeOptionBtnActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  typeOptionBtnOutsourcedActive: {
+    backgroundColor: "#E65100",
+    borderColor: "#E65100",
+  },
+  typeOptionText: { fontSize: 13, fontWeight: "700", color: colors.textMuted },
+  typeOptionTextActive: { color: "#FFFFFF" },
+  vendorBox: {
+    backgroundColor: "#FFF8E1",
+    borderWidth: 1,
+    borderColor: "#FFE082",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  vendorHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
+  vendorHeaderText: { fontSize: 13, fontWeight: "800", color: "#E65100" },
 });

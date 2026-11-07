@@ -3492,6 +3492,22 @@ async def dashboard(
     """
     full_exp_params = exp_params + [pstart, pend]
 
+    # Product-wise arrivals breakdown (only includes products that arrived)
+    product_sql = f"""
+        SELECT
+            COALESCE(p.name, 'Other') AS product_name,
+            COUNT(b.id) AS batch_count,
+            ROUND(COALESCE(SUM(b.raw_weight), 0)::numeric, 2) AS total_weight
+        FROM public.batches b
+        LEFT JOIN public.products p ON b.product_id = p.id
+        WHERE {" AND ".join(batch_where)}
+          AND (((b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)))
+        GROUP BY p.name
+        HAVING COALESCE(SUM(b.raw_weight), 0) > 0
+        ORDER BY total_weight DESC
+    """
+    product_params = batch_params + [pstart, pend, s_date, e_date]
+
     # Run all lightweight queries in parallel
     tasks = [
         db.query(batch_sql, full_batch_params),
@@ -3500,6 +3516,7 @@ async def dashboard(
         db.customers.count_documents(cust_filter),
         db.machines.find(machine_filter, {"_id": 0}).to_list(50),
         db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15),
+        db.query(product_sql, product_params),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -3510,6 +3527,16 @@ async def dashboard(
     period_customers = results[3]
     machines = results[4]
     recent = results[5]
+    product_rows = results[6] if len(results) > 6 and results[6] else []
+
+    product_arrivals = [
+        {
+            "product_name": str(r.get("product_name") or "Other"),
+            "batch_count": int(r.get("batch_count") or 0),
+            "total_weight": round(float(r.get("total_weight") or 0), 2),
+        }
+        for r in product_rows
+    ]
 
     period_received_weight = round(float(batch_stats.get("period_received_weight") or 0), 2)
     period_billed = round(float(batch_stats.get("period_billed") or 0), 2)
@@ -3572,6 +3599,7 @@ async def dashboard(
         "outsourced_machines_running": outsourced_machines_running,
         "total_machines": len(machines),
         "recent_activities": recent,
+        "product_arrivals": product_arrivals,
     }
 
 

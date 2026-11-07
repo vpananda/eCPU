@@ -46,7 +46,59 @@ type Dash = {
   outsourced_machines_running?: number;
   total_machines: number;
   recent_activities: any[];
+  product_arrivals?: {
+    product_name: string;
+    batch_count: number;
+    total_weight: number;
+  }[];
 };
+
+function getSpiceTheme(name: string) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("cardamom")) {
+    return {
+      icon: "leaf",
+      color: "#166534",
+      bg: "#F0FDF4",
+      border: "#BBF7D0",
+      iconBg: "#DCFCE7",
+    };
+  }
+  if (n.includes("pepper")) {
+    return {
+      icon: "circle-multiple-outline",
+      color: "#9A3412",
+      bg: "#FFF7ED",
+      border: "#FED7AA",
+      iconBg: "#FFEDD5",
+    };
+  }
+  if (n.includes("coffee")) {
+    return {
+      icon: "coffee-outline",
+      color: "#78350F",
+      bg: "#FEF3C7",
+      border: "#FDE68A",
+      iconBg: "#FCD34D",
+    };
+  }
+  if (n.includes("turmeric")) {
+    return {
+      icon: "shaker-outline",
+      color: "#854D0E",
+      bg: "#FEF9C3",
+      border: "#FEF08A",
+      iconBg: "#FDE047",
+    };
+  }
+  return {
+    icon: "seed-outline",
+    color: "#0F766E",
+    bg: "#F0FDFA",
+    border: "#99F6E4",
+    iconBg: "#CCFBF1",
+  };
+}
 
 function fmtNum(v: number, prefix = "", suffix = "") {
   return `${prefix}${(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}${suffix}`;
@@ -385,6 +437,57 @@ export default function Dashboard() {
                   <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
                 </TouchableOpacity>
               </View>
+
+              {/* Spices Arrival Breakdown (Only displayed if arrived) */}
+              {data?.product_arrivals && data.product_arrivals.length > 0 && (
+                <View style={styles.hubSpicesSection}>
+                  <View style={styles.hubSpicesHeader}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <MaterialCommunityIcons name="leaf" size={14} color="#15803D" />
+                      <Text style={styles.hubSpicesTitle}>SPICES ARRIVAL BREAKDOWN</Text>
+                    </View>
+                    <Text style={styles.hubSpicesSubtitle}>
+                      {data.product_arrivals.length} {data.product_arrivals.length === 1 ? "variety" : "varieties"} arrived
+                    </Text>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.hubSpicesScroll}
+                  >
+                    {data.product_arrivals.map((item, idx) => {
+                      const theme = getSpiceTheme(item.product_name);
+                      return (
+                        <TouchableOpacity
+                          key={item.product_name + idx}
+                          style={[styles.hubSpiceCard, { borderColor: theme.border, backgroundColor: theme.bg }]}
+                          onPress={() => router.push({ pathname: "/arrivals", params: { tab: "in", q: item.product_name } })}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.hubSpiceCardTop}>
+                            <View style={[styles.hubSpiceIconBox, { backgroundColor: theme.iconBg }]}>
+                              <MaterialCommunityIcons name={theme.icon as any} size={15} color={theme.color} />
+                            </View>
+                            <View style={[styles.hubSpiceBatchBadge, { backgroundColor: theme.iconBg }]}>
+                              <Text style={[styles.hubSpiceBatchText, { color: theme.color }]}>
+                                {item.batch_count} {item.batch_count === 1 ? "Lot" : "Lots"}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <Text style={styles.hubSpiceName} numberOfLines={1}>
+                            {item.product_name}
+                          </Text>
+                          <Text style={[styles.hubSpiceWeight, { color: theme.color }]}>
+                            {fmtNum(item.total_weight, "", " KG")}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
 
               {/* Drying Division Header */}
               <View style={styles.hubDivisionBar}>
@@ -1820,6 +1923,74 @@ const styles = StyleSheet.create({
     height: 36,
     backgroundColor: "#E2E8F0",
     marginHorizontal: 10,
+  },
+  hubSpicesSection: {
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingVertical: 10,
+  },
+  hubSpicesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  hubSpicesTitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#15803D",
+    letterSpacing: 0.8,
+  },
+  hubSpicesSubtitle: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  hubSpicesScroll: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  hubSpiceCard: {
+    minWidth: 125,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    padding: 10,
+    justifyContent: "space-between",
+  },
+  hubSpiceCardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  hubSpiceIconBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hubSpiceBatchBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  hubSpiceBatchText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  hubSpiceName: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1E293B",
+    marginBottom: 2,
+  },
+  hubSpiceWeight: {
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: -0.2,
   },
   hubDivisionBar: {
     backgroundColor: "#F1F5F9",

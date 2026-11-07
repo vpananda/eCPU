@@ -34,6 +34,8 @@ export default function DeliveryScreen() {
       const b = await api<any>(`/batches/${id}`);
       setBatch(b);
       if (b.rate_per_kg) setRate(String(b.rate_per_kg));
+      if (b.actual_dry_weight) setDryWeight(String(b.actual_dry_weight));
+      if (b.processed_bags) setProcessedBags(String(b.processed_bags));
     } catch (e: any) {
       toast.show(e.message || "Failed to load batch", "error");
     } finally { setLoadingData(false); }
@@ -50,7 +52,12 @@ export default function DeliveryScreen() {
   const receivedNum = parseFloat(amountReceived || "0");
   const remaining = Math.max(0, balanceDue - receivedNum);
 
+  const isCompleted = batch?.status === "Completed" || batch?.status === "Delivered";
+
   const submit = async () => {
+    if (!isCompleted) {
+      return toast.show(`Batch cannot be delivered until processing is Completed (currently ${batch.status})`, "error");
+    }
     if (!dryNum || dryNum <= 0) return toast.show("Enter processed dry weight", "error");
     if (!receivedBy.trim()) return toast.show("Enter person receiving", "error");
     setSaving(true);
@@ -68,7 +75,7 @@ export default function DeliveryScreen() {
           remarks,
         },
       });
-      toast.show("Batch delivered");
+      toast.show("Batch delivered successfully");
       router.replace(`/batch/${id}`);
     } catch (e: any) {
       toast.show(e.message || "Failed", "error");
@@ -107,6 +114,15 @@ export default function DeliveryScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
+          {!isCompleted && (
+            <View style={styles.notCompletedBanner}>
+              <MaterialCommunityIcons name="alert-circle" size={18} color="#B45309" />
+              <Text style={styles.notCompletedText}>
+                ⚠️ Processing is not completed yet (Status: {batch.status}). Batches must be marked "Completed" before delivery.
+              </Text>
+            </View>
+          )}
+
           {/* Batch summary card */}
           <View style={styles.summary}>
             <View style={styles.sumHeader}>
@@ -121,7 +137,11 @@ export default function DeliveryScreen() {
             <View style={styles.sumRow}>
               <SumStat label="Arrival Weight" value={`${batch.raw_weight} kg`} />
               <SumStat label="Bags at arrival" value={String(batch.bags || 0)} />
-              <SumStat label="Machine" value={batch.machine?.name || "-"} />
+              {batch.padi_weight != null && Number(batch.padi_weight) > 0 ? (
+                <SumStat label="Padi Weight" value={`${batch.padi_weight} kg`} />
+              ) : (
+                <SumStat label="Machine" value={batch.machine?.name || "-"} />
+              )}
             </View>
           </View>
 
@@ -210,6 +230,24 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
   title: { fontSize: 20, fontWeight: "800", color: colors.text },
+  notCompletedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FEF3C7",
+    padding: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    marginBottom: spacing.md,
+  },
+  notCompletedText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#92400E",
+    lineHeight: 16,
+  },
   summary: { backgroundColor: colors.primary50, borderRadius: radius.xl, padding: spacing.lg, marginBottom: spacing.lg },
   sumHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
   batchNo: { fontSize: 18, fontWeight: "800", color: colors.text },

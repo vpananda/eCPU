@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -58,6 +58,19 @@ export default function StopDryer() {
   const [tempMinute, setTempMinute] = useState(0);
   const [tempAmPm, setTempAmPm] = useState<"AM" | "PM">("AM");
   const [saving, setSaving] = useState(false);
+  const [batchWeights, setBatchWeights] = useState<Record<string, { dry: string; padi: string; bags: string }>>({});
+
+  const updateBatchWeight = (bid: string, field: "dry" | "padi" | "bags", val: string) => {
+    setBatchWeights(prev => ({
+      ...prev,
+      [bid]: {
+        dry: prev[bid]?.dry || "",
+        padi: prev[bid]?.padi || "",
+        bags: prev[bid]?.bags || "",
+        [field]: val,
+      },
+    }));
+  };
 
   const openDateTimePicker = () => {
     setTempDateStr(todayISOStr(stopTime));
@@ -135,13 +148,25 @@ export default function StopDryer() {
   const handleStop = async () => {
     setSaving(true);
     try {
+      const outputs = runningBatches.map(b => {
+        const w = batchWeights[b.id] || { dry: "", padi: "", bags: "" };
+        return {
+          batch_id: b.id,
+          dry_weight: parseFloat(w.dry || "0"),
+          padi_weight: parseFloat(w.padi || "0"),
+          bags: parseInt(w.bags || "0", 10),
+        };
+      });
+      const hasAnyDry = outputs.some(o => o.dry_weight > 0);
+
       await api(`/machines/${machineId}/stop`, {
         method: "POST",
         body: {
-          end_time: stopTime.toISOString()
+          end_time: stopTime.toISOString(),
+          batch_outputs: hasAnyDry ? outputs : undefined,
         }
       });
-      Alert.alert("Success", "Dryer stopped successfully.");
+      Alert.alert("Success", "Dryer stopped, batches marked Completed, and customer WhatsApp alerts dispatched.");
       router.back();
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to stop dryer");
@@ -215,12 +240,51 @@ export default function StopDryer() {
                     <View style={styles.previewCardDivider} />
                     <View style={styles.previewStats}>
                       <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Raw Weight</Text>
+                        <Text style={styles.statLabel}>Raw Wet Weight</Text>
                         <Text style={styles.statVal}>{b.raw_weight} KG</Text>
                       </View>
                       <View style={styles.statBox}>
                         <Text style={styles.statLabel}>Input Bags</Text>
                         <Text style={styles.statVal}>{b.bags} Bags</Text>
+                      </View>
+                    </View>
+
+                    {/* Output Weight Inputs */}
+                    <View style={styles.outputInputsBox}>
+                      <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: 8 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.outputInputLabel}>Dry Weight (KG) *</Text>
+                          <TextInput
+                            style={styles.outputInput}
+                            value={batchWeights[b.id]?.dry || ""}
+                            onChangeText={(v) => updateBatchWeight(b.id, "dry", v)}
+                            keyboardType="decimal-pad"
+                            placeholder="e.g. 110"
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.outputInputLabel}>Padi Weight (KG)</Text>
+                          <TextInput
+                            style={styles.outputInput}
+                            value={batchWeights[b.id]?.padi || ""}
+                            onChangeText={(v) => updateBatchWeight(b.id, "padi", v)}
+                            keyboardType="decimal-pad"
+                            placeholder="e.g. 5"
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
+                        <View style={{ width: 68 }}>
+                          <Text style={styles.outputInputLabel}>Dry Bags</Text>
+                          <TextInput
+                            style={styles.outputInput}
+                            value={batchWeights[b.id]?.bags || ""}
+                            onChangeText={(v) => updateBatchWeight(b.id, "bags", v)}
+                            keyboardType="number-pad"
+                            placeholder="e.g. 2"
+                            placeholderTextColor={colors.textLight}
+                          />
+                        </View>
                       </View>
                     </View>
                   </View>
@@ -545,5 +609,30 @@ const styles = StyleSheet.create({
   pickerSheetApplyText: {
     color: "#fff",
     fontWeight: "800",
+  },
+  outputInputsBox: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  outputInputLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.primaryDark,
+    textTransform: "uppercase",
+    marginBottom: 4,
+    letterSpacing: 0.3,
+  },
+  outputInput: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: radius.md,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.text,
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
   },
 });

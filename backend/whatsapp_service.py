@@ -283,14 +283,37 @@ async def send_drying_completed(
     batch_no: str,
     dry_weight: float,
     branch_name: str,
-    language_code: str = "en"
+    language_code: str = "en",
+    padi_weight: Optional[float] = None
 ) -> Dict[str, Any]:
-    """Send Processing Complete with Branch Name only in Thank You"""
+    """Send Processing Complete with Dry Weight & Padi Weight and Branch Name only in Thank You"""
     clean_prod = product_name or "Cardamom"
     branch_label = clean_branch_label(branch_name)
     lang = language_code or "en"
+    padi_val = float(padi_weight or 0)
 
-    # 1. Try v4 (Thanks,\n{{5}} only - approved in en, ta)
+    # 1. Try v5 (with explicit Padi Weight line)
+    res_v5 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_drying_completed_v5",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            f"{dry_weight:,.2f}",
+            f"{padi_val:,.2f}",
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v5.get("success"):
+        return res_v5
+
+    # 2. Try v4 (Thanks,\n{{5}} only - approved in en, ta)
+    dry_display = (
+        (f"{dry_weight:,.2f} (பாடி: {padi_val:,.2f} KG)" if lang == "ta" else f"{dry_weight:,.2f} (Padi: {padi_val:,.2f} KG)")
+        if padi_val > 0 else f"{dry_weight:,.2f}"
+    )
     res_v4 = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_drying_completed_v4",
@@ -298,7 +321,7 @@ async def send_drying_completed(
             customer_name,
             clean_prod,
             batch_no,
-            f"{dry_weight:,.2f}",
+            dry_display,
             branch_label
         ],
         language_code=lang

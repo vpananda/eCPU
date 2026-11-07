@@ -25,9 +25,9 @@ export default function DeliveryPicker() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch all non-delivered batches (ready to be handed over)
+      // Deliver screen should have only processed (Completed) batches
       const all = await api<Batch[]>("/batches");
-      setBatches(all.filter(b => b.status !== "Delivered"));
+      setBatches(all.filter(b => b.status === "Completed"));
     } catch (e: any) {
       toast.show(e.message || "Failed to load batches", "error");
     } finally { setLoading(false); }
@@ -73,8 +73,11 @@ export default function DeliveryPicker() {
         <ScrollView contentContainerStyle={{ padding: spacing.xl, gap: spacing.sm, paddingBottom: 100 }}>
           {filtered.length === 0 && (
             <View style={styles.empty}>
-              <MaterialCommunityIcons name="package-variant-closed-remove" size={44} color={colors.textLight} />
-              <Text style={styles.emptyText}>No batches available for delivery</Text>
+              <MaterialCommunityIcons name="check-circle-outline" size={44} color={colors.textLight} />
+              <Text style={styles.emptyText}>No processed batches ready for delivery</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: "center", marginTop: 4 }}>
+                Batches must have drying marked as "Completed" before they can be delivered.
+              </Text>
             </View>
           )}
           {filtered.map(b => (

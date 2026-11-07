@@ -975,7 +975,9 @@ class MachineLoadIn(BaseModel):
 class MachineStopIn(BaseModel):
     end_time: Optional[str] = None
     total_dry_weight: Optional[float] = None
+    total_padi_weight: Optional[float] = None
     total_dry_bags: Optional[int] = None
+    batch_outputs: Optional[List[Dict[str, Any]]] = None  # [{ "batch_id": ..., "dry_weight": ..., "padi_weight": ..., "bags": ... }]
 
 
 class ArrivalIn(BaseModel):
@@ -1028,6 +1030,9 @@ class BatchStatusUpdate(BaseModel):
     status: str  # Loaded, Drying, Completed
     remarks: Optional[str] = ""
     machine_id: Optional[str] = None  # required when transitioning to Loaded
+    actual_dry_weight: Optional[float] = None
+    padi_weight: Optional[float] = None
+    processed_bags: Optional[int] = None
 
 
 class DeliveryIn(BaseModel):
@@ -1743,6 +1748,7 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
         raise HTTPException(status_code=400, detail="Total raw weight of active batches is zero")
 
     t_end = body.end_time or now_utc().isoformat()
+    batch_out_map = {str(item.get("batch_id")): item for item in (body.batch_outputs or []) if item.get("batch_id")}
 
     # Process each batch
     for b in drying_batches:
@@ -1753,20 +1759,40 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
             "updated_by": user["id"],
         }
 
-        if body.total_dry_weight is not None and body.total_dry_bags is not None:
-            raw = float(b["raw_weight"])
+        raw = float(b["raw_weight"])
+        if str(b["id"]) in batch_out_map:
+            item = batch_out_map[str(b["id"])]
+            b_dry = round(float(item.get("dry_weight") or 0), 2)
+            b_padi = round(float(item.get("padi_weight") or 0), 2)
+            b_bags = int(item.get("bags") or 0)
+            upd.update({
+                "actual_dry_weight": b_dry,
+                "padi_weight": b_padi,
+                "processed_bags": b_bags,
+                "weight_loss": round(raw - (b_dry + b_padi), 2),
+            })
+            tmp = dict(b)
+            tmp["actual_dry_weight"] = b_dry
+            tmp["padi_weight"] = b_padi
+            tmp["processed_bags"] = b_bags
+            totals = await recompute_batch_totals(tmp)
+            upd.update(totals)
+        elif body.total_dry_weight is not None:
             pct = raw / total_raw_weight
             prop_dry_weight = round(pct * body.total_dry_weight, 2)
-            prop_bags = int(round(pct * body.total_dry_bags))
+            prop_padi_weight = round(pct * (body.total_padi_weight or 0), 2)
+            prop_bags = int(round(pct * (body.total_dry_bags or 0)))
 
             upd.update({
                 "actual_dry_weight": prop_dry_weight,
+                "padi_weight": prop_padi_weight,
                 "processed_bags": prop_bags,
-                "weight_loss": round(raw - prop_dry_weight, 2)
+                "weight_loss": round(raw - (prop_dry_weight + prop_padi_weight), 2),
             })
 
             tmp = dict(b)
             tmp["actual_dry_weight"] = prop_dry_weight
+            tmp["padi_weight"] = prop_padi_weight
             tmp["processed_bags"] = prop_bags
             totals = await recompute_batch_totals(tmp)
             upd.update(totals)
@@ -1791,11 +1817,11 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
             cust = await db.customers.find_one({"id": b.get("customer_id")}, {"_id": 0})
             prod = await db.products.find_one({"id": b.get("product_id")}, {"_id": 0})
             br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
-            dry_wt = b.get("actual_dry_weight")
-            if body.total_dry_weight is not None and total_raw_weight > 0:
-                raw = float(b["raw_weight"])
-                pct = raw / total_raw_weight
-                dry_wt = round(pct * body.total_dry_weight, 2)
+            
+            # Fetch updated batch for weights
+            updated_b = await db.batches.find_one({"id": b["id"]}, {"_id": 0}) or b
+            dry_wt = updated_b.get("actual_dry_weight")
+            padi_wt = updated_b.get("padi_weight") or 0.0
             
             phone = (cust.get("mobile") or cust.get("phone")) if cust else None
             if cust and phone and dry_wt and cust.get("whatsapp_enabled", True) is not False:
@@ -1807,7 +1833,8 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
                         batch_no=b.get("batch_no", ""),
                         dry_weight=float(dry_wt),
                         branch_name=br.get("name", "Main Plant") if br else "Main Plant",
-                        language_code=cust.get("preferred_language") or "en"
+                        language_code=cust.get("preferred_language") or "en",
+                        padi_weight=float(padi_wt)
                     )
                 )
                 logger.info(f"Queued WhatsApp drying completed for {cust.get('name')} ({phone})")
@@ -2511,6 +2538,24 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
             raise HTTPException(status_code=400, detail="Machine required to load batch")
         await db.machines.update_one({"id": machine_id},
                                      {"$set": {"status": "Running", "current_batch_id": bid}})
+    elif body.status == "Completed":
+        if machine_id:
+            await db.machines.update_one({"id": machine_id},
+                                         {"$set": {"status": "Available", "current_batch_id": None}})
+        if body.actual_dry_weight is not None and body.actual_dry_weight > 0:
+            upd["actual_dry_weight"] = body.actual_dry_weight
+            raw = float(b.get("raw_weight") or 0)
+            padi = float(body.padi_weight or 0)
+            upd["padi_weight"] = padi
+            upd["processed_bags"] = body.processed_bags or 0
+            upd["weight_loss"] = round(raw - (body.actual_dry_weight + padi), 2)
+
+            tmp = dict(b)
+            tmp["actual_dry_weight"] = body.actual_dry_weight
+            tmp["padi_weight"] = padi
+            tmp["processed_bags"] = body.processed_bags or 0
+            totals = await recompute_batch_totals(tmp)
+            upd.update(totals)
     elif body.status == "Delivered":
         if machine_id:
             await db.machines.update_one({"id": machine_id},
@@ -2518,6 +2563,33 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
 
     await db.batches.update_one({"id": bid}, {"$set": upd})
     await audit("update_status", "batch", bid, user, {"status": b["status"]}, {"status": body.status})
+
+    # Dispatch WhatsApp alert when processing completes
+    if body.status == "Completed":
+        try:
+            cust = await db.customers.find_one({"id": b.get("customer_id")}, {"_id": 0})
+            prod = await db.products.find_one({"id": b.get("product_id")}, {"_id": 0})
+            br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
+            dry_wt = upd.get("actual_dry_weight") or b.get("actual_dry_weight")
+            padi_wt = upd.get("padi_weight") if "padi_weight" in upd else (b.get("padi_weight") or 0.0)
+            phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+            if cust and phone and dry_wt and cust.get("whatsapp_enabled", True) is not False:
+                asyncio.create_task(
+                    send_drying_completed(
+                        to_phone=phone,
+                        customer_name=cust.get("name", "Valued Customer"),
+                        product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                        batch_no=b.get("batch_no", ""),
+                        dry_weight=float(dry_wt),
+                        branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                        language_code=cust.get("preferred_language") or "en",
+                        padi_weight=float(padi_wt)
+                    )
+                )
+                logger.info(f"Queued WhatsApp drying completed alert for {cust.get('name')} ({phone})")
+        except Exception as e:
+            logger.error(f"Failed to queue WhatsApp drying completed: {e}")
+
     return {"ok": True}
 
 
@@ -2527,6 +2599,11 @@ async def deliver_batch(bid: str, body: DeliveryIn,
     b = await db.batches.find_one({"id": bid}, {"_id": 0})
     if not b:
         raise HTTPException(status_code=404, detail="Not found")
+    if b.get("status") not in ("Completed", "Delivered"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch cannot be delivered until processing is Completed (currently {b.get('status')})"
+        )
     if body.actual_dry_weight <= 0:
         raise HTTPException(status_code=400, detail="Dry weight must be > 0")
 

@@ -23,6 +23,7 @@ export default function BatchDetail() {
   const [updating, setUpdating] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
+  const [completeOpen, setCompleteOpen] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [newDate, setNewDate] = useState("");
   const [newWeight, setNewWeight] = useState("");
@@ -30,6 +31,45 @@ export default function BatchDetail() {
   const [newBags, setNewBags] = useState("");
   const [newReceivedFrom, setNewReceivedFrom] = useState("");
   const [newRemarks, setNewRemarks] = useState("");
+
+  const [compDryWeight, setCompDryWeight] = useState("");
+  const [compPadiWeight, setCompPadiWeight] = useState("");
+  const [compBags, setCompBags] = useState("");
+
+  const openCompleteModal = () => {
+    setCompDryWeight(data?.actual_dry_weight ? String(data.actual_dry_weight) : "");
+    setCompPadiWeight(data?.padi_weight ? String(data.padi_weight) : "");
+    setCompBags(data?.processed_bags ? String(data.processed_bags) : (data?.bags ? String(data.bags) : ""));
+    setCompleteOpen(true);
+  };
+
+  const handleCompleteSubmit = async () => {
+    const dry = parseFloat(compDryWeight);
+    if (!dry || dry <= 0) {
+      return toast.show("Please enter a valid dry weight", "error");
+    }
+    const padi = parseFloat(compPadiWeight || "0");
+    const bagsNum = parseInt(compBags || "0", 10);
+    setUpdating(true);
+    try {
+      await api(`/batches/${id}/status`, {
+        method: "PUT",
+        body: {
+          status: "Completed",
+          actual_dry_weight: dry,
+          padi_weight: isNaN(padi) ? 0 : padi,
+          processed_bags: isNaN(bagsNum) ? 0 : bagsNum,
+        },
+      });
+      toast.show("Processing completed & customer notified!");
+      setCompleteOpen(false);
+      await load();
+    } catch (e: any) {
+      toast.show(e.message || "Failed to complete processing", "error");
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const openEditModal = () => {
     if (data) {
@@ -134,7 +174,14 @@ export default function BatchDetail() {
     const idx = FLOW.indexOf(data.status);
     if (idx < 0 || idx >= FLOW.length - 1) return;
     const next = FLOW[idx + 1];
-    if (next === "Delivered") { router.push(`/delivery/${id}`); return; }
+    if (next === "Completed") {
+      openCompleteModal();
+      return;
+    }
+    if (next === "Delivered") {
+      router.push(`/delivery/${id}`);
+      return;
+    }
     setUpdating(true);
     try {
       await api(`/batches/${id}/status`, { method: "PUT", body: { status: next } });
@@ -303,6 +350,116 @@ export default function BatchDetail() {
         </View>
       </Modal>
 
+      {/* Complete Processing Modal */}
+      <Modal visible={completeOpen} transparent animationType="fade" onRequestClose={() => setCompleteOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+              <View>
+                <Text style={styles.modalTitle}>Complete Processing</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>
+                  {data?.batch_no} • {data?.customer?.name}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setCompleteOpen(false)}>
+                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Arrival Reference Info */}
+            <View style={styles.completeRefBox}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completeRefLabel}>ARRIVAL WET WEIGHT</Text>
+                <Text style={styles.completeRefVal}>{data?.raw_weight || 0} kg</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completeRefLabel}>ARRIVAL BAGS</Text>
+                <Text style={styles.completeRefVal}>{data?.bags || 0} Bags</Text>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+              <Text style={styles.modalLabel}>Processed Dry Weight (KG) *</Text>
+              <TextInput
+                testID="complete-dry-weight"
+                style={styles.modalInput}
+                value={compDryWeight}
+                onChangeText={setCompDryWeight}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 112.5"
+                placeholderTextColor={colors.textLight}
+              />
+
+              <View style={{ flexDirection: "row", gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalLabel}>Padi Weight (KG)</Text>
+                  <TextInput
+                    testID="complete-padi-weight"
+                    style={styles.modalInput}
+                    value={compPadiWeight}
+                    onChangeText={setCompPadiWeight}
+                    keyboardType="decimal-pad"
+                    placeholder="e.g. 5.2"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalLabel}>Dry Bags</Text>
+                  <TextInput
+                    testID="complete-bags"
+                    style={styles.modalInput}
+                    value={compBags}
+                    onChangeText={setCompBags}
+                    keyboardType="number-pad"
+                    placeholder="e.g. 2"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+              </View>
+
+              {/* Live Calculation Preview */}
+              {parseFloat(compDryWeight || "0") > 0 && (
+                <View style={styles.completeCalcBox}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                    <Text style={styles.completeCalcLabel}>Total Output (Dry + Padi):</Text>
+                    <Text style={styles.completeCalcVal}>
+                      {(parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0")).toFixed(2)} kg
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={styles.completeCalcLabel}>Weight Loss (Moisture):</Text>
+                    <Text style={[styles.completeCalcVal, { color: colors.warning }]}>
+                      {Math.max(0, (data?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))).toFixed(2)} kg
+                      {" "}({(((data?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))) / (data?.raw_weight || 1) * 100).toFixed(1)}%)
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={[styles.modalButtons, { marginTop: spacing.md }]}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
+                onPress={() => setCompleteOpen(false)}
+              >
+                <Text style={{ color: colors.textMuted, fontWeight: "700" }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.primary }]}
+                onPress={handleCompleteSubmit}
+                disabled={updating}
+              >
+                {updating ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Complete & Notify</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* View QR Code Modal */}
       <Modal visible={qrModalOpen} transparent animationType="fade" onRequestClose={() => setQrModalOpen(false)}>
         <View style={styles.modalBg}>
@@ -390,9 +547,12 @@ export default function BatchDetail() {
           {data.actual_dry_weight ? (
             <>
               <Row label="Actual Dry Weight" value={`${data.actual_dry_weight} kg`} />
+              {data.padi_weight != null && Number(data.padi_weight) > 0 ? (
+                <Row label="Padi Weight" value={`${data.padi_weight} kg`} />
+              ) : null}
               <Row
                 label="Weight Loss"
-                value={`${data.weight_loss != null ? data.weight_loss : Math.max(0, data.raw_weight - data.actual_dry_weight)} kg (${data.raw_weight > 0 ? (((data.raw_weight - data.actual_dry_weight) / data.raw_weight) * 100).toFixed(1) : "0"}%)`}
+                value={`${data.weight_loss != null ? data.weight_loss : Math.max(0, data.raw_weight - (Number(data.actual_dry_weight) + Number(data.padi_weight || 0)))} kg (${data.raw_weight > 0 ? (((data.raw_weight - (Number(data.actual_dry_weight) + Number(data.padi_weight || 0))) / data.raw_weight) * 100).toFixed(1) : "0"}%)`}
               />
             </>
           ) : null}
@@ -409,6 +569,9 @@ export default function BatchDetail() {
                 : "-"
             }
           />
+          {data.processed_bags != null && Number(data.processed_bags) > 0 ? (
+            <Row label="Processed Dry Bags" value={`${data.processed_bags} Bags`} />
+          ) : null}
         </View>
 
         {/* Bill */}
@@ -573,6 +736,45 @@ const styles = StyleSheet.create({
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: spacing.xl },
   modalContent: { backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing.xl, width: "100%", ...shadow.card },
   modalTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  completeRefBox: {
+    flexDirection: "row",
+    backgroundColor: `${colors.primary}12`,
+    padding: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: `${colors.primary}25`,
+    marginBottom: spacing.md,
+  },
+  completeRefLabel: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: colors.primaryDark,
+    letterSpacing: 0.5,
+  },
+  completeRefVal: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 2,
+  },
+  completeCalcBox: {
+    backgroundColor: "#F8FAFC",
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: spacing.md,
+  },
+  completeCalcLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  completeCalcVal: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.text,
+  },
   modalLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
   modalInput: { backgroundColor: colors.bg, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: colors.text, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.lg },
   modalButtons: { flexDirection: "row", gap: spacing.md },

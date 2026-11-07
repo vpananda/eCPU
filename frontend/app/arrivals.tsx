@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Modal, Alert } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
@@ -88,6 +88,49 @@ export default function ArrivalsScreen() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(start);
   const [draftEnd, setDraftEnd] = useState(end);
+
+  const [completeBatch, setCompleteBatch] = useState<Row | null>(null);
+  const [compDryWeight, setCompDryWeight] = useState("");
+  const [compPadiWeight, setCompPadiWeight] = useState("");
+  const [compBags, setCompBags] = useState("");
+  const [completing, setCompleting] = useState(false);
+
+  const openCompleteModal = (r: Row) => {
+    setCompleteBatch(r);
+    setCompDryWeight("");
+    setCompPadiWeight("");
+    setCompBags("");
+  };
+
+  const handleCompleteSubmit = async () => {
+    if (!completeBatch) return;
+    const dry = parseFloat(compDryWeight);
+    if (!dry || dry <= 0) {
+      Alert.alert("Invalid Input", "Please enter a valid processed dry weight.");
+      return;
+    }
+    const padi = parseFloat(compPadiWeight || "0");
+    const bagsNum = parseInt(compBags || "0", 10);
+    setCompleting(true);
+    try {
+      await api(`/batches/${completeBatch.batch_id}/status`, {
+        method: "PUT",
+        body: {
+          status: "Completed",
+          actual_dry_weight: dry,
+          padi_weight: isNaN(padi) ? 0 : padi,
+          processed_bags: isNaN(bagsNum) ? 0 : bagsNum,
+        },
+      });
+      Alert.alert("Success", `Batch ${completeBatch.batch_no} marked Completed & WhatsApp alert sent to ${completeBatch.customer_name}!`);
+      setCompleteBatch(null);
+      await load();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to complete processing");
+    } finally {
+      setCompleting(false);
+    }
+  };
 
   const applyPreset = (key: string) => {
     setActivePreset(key);
@@ -364,11 +407,131 @@ export default function ArrivalsScreen() {
                     </View>
                   ) : null}
                 </View>
+
+                {isProcessingTab && (
+                  <TouchableOpacity
+                    style={styles.cardCompleteBtn}
+                    onPress={() => openCompleteModal(r)}
+                    activeOpacity={0.8}
+                  >
+                    <MaterialCommunityIcons name="check-circle" size={14} color="#fff" />
+                    <Text style={styles.cardCompleteBtnText}>Complete Processing</Text>
+                  </TouchableOpacity>
+                )}
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       )}
+
+      {/* Complete Processing Modal */}
+      <Modal visible={!!completeBatch} transparent animationType="fade" onRequestClose={() => setCompleteBatch(null)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Complete Processing</Text>
+                <Text style={styles.modalSubTitle}>
+                  {completeBatch?.batch_no} • {completeBatch?.customer_name}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setCompleteBatch(null)}>
+                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Arrival Reference Info */}
+            <View style={styles.refInfoBox}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.refLabel}>ARRIVAL WET WEIGHT</Text>
+                <Text style={styles.refVal}>{completeBatch?.raw_weight || 0} KG</Text>
+              </View>
+              {completeBatch?.machine_name ? (
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.refLabel}>MACHINE</Text>
+                  <Text style={styles.refVal}>{completeBatch.machine_name}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 300 }}>
+              <Text style={styles.inputTitle}>Processed Dry Weight (KG) *</Text>
+              <TextInput
+                style={styles.dialogInput}
+                value={compDryWeight}
+                onChangeText={setCompDryWeight}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 112.5"
+                placeholderTextColor={colors.textLight}
+              />
+
+              <View style={{ flexDirection: "row", gap: spacing.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputTitle}>Padi Weight (KG)</Text>
+                  <TextInput
+                    style={styles.dialogInput}
+                    value={compPadiWeight}
+                    onChangeText={setCompPadiWeight}
+                    keyboardType="decimal-pad"
+                    placeholder="e.g. 5.2"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inputTitle}>Dry Bags</Text>
+                  <TextInput
+                    style={styles.dialogInput}
+                    value={compBags}
+                    onChangeText={setCompBags}
+                    keyboardType="number-pad"
+                    placeholder="e.g. 2"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+              </View>
+
+              {/* Live Calculation Preview */}
+              {parseFloat(compDryWeight || "0") > 0 && (
+                <View style={styles.calcSummaryBox}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                    <Text style={styles.calcLabel}>Total Output (Dry + Padi):</Text>
+                    <Text style={styles.calcVal}>
+                      {(parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0")).toFixed(2)} KG
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={styles.calcLabel}>Weight Loss (Moisture):</Text>
+                    <Text style={[styles.calcVal, { color: colors.warning }]}>
+                      {Math.max(0, (completeBatch?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))).toFixed(2)} KG
+                      {" "}({(((completeBatch?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))) / (completeBatch?.raw_weight || 1) * 100).toFixed(1)}%)
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setCompleteBatch(null)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSubmitBtn}
+                onPress={handleCompleteSubmit}
+                disabled={completing}
+              >
+                {completing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.modalSubmitText}>Complete & Notify</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -477,4 +640,145 @@ const styles = StyleSheet.create({
   empty: { alignItems: "center", paddingVertical: 60, gap: 6 },
   emptyText: { fontSize: 14, color: colors.textMuted, fontWeight: "600", marginTop: 12, textAlign: "center" },
   waArrivalBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center" },
+
+  cardCompleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#F57C00",
+    paddingVertical: 9,
+    borderRadius: radius.md,
+    marginTop: 10,
+    ...shadow.sm,
+  },
+  cardCompleteBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  modalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.xl,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    width: "100%",
+    ...shadow.card,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.md,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  modalSubTitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontWeight: "600",
+  },
+  refInfoBox: {
+    flexDirection: "row",
+    backgroundColor: "#FFF7ED",
+    padding: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "#FED7AA",
+    marginBottom: spacing.md,
+  },
+  refLabel: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#9A3412",
+    letterSpacing: 0.5,
+  },
+  refVal: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 2,
+  },
+  inputTitle: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+    marginBottom: 6,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  dialogInput: {
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.md,
+    fontWeight: "700",
+  },
+  calcSummaryBox: {
+    backgroundColor: "#F8FAFC",
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: spacing.md,
+  },
+  calcLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  calcVal: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  modalBtnRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelText: {
+    color: colors.textMuted,
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  modalSubmitBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    backgroundColor: "#F57C00",
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow.sm,
+  },
+  modalSubmitText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 13,
+  },
 });

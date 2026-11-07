@@ -41,10 +41,11 @@ export default function DeliveryScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  const arrivalWeight = Number(batch?.raw_weight || 0);
   const dryNum = parseFloat(dryWeight || "0");
   const rateNum = parseFloat(rate || "0");
-  const totalAmount = Math.max(0, dryNum * rateNum);
-  const alreadyPaid = batch?.total_paid || 0;
+  const totalAmount = Math.max(0, arrivalWeight * rateNum);
+  const alreadyPaid = Number(batch?.total_paid || 0);
   const balanceDue = Math.max(0, totalAmount - alreadyPaid);
   const receivedNum = parseFloat(amountReceived || "0");
   const remaining = Math.max(0, balanceDue - receivedNum);
@@ -145,7 +146,7 @@ export default function DeliveryScreen() {
           <Input testID="delivery-rate" label="Rate per kg (₹)" keyboardType="decimal-pad" value={rate} onChangeText={setRate} />
 
           <View style={styles.billCard}>
-            <Row label="Processed × Rate" value={`${dryNum || 0} × ₹${rateNum || 0}`} />
+            <Row label="Arrival × Rate" value={`${arrivalWeight || 0} kg × ₹${rateNum || 0}`} />
             <Row label="Total Amount" value={`₹${totalAmount.toFixed(2)}`} bold />
             <Row label="Already Paid (advance)" value={`₹${alreadyPaid.toFixed(2)}`} />
             <View style={styles.hr} />

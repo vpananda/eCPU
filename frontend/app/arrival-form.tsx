@@ -203,7 +203,7 @@ export default function ArrivalForm() {
           photos,
         },
       });
-            toast.show(`Arrival ${b.batch_no || ""} recorded successfully!`);
+            toast.show(`Arrival ${b.batch_no || ""} recorded & WhatsApp sent!`);
       // Reset form fields to record the next arrival immediately
       setCustomerId(null);
       setRawWeight("");

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, ActivityIndicator, Switch } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -11,6 +11,15 @@ import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
 import { storage } from "@/src/utils/storage";
 import { colors, spacing } from "@/src/theme";
+
+const LANGUAGE_OPTIONS = [
+  { id: "en", name: "English" },
+  { id: "ta", name: "Tamil (தமிழ்)" },
+  { id: "ml", name: "Malayalam (മലയാളം)" },
+  { id: "kn", name: "Kannada (ಕನ್ನಡ)" },
+  { id: "te", name: "Telugu (తెలుగు)" },
+  { id: "hi", name: "Hindi (हिन्दी)" },
+];
 
 export default function CustomerForm() {
   const router = useRouter();
@@ -30,6 +39,8 @@ export default function CustomerForm() {
     gst: "",
     remarks: "",
     branch_id: "",
+    preferred_language: "en",
+    whatsapp_enabled: true,
   });
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
@@ -52,6 +63,8 @@ export default function CustomerForm() {
               gst: c.gst || "",
               remarks: c.remarks || "",
               branch_id: c.branch_id || "",
+              preferred_language: c.preferred_language || "en",
+              whatsapp_enabled: c.whatsapp_enabled !== false,
             });
           }
         } catch (e: any) {
@@ -156,6 +169,39 @@ export default function CustomerForm() {
           )}
 
           <Input testID="cf-alt-mobile" label="Alternative Phone" value={form.alt_mobile} onChangeText={v => set("alt_mobile", v)} keyboardType="phone-pad" />
+
+          {/* WhatsApp Updates Toggle */}
+          <View style={styles.switchCard}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <MaterialCommunityIcons name="whatsapp" size={18} color={form.whatsapp_enabled ? "#25D366" : colors.textMuted} />
+                <Text style={styles.switchLabel}>WhatsApp Updates</Text>
+              </View>
+              <Text style={styles.switchSublabel}>
+                {form.whatsapp_enabled
+                  ? "Customer receives receipts & delivery alerts on WhatsApp"
+                  : "Disabled — Customer uses basic keypad phone without WhatsApp"}
+              </Text>
+            </View>
+            <Switch
+              testID="cf-whatsapp-switch"
+              value={form.whatsapp_enabled}
+              onValueChange={v => setForm(f => ({ ...f, whatsapp_enabled: v }))}
+              trackColor={{ false: "#CBD5E1", true: "#86EFAC" }}
+              thumbColor={form.whatsapp_enabled ? colors.primary : "#94A3B8"}
+            />
+          </View>
+
+          {form.whatsapp_enabled && (
+            <Picker
+              testID="cf-language"
+              label="WhatsApp Notification Language"
+              value={form.preferred_language}
+              onChange={v => set("preferred_language", v)}
+              options={LANGUAGE_OPTIONS}
+              placeholder="Select language..."
+            />
+          )}
           <Input testID="cf-village" label="Village / Town" value={form.village} onChangeText={v => set("village", v)} />
           <View style={{ flexDirection: "row", gap: spacing.md }}>
             <View style={{ flex: 1 }}><Input testID="cf-taluk" label="Taluk" value={form.taluk} onChangeText={v => set("taluk", v)} /></View>
@@ -176,4 +222,26 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
   title: { fontSize: 20, fontWeight: "800", color: colors.text },
+  switchCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    padding: 12,
+    marginBottom: spacing.md,
+  },
+  switchLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  switchSublabel: {
+    fontSize: 11.5,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 16,
+  },
 });

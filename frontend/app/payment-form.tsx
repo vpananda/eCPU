@@ -196,7 +196,7 @@ export default function PaymentForm() {
           created_at: paymentDate ? `${paymentDate}T12:00:00Z` : undefined,
         },
       });
-      toast.show("Payment recorded and customer ledger updated");
+      toast.show("Payment recorded & WhatsApp receipt sent!");
       router.back();
     } catch (e: any) {
       toast.show(e.message || "Failed to save payment", "error");

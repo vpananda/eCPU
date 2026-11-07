@@ -23,6 +23,16 @@ import uuid
 import jwt
 import httpx
 import logging
+from whatsapp_service import (
+    send_arrival_receipt,
+    send_drying_completed,
+    send_delivery_statement,
+    send_payment_receipt,
+    send_whatsapp_template,
+    send_whatsapp_text,
+    clean_phone_number,
+    get_config,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -902,6 +912,8 @@ class CustomerIn(BaseModel):
     remarks: Optional[str] = ""
     photo: Optional[str] = ""  # base64
     branch_id: Optional[str] = None
+    preferred_language: Optional[str] = "en"
+    whatsapp_enabled: Optional[bool] = True
 
 
 class MergeCustomerIn(BaseModel):
@@ -1773,6 +1785,35 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
         "updated_by": user["id"]
     }})
 
+    # Auto-dispatch WhatsApp Drying Completed alerts to customers
+    for b in drying_batches:
+        try:
+            cust = await db.customers.find_one({"id": b.get("customer_id")}, {"_id": 0})
+            prod = await db.products.find_one({"id": b.get("product_id")}, {"_id": 0})
+            br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
+            dry_wt = b.get("actual_dry_weight")
+            if body.total_dry_weight is not None and total_raw_weight > 0:
+                raw = float(b["raw_weight"])
+                pct = raw / total_raw_weight
+                dry_wt = round(pct * body.total_dry_weight, 2)
+            
+            phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+            if cust and phone and dry_wt and cust.get("whatsapp_enabled", True) is not False:
+                asyncio.create_task(
+                    send_drying_completed(
+                        to_phone=phone,
+                        customer_name=cust.get("name", "Valued Customer"),
+                        product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                        batch_no=b.get("batch_no", ""),
+                        dry_weight=float(dry_wt),
+                        branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                        language_code=cust.get("preferred_language") or "en"
+                    )
+                )
+                logger.info(f"Queued WhatsApp drying completed for {cust.get('name')} ({phone})")
+        except Exception as e:
+            logger.error(f"Failed to queue WhatsApp drying completed: {e}")
+
     await audit("stop", "machine", mid, user, None, {"end_time": t_end, "total_dry_weight": body.total_dry_weight, "total_dry_bags": body.total_dry_bags})
     return {"ok": True}
 
@@ -2331,6 +2372,31 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
         await db.batches.update_one({"id": bid}, {"$set": totals})
 
     await audit("create", "batch", bid, user, None, {"batch_no": b["batch_no"]})
+
+    # Auto-dispatch WhatsApp stock arrival receipt
+    try:
+        cust = await db.customers.find_one({"id": body.customer_id}, {"_id": 0})
+        prod = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+        br = await db.branches.find_one({"id": b["branch_id"]}, {"_id": 0})
+        phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+        if cust and phone and cust.get("whatsapp_enabled", True) is not False:
+            asyncio.create_task(
+                send_arrival_receipt(
+                    to_phone=phone,
+                    customer_name=cust.get("name", "Valued Customer"),
+                    product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                    branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                    batch_no=b["batch_no"],
+                    raw_weight=float(body.raw_weight),
+                    bags=int(body.bags or 0),
+                    arrival_time=b.get("arrival_date") or b.get("created_at"),
+                    language_code=cust.get("preferred_language") or "en"
+                )
+            )
+            logger.info(f"Queued WhatsApp arrival receipt for {cust.get('name')} ({phone})")
+    except Exception as e:
+        logger.error(f"Failed to queue WhatsApp arrival: {e}")
+
     return clean(await clean_batch(b))
 
 
@@ -2391,6 +2457,31 @@ async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)
     }
     await db.batches.insert_one(dict(b))
     await audit("create_arrival", "batch", bid, user, None, {"batch_no": b["batch_no"], "raw_weight": body.raw_weight})
+
+    # Auto-dispatch WhatsApp stock arrival receipt
+    try:
+        cust = await db.customers.find_one({"id": body.customer_id}, {"_id": 0})
+        prod = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+        br = await db.branches.find_one({"id": branch_id}, {"_id": 0})
+        phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+        if cust and phone and cust.get("whatsapp_enabled", True) is not False:
+            asyncio.create_task(
+                send_arrival_receipt(
+                    to_phone=phone,
+                    customer_name=cust.get("name", "Valued Customer"),
+                    product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                    branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                    batch_no=b["batch_no"],
+                    raw_weight=float(body.raw_weight),
+                    bags=int(body.bags or 0),
+                    arrival_time=b.get("arrival_date") or b.get("created_at"),
+                    language_code=cust.get("preferred_language") or "en"
+                )
+            )
+            logger.info(f"Queued WhatsApp arrival receipt for {cust.get('name')} ({phone})")
+    except Exception as e:
+        logger.error(f"Failed to queue WhatsApp arrival: {e}")
+
     return clean(await clean_batch(b))
 
 
@@ -2498,6 +2589,47 @@ async def deliver_batch(bid: str, body: DeliveryIn,
         await db.machines.update_one({"id": b["machine_id"]},
                                      {"$set": {"status": "Available", "current_batch_id": None}})
     await audit("delivery", "batch", bid, user, None, delivery)
+
+    # Auto-dispatch WhatsApp Delivery Statement with full financial breakdown
+    try:
+        cust = await db.customers.find_one({"id": b.get("customer_id")}, {"_id": 0})
+        prod = await db.products.find_one({"id": b.get("product_id")}, {"_id": 0})
+        br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
+        branch_name = br.get("name", "Main Plant") if br else "Main Plant"
+
+        # Delivered to person name and phone if captured
+        delivered_to = (body.received_by or "").strip()
+        if body.received_by_phone and body.received_by_phone.strip():
+            delivered_to = f"{delivered_to} ({body.received_by_phone.strip()})"
+        if not delivered_to:
+            delivered_to = cust.get("name", "Customer") if cust else "Customer"
+        
+        # Calculate customer overall pending
+        cust_batches = await db.batches.find({"customer_id": b.get("customer_id")}, {"_id": 0, "balance_amount": 1}).to_list(1000)
+        overall_pending = sum(float(cb.get("balance_amount") or 0) for cb in cust_batches)
+
+        phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+        if cust and phone and cust.get("whatsapp_enabled", True) is not False:
+            asyncio.create_task(
+                send_delivery_statement(
+                    to_phone=phone,
+                    customer_name=cust.get("name", "Valued Customer"),
+                    product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                    batch_no=b.get("batch_no", ""),
+                    delivered_weight=float(body.actual_dry_weight),
+                    delivered_to=delivered_to,
+                    bill_amount=float(totals.get("bill_amount") or 0),
+                    amount_received=float(body.amount_received or 0),
+                    batch_pending=float(totals.get("balance_amount") or 0),
+                    overall_pending=float(overall_pending),
+                    branch_name=branch_name,
+                    language_code=cust.get("preferred_language") or "en"
+                )
+            )
+            logger.info(f"Queued WhatsApp delivery statement for {cust.get('name')} ({phone})")
+    except Exception as e:
+        logger.error(f"Failed to queue WhatsApp delivery statement: {e}")
+
     return {"ok": True, "weight_loss": weight_loss, "bill_amount": totals["bill_amount"], "balance_amount": totals["balance_amount"]}
 
 
@@ -2687,6 +2819,33 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
         totals = await recompute_batch_totals(b)
         await db.batches.update_one({"id": body.batch_id}, {"$set": totals})
         await audit("create", "payment", p["id"], user, None, {"amount": p["amount"], "mode": p["mode"]})
+
+        # Auto-dispatch WhatsApp payment receipt
+        try:
+            cid = b.get("customer_id")
+            cust = await db.customers.find_one({"id": cid}, {"_id": 0})
+            br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
+            branch_name = br.get("name", "Main Plant") if br else "Main Plant"
+            phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+            if cust and phone and cust.get("whatsapp_enabled", True) is not False:
+                cust_batches = await db.batches.find({"customer_id": cid}, {"_id": 0, "balance_amount": 1}).to_list(1000)
+                new_bal = sum(float(cb.get("balance_amount") or 0) for cb in cust_batches)
+                asyncio.create_task(
+                    send_payment_receipt(
+                        to_phone=phone,
+                        customer_name=cust.get("name", "Valued Customer"),
+                        amount=float(body.amount),
+                        date=created_time[:10],
+                        receipt_no=p["id"][:8].upper(),
+                        balance=float(new_bal),
+                        branch_name=branch_name,
+                        language_code=cust.get("preferred_language") or "en"
+                    )
+                )
+                logger.info(f"Queued WhatsApp payment receipt for {cust.get('name')} ({phone})")
+        except Exception as e:
+            logger.error(f"Failed to queue WhatsApp payment: {e}")
+
         return clean(p)
     else:
         # Customer Account payment (automatically applies FIFO to unpaid batches & keeps excess as advance)
@@ -2748,6 +2907,33 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
         await audit("create", "payment", (first_p or {}).get("id", ""), user, None, {
             "amount": body.amount, "mode": body.mode, "customer_id": body.customer_id
         })
+
+        # Auto-dispatch WhatsApp payment receipt
+        try:
+            cid = body.customer_id
+            cust = await db.customers.find_one({"id": cid}, {"_id": 0})
+            branch_name = branch.get("name", "Main Plant") if branch else "Main Plant"
+            phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+            if cust and phone and cust.get("whatsapp_enabled", True) is not False:
+                cust_batches = await db.batches.find({"customer_id": cid}, {"_id": 0, "balance_amount": 1}).to_list(1000)
+                new_bal = sum(float(cb.get("balance_amount") or 0) for cb in cust_batches)
+                receipt_ref = (first_p or {}).get("id", "")[:8].upper() or "PAY-E3"
+                asyncio.create_task(
+                    send_payment_receipt(
+                        to_phone=phone,
+                        customer_name=cust.get("name", "Valued Customer"),
+                        amount=float(body.amount),
+                        date=created_time[:10],
+                        receipt_no=receipt_ref,
+                        balance=float(new_bal),
+                        branch_name=branch_name,
+                        language_code=cust.get("preferred_language") or "en"
+                    )
+                )
+                logger.info(f"Queued WhatsApp payment receipt for {cust.get('name')} ({phone})")
+        except Exception as e:
+            logger.error(f"Failed to queue WhatsApp payment: {e}")
+
         return clean(first_p)
 
 
@@ -3903,6 +4089,112 @@ async def delete_user(uid: str, user: dict = Depends(require_roles("Admin"))):
 @api.get("/audit")
 async def audit_logs(user: dict = Depends(require_roles("Admin", "Manager")), limit: int = 100):
     return await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+
+
+# -----------------------------------------------------------------------------
+# META WHATSAPP CLOUD API INTEGRATION
+# -----------------------------------------------------------------------------
+from whatsapp_service import send_whatsapp_template, send_whatsapp_text, clean_phone_number, get_config
+
+class WhatsAppTestReq(BaseModel):
+    phone: str
+
+class WhatsAppArrivalReq(BaseModel):
+    phone: str
+    customer_name: str
+    branch_name: str
+    batch_no: str
+    weight: float
+    bags: int
+
+class WhatsAppPaymentReq(BaseModel):
+    phone: str
+    customer_name: str
+    amount: float
+    date: str
+    receipt_no: str
+    balance: float
+
+@api.get("/whatsapp/status")
+async def whatsapp_status(user: dict = Depends(get_current_user)):
+    """Fetch live Meta WhatsApp Cloud API connection details and templates"""
+    cfg = get_config()
+    token = cfg["token"]
+    phone_id = cfg["phone_id"]
+    waba_id = cfg["account_id"]
+
+    if not token:
+        return {"configured": False, "error": "META_WHATSAPP_TOKEN not configured"}
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # 1. Phone number details
+            phone_res = await client.get(
+                f"https://graph.facebook.com/v21.0/{phone_id}",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            # 2. Templates
+            templates_res = await client.get(
+                f"https://graph.facebook.com/v21.0/{waba_id}/message_templates",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            
+            phone_data = phone_res.json() if phone_res.status_code == 200 else {}
+            templates_data = templates_res.json().get("data", []) if templates_res.status_code == 200 else []
+
+            return {
+                "configured": True,
+                "verified_name": phone_data.get("verified_name"),
+                "display_phone_number": phone_data.get("display_phone_number"),
+                "quality_rating": phone_data.get("quality_rating"),
+                "status": phone_data.get("code_verification_status"),
+                "templates": [{"name": t.get("name"), "status": t.get("status"), "category": t.get("category")} for t in templates_data]
+            }
+    except Exception as e:
+        return {"configured": True, "error": str(e)}
+
+@api.post("/whatsapp/send-test")
+async def whatsapp_send_test(body: WhatsAppTestReq, user: dict = Depends(get_current_user)):
+    """Send test 'hello' template via Meta Cloud API"""
+    res = await send_whatsapp_template(to_phone=body.phone, template_name="hello", parameters=None, language_code="en")
+    return res
+
+@api.post("/whatsapp/send-arrival")
+async def whatsapp_send_arrival(body: WhatsAppArrivalReq, user: dict = Depends(get_current_user)):
+    """Send stock arrival receipt notification via Meta Cloud API"""
+    params = [
+        body.customer_name,
+        body.branch_name,
+        body.batch_no,
+        f"{body.weight:,.1f}",
+        str(body.bags)
+    ]
+    res = await send_whatsapp_template(
+        to_phone=body.phone,
+        template_name="e3_arrival_alert",
+        parameters=params,
+        language_code="en"
+    )
+    return res
+
+@api.post("/whatsapp/send-payment")
+async def whatsapp_send_payment(body: WhatsAppPaymentReq, user: dict = Depends(get_current_user)):
+    """Send payment receipt notification via Meta Cloud API"""
+    params = [
+        body.customer_name,
+        f"{body.amount:,.2f}",
+        body.date,
+        body.receipt_no,
+        f"{body.balance:,.2f}"
+    ]
+    res = await send_whatsapp_template(
+        to_phone=body.phone,
+        template_name="e3_payment_receipt",
+        parameters=params,
+        language_code="en"
+    )
+    return res
 
 
 @api.get("/")

@@ -23,6 +23,7 @@ export default function BatchDetail() {
   const [updating, setUpdating] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
+  const [qrModalOpen, setQrModalOpen] = useState(false);
   const [newDate, setNewDate] = useState("");
   const [newWeight, setNewWeight] = useState("");
   const [newRate, setNewRate] = useState("");
@@ -302,14 +303,50 @@ export default function BatchDetail() {
         </View>
       </Modal>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        {/* QR + Batch header */}
-        <View style={styles.hero}>
-          <View style={styles.qrBox}>
-            <QRCode value={data.qr_code || data.id} size={120} color={colors.text} backgroundColor="#fff" />
+      {/* View QR Code Modal */}
+      <Modal visible={qrModalOpen} transparent animationType="fade" onRequestClose={() => setQrModalOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalContent, { alignItems: "center", paddingVertical: 24 }]}>
+            <View style={styles.qrModalHeader}>
+              <Text style={styles.qrModalTitle}>Batch QR Tag</Text>
+              <TouchableOpacity onPress={() => setQrModalOpen(false)}>
+                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.qrBox}>
+              <QRCode value={data.qr_code || data.id} size={180} color={colors.text} backgroundColor="#fff" />
+            </View>
+
+            <Text style={styles.batchNo}>{data.batch_no}</Text>
+            <Text style={styles.receipt}>Receipt: {data.receipt_no}</Text>
+
+            <TouchableOpacity
+              style={styles.qrCloseBtn}
+              onPress={() => setQrModalOpen(false)}
+            >
+              <Text style={styles.qrCloseBtnText}>Close</Text>
+            </TouchableOpacity>
           </View>
-          <Text style={styles.batchNo}>{data.batch_no}</Text>
-          <Text style={styles.receipt}>Receipt: {data.receipt_no}</Text>
+        </View>
+      </Modal>
+
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* Compact Batch Header with View QR Code Button */}
+        <View style={styles.compactHero}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.batchNoLarge}>{data.batch_no}</Text>
+            <Text style={styles.receiptSmall}>Receipt: {data.receipt_no}</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.qrPillBtn}
+            onPress={() => setQrModalOpen(true)}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="qrcode-scan" size={16} color={colors.primary} />
+            <Text style={styles.qrPillBtnText}>View QR Code</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Timeline */}
@@ -466,6 +503,72 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   title: { flex: 1, fontSize: 18, fontWeight: "800", color: colors.text, textAlign: "center" },
+  compactHero: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    backgroundColor: colors.card,
+    marginHorizontal: spacing.xl,
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+    borderRadius: radius.xl,
+    ...shadow.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  batchNoLarge: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+    letterSpacing: -0.2,
+  },
+  receiptSmall: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  qrPillBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: `${colors.primary}12`,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: `${colors.primary}30`,
+  },
+  qrPillBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  qrModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: spacing.lg,
+  },
+  qrModalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  qrCloseBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 28,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+  },
+  qrCloseBtnText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   hero: { alignItems: "center", padding: spacing.xl, gap: 4 },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: spacing.xl },
   modalContent: { backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing.xl, width: "100%", ...shadow.card },

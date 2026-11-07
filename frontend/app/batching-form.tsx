@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
@@ -22,12 +22,17 @@ type Machine = {
 type Batch = {
   id: string;
   batch_no: string;
-  receipt_no: string;
+  receipt_no?: string;
   raw_weight: number;
   bags: number;
-  customer?: { id: string; name: string; code: string };
+  customer?: { id: string; name: string; code?: string; mobile?: string };
   product?: { name: string };
+  machine?: { id: string; name: string };
+  machine_name?: string;
   status: string;
+  created_at?: string;
+  arrival_date?: string;
+  remarks?: string;
 };
 
 function todayISOStr(d: Date) {
@@ -53,16 +58,29 @@ function formatDateTime(d: Date) {
 
 export default function BatchingForm() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const { selectedBranchId } = useAuth();
+
+  const [activeTab, setActiveTab] = useState<"start" | "running">(
+    params.tab === "running" ? "running" : "start"
+  );
 
   const [machines, setMachines] = useState<Machine[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [runningBatches, setRunningBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [selectedMachineId, setSelectedMachineId] = useState("");
   const [selectedBatchIds, setSelectedBatchIds] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [machineFilter, setMachineFilter] = useState<"All" | "In-House" | "Outsourced">("All");
+
+  // Complete Processing Modal State
+  const [completeBatch, setCompleteBatch] = useState<Batch | null>(null);
+  const [compDryWeight, setCompDryWeight] = useState("");
+  const [compPadiWeight, setCompPadiWeight] = useState("");
+  const [compBags, setCompBags] = useState("");
+  const [completing, setCompleting] = useState(false);
 
   const inhouseMachines = React.useMemo(() => machines.filter(m => !m.is_outsourced), [machines]);
   const outsourcedMachines = React.useMemo(() => machines.filter(m => !!m.is_outsourced), [machines]);
@@ -83,11 +101,28 @@ export default function BatchingForm() {
       const machs = await api<Machine[]>(`/machines${branchParam}`);
       setMachines(machs.filter(m => m.status === "Available"));
 
-      const url = selectedBranchId 
+      const pendingUrl = selectedBranchId 
         ? `/batches?status=Received&branch_id=${selectedBranchId}` 
         : "/batches?status=Received";
-      const allBatches = await api<Batch[]>(url);
-      setBatches(allBatches);
+      const dryingUrl = selectedBranchId 
+        ? `/batches?status=Drying&branch_id=${selectedBranchId}` 
+        : "/batches?status=Drying";
+      const loadedUrl = selectedBranchId 
+        ? `/batches?status=Loaded&branch_id=${selectedBranchId}` 
+        : "/batches?status=Loaded";
+
+      const [pendingList, dryingList, loadedList] = await Promise.all([
+        api<Batch[]>(pendingUrl),
+        api<Batch[]>(dryingUrl).catch(() => [] as Batch[]),
+        api<Batch[]>(loadedUrl).catch(() => [] as Batch[]),
+      ]);
+
+      setBatches(pendingList);
+
+      // Deduplicate running batches by ID
+      const rMap = new Map<string, Batch>();
+      [...dryingList, ...loadedList].forEach(b => rMap.set(b.id, b));
+      setRunningBatches(Array.from(rMap.values()));
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to load branch data");
     } finally {
@@ -167,11 +202,51 @@ export default function BatchingForm() {
         body: { batch_ids: ids, start_time: processTime.toISOString() }
       });
       Alert.alert("Success", "Dryer loaded and process started successfully.");
-      router.back();
+      setSelectedBatchIds({});
+      setSelectedMachineId("");
+      await loadData();
+      setActiveTab("running");
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to launch process");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openCompleteModal = (b: Batch) => {
+    setCompleteBatch(b);
+    setCompDryWeight("");
+    setCompPadiWeight("");
+    setCompBags("");
+  };
+
+  const handleCompleteSubmit = async () => {
+    if (!completeBatch) return;
+    const dry = parseFloat(compDryWeight);
+    if (!dry || dry <= 0) {
+      Alert.alert("Invalid Weight", "Please enter a valid processed dry weight.");
+      return;
+    }
+    const padi = parseFloat(compPadiWeight || "0");
+    const dryBags = parseInt(compBags || "0", 10);
+    setCompleting(true);
+    try {
+      await api(`/batches/${completeBatch.id}/status`, {
+        method: "PUT",
+        body: {
+          status: "Completed",
+          actual_dry_weight: dry,
+          padi_weight: padi,
+          processed_bags: dryBags,
+        }
+      });
+      Alert.alert("Processing Completed", `Batch ${completeBatch.batch_no} marked Completed & ready for dispatch! Customer notification dispatched.`);
+      setCompleteBatch(null);
+      await loadData();
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to complete processing");
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -243,6 +318,80 @@ export default function BatchingForm() {
     );
   };
 
+  const renderRunningBatchCard = (b: Batch) => {
+    const machineName = b.machine?.name || b.machine_name || "Dryer";
+    return (
+      <View key={b.id} style={styles.runningCard}>
+        {/* Card Header: Machine Badge + Batch No + Product */}
+        <View style={styles.runningCardHeader}>
+          <View style={styles.runningMachinePill}>
+            <View style={styles.runningDot} />
+            <Text style={styles.runningMachineText}>{machineName}</Text>
+          </View>
+
+          <View style={styles.runningBatchPill}>
+            <Text style={styles.runningBatchText}>{b.batch_no}</Text>
+          </View>
+
+          {b.product?.name ? (
+            <View style={styles.runningProductChip}>
+              <Text style={styles.runningProductText}>{b.product.name}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {/* Customer Information */}
+        <View style={styles.runningCustomerRow}>
+          <View style={styles.runningAvatar}>
+            <Text style={styles.runningAvatarText}>
+              {(b.customer?.name || "C").charAt(0).toUpperCase()}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.runningCustomerName}>{b.customer?.name || "Unknown Customer"}</Text>
+            {b.customer?.mobile ? (
+              <Text style={styles.runningCustomerPhone}>{b.customer.mobile}</Text>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Weight & Bags Stats Row */}
+        <View style={styles.runningStatsGrid}>
+          <View style={styles.runningStatBox}>
+            <Text style={styles.runningStatLabel}>ARRIVAL WEIGHT</Text>
+            <Text style={styles.runningStatVal}>{b.raw_weight} kg</Text>
+          </View>
+          <View style={styles.runningStatBox}>
+            <Text style={styles.runningStatLabel}>BAGS</Text>
+            <Text style={styles.runningStatVal}>{b.bags || 1} Bags</Text>
+          </View>
+          <View style={styles.runningStatBox}>
+            <Text style={styles.runningStatLabel}>STATUS</Text>
+            <Text style={[styles.runningStatVal, { color: colors.warning }]}>Drying</Text>
+          </View>
+        </View>
+
+        {/* Loaded Info / Remarks */}
+        {b.remarks ? (
+          <View style={styles.runningRemarksRow}>
+            <MaterialCommunityIcons name="information-outline" size={13} color={colors.textMuted} />
+            <Text style={styles.runningRemarksText} numberOfLines={1}>{b.remarks}</Text>
+          </View>
+        ) : null}
+
+        {/* Action Button: One-tap Complete Processing */}
+        <TouchableOpacity
+          style={styles.completeActionBtn}
+          onPress={() => openCompleteModal(b)}
+          activeOpacity={0.88}
+        >
+          <MaterialCommunityIcons name="check-circle-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.completeActionBtnText}>Complete Processing</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       {/* Header */}
@@ -250,19 +399,116 @@ export default function BatchingForm() {
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <MaterialCommunityIcons name="arrow-left" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Create Batch Run</Text>
+        <Text style={styles.headerTitle}>Dryer Processing</Text>
         <View style={{ width: 40 }} />
+      </View>
+
+      {/* Top Segment Tabs: Start Drying vs Running Batches */}
+      <View style={styles.topTabsContainer}>
+        <TouchableOpacity
+          style={[styles.topTabBtn, activeTab === "start" && styles.topTabBtnActive]}
+          onPress={() => setActiveTab("start")}
+          activeOpacity={0.85}
+        >
+          <MaterialCommunityIcons
+            name="play-circle-outline"
+            size={16}
+            color={activeTab === "start" ? "#FFFFFF" : colors.textMuted}
+          />
+          <Text style={[styles.topTabText, activeTab === "start" && styles.topTabTextActive]}>
+            Start Drying
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.topTabBtn, activeTab === "running" && styles.topTabBtnActiveRunning]}
+          onPress={() => setActiveTab("running")}
+          activeOpacity={0.85}
+        >
+          <MaterialCommunityIcons
+            name="cog-play"
+            size={16}
+            color={activeTab === "running" ? "#FFFFFF" : colors.warning}
+          />
+          <Text style={[styles.topTabText, activeTab === "running" && styles.topTabTextActive]}>
+            Running Batches
+          </Text>
+          {runningBatches.length > 0 && (
+            <View style={[styles.runningBadgePill, activeTab === "running" && styles.runningBadgePillActive]}>
+              <Text style={[styles.runningBadgePillText, activeTab === "running" && styles.runningBadgePillTextActive]}>
+                {runningBatches.length}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Fetching branch resources...</Text>
+          <Text style={styles.loadingText}>Fetching branch processing data...</Text>
         </View>
+      ) : activeTab === "running" ? (
+        /* TAB 2: RUNNING BATCHES LIST */
+        <ScrollView contentContainerStyle={styles.runningScroll} showsVerticalScrollIndicator={false}>
+          {runningBatches.length === 0 ? (
+            <View style={styles.emptyRunningCard}>
+              <View style={styles.emptyIconCircle}>
+                <MaterialCommunityIcons name="check-all" size={36} color={colors.primary} />
+              </View>
+              <Text style={styles.emptyRunningTitle}>No Batches Currently Drying</Text>
+              <Text style={styles.emptyRunningSub}>
+                All dryers are idle. Select pending arrivals in "Start Drying" to launch a new batch run.
+              </Text>
+              <TouchableOpacity
+                style={styles.emptyActionBtn}
+                onPress={() => setActiveTab("start")}
+              >
+                <MaterialCommunityIcons name="plus" size={16} color="#FFFFFF" />
+                <Text style={styles.emptyActionBtnText}>Start New Dryer Run</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              <View style={styles.runningListSummary}>
+                <Text style={styles.runningSummaryTitle}>
+                  {runningBatches.length} BATCH{runningBatches.length > 1 ? "ES" : ""} IN DRYERS
+                </Text>
+                <Text style={styles.runningSummarySub}>
+                  Record output weights to complete drying and notify customer
+                </Text>
+              </View>
+
+              <View style={{ gap: spacing.md }}>
+                {runningBatches.map(renderRunningBatchCard)}
+              </View>
+            </>
+          )}
+        </ScrollView>
       ) : (
+        /* TAB 1: START DRYING (NEW BATCH RUN) */
         <View style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-            
+            {/* Quick Banner if running batches exist */}
+            {runningBatches.length > 0 && (
+              <TouchableOpacity
+                style={styles.runningAlertBanner}
+                onPress={() => setActiveTab("running")}
+                activeOpacity={0.88}
+              >
+                <View style={styles.alertPulseDot} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.alertBannerTitle}>
+                    {runningBatches.length} Batch{runningBatches.length > 1 ? "es" : ""} Currently In Dryers
+                  </Text>
+                  <Text style={styles.alertBannerSub}>
+                    Tap to view running batches & complete processing
+                  </Text>
+                </View>
+                <MaterialCommunityIcons name="arrow-right" size={18} color="#B45309" />
+              </TouchableOpacity>
+            )}
+
             {/* 1. MACHINE SELECTOR */}
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs }}>
               <Text style={styles.sectionTitle}>1. Select Dryer Machine</Text>
@@ -312,7 +558,7 @@ export default function BatchingForm() {
             {machines.length === 0 ? (
               <View style={styles.warnBox}>
                 <MaterialCommunityIcons name="alert-circle-outline" size={20} color={colors.danger} />
-                <Text style={styles.warnText}>No available dryers found at this branch. Free up a dryer to load a new batch.</Text>
+                <Text style={styles.warnText}>No available dryers found at this branch. Complete running batches to free up dryers.</Text>
               </View>
             ) : (
               <View style={{ gap: spacing.md }}>
@@ -408,7 +654,7 @@ export default function BatchingForm() {
 
           </ScrollView>
 
-          {/* 3. CONFIRM ACTION BAR */}
+          {/* CONFIRM ACTION BAR */}
           <View style={styles.buttonBar}>
             <View style={styles.summaryInfo}>
               <Text style={styles.summaryLabel}>Selected: {selectedCount} arrivals</Text>
@@ -448,7 +694,7 @@ export default function BatchingForm() {
             <Calendar
               startDate={tempDateStr}
               endDate={tempDateStr}
-              onSelectRange={(s, e) => {
+              onSelectRange={(s) => {
                 setTempDateStr(s);
               }}
             />
@@ -504,6 +750,127 @@ export default function BatchingForm() {
           </View>
         </View>
       </Modal>
+
+      {/* Complete Processing Modal */}
+      <Modal
+        visible={!!completeBatch}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCompleteBatch(null)}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.completeModalContent}>
+            <View style={styles.completeModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completeModalTitle}>Complete Processing</Text>
+                <Text style={styles.completeModalSub}>
+                  {completeBatch?.batch_no} • {completeBatch?.customer?.name}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setCompleteBatch(null)}>
+                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Arrival Reference Info */}
+            <View style={styles.completeRefBox}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completeRefLabel}>ARRIVAL WET WEIGHT</Text>
+                <Text style={styles.completeRefVal}>{completeBatch?.raw_weight || 0} kg</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completeRefLabel}>ARRIVAL BAGS</Text>
+                <Text style={styles.completeRefVal}>{completeBatch?.bags || 0} Bags</Text>
+              </View>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+              <Text style={styles.completeInputLabel}>Processed Dry Weight (KG) *</Text>
+              <TextInput
+                testID="batching-complete-dry-weight"
+                style={styles.completeTextInput}
+                value={compDryWeight}
+                onChangeText={setCompDryWeight}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 112.5"
+                placeholderTextColor={colors.textLight}
+              />
+
+              <View style={{ flexDirection: "row", gap: spacing.md, marginTop: spacing.sm }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.completeInputLabel}>Padi Weight (KG)</Text>
+                  <TextInput
+                    testID="batching-complete-padi-weight"
+                    style={styles.completeTextInput}
+                    value={compPadiWeight}
+                    onChangeText={setCompPadiWeight}
+                    keyboardType="decimal-pad"
+                    placeholder="e.g. 5.2"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.completeInputLabel}>Dry Bags</Text>
+                  <TextInput
+                    testID="batching-complete-bags"
+                    style={styles.completeTextInput}
+                    value={compBags}
+                    onChangeText={setCompBags}
+                    keyboardType="number-pad"
+                    placeholder="e.g. 2"
+                    placeholderTextColor={colors.textLight}
+                  />
+                </View>
+              </View>
+
+              {/* Live Calculation Preview */}
+              {parseFloat(compDryWeight || "0") > 0 && (
+                <View style={styles.completeCalcBox}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                    <Text style={styles.completeCalcLabel}>Total Output (Dry + Padi):</Text>
+                    <Text style={styles.completeCalcVal}>
+                      {(parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0")).toFixed(2)} kg
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={styles.completeCalcLabel}>Weight Loss (Moisture):</Text>
+                    <Text style={[styles.completeCalcVal, { color: colors.warning }]}>
+                      {Math.max(0, (completeBatch?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))).toFixed(2)} kg ({completeBatch && completeBatch.raw_weight > 0 ? (((completeBatch.raw_weight - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))) / completeBatch.raw_weight) * 100).toFixed(1) : 0}%)
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.completeNoticeBox}>
+                <MaterialCommunityIcons name="whatsapp" size={16} color="#25D366" />
+                <Text style={styles.completeNoticeText}>
+                  A WhatsApp ready-for-dispatch message with dry & padi weights will be sent immediately to the customer.
+                </Text>
+              </View>
+            </ScrollView>
+
+            <View style={styles.completeActionsRow}>
+              <TouchableOpacity
+                style={styles.completeCancelBtn}
+                onPress={() => setCompleteBatch(null)}
+              >
+                <Text style={styles.completeCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.completeSubmitBtn}
+                onPress={handleCompleteSubmit}
+                disabled={completing}
+              >
+                {completing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.completeSubmitBtnText}>Complete & Notify</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -529,9 +896,296 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   headerTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
+
+  // Top Segment Tabs
+  topTabsContainer: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    gap: 10,
+  },
+  topTabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    backgroundColor: "#F1F5F9",
+  },
+  topTabBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  topTabBtnActiveRunning: {
+    backgroundColor: "#D97706",
+  },
+  topTabText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  topTabTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+  },
+  runningBadgePill: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  runningBadgePillActive: {
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  runningBadgePillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  runningBadgePillTextActive: {
+    color: "#FFFFFF",
+  },
+
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
   loadingText: { marginTop: spacing.md, color: colors.textMuted, fontSize: 14, fontWeight: "600" },
   scroll: { padding: spacing.lg, paddingBottom: 120 },
+
+  // Running Alert Banner in Start tab
+  runningAlertBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#FEF3C7",
+    padding: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    marginBottom: spacing.lg,
+  },
+  alertPulseDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#D97706",
+  },
+  alertBannerTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#92400E",
+  },
+  alertBannerSub: {
+    fontSize: 11,
+    color: "#B45309",
+    marginTop: 2,
+  },
+
+  // Running Tab Styles
+  runningScroll: { padding: spacing.lg, paddingBottom: 60 },
+  runningListSummary: {
+    marginBottom: spacing.md,
+  },
+  runningSummaryTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  runningSummarySub: {
+    fontSize: 12,
+    color: colors.textLight,
+    marginTop: 2,
+  },
+  runningCard: {
+    backgroundColor: "#fff",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  runningCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: spacing.sm,
+  },
+  runningMachinePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  runningDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#2563EB",
+  },
+  runningMachineText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#1E40AF",
+  },
+  runningBatchPill: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  runningBatchText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  runningProductChip: {
+    marginLeft: "auto",
+    backgroundColor: "#E8F5E9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  runningProductText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  runningCustomerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: spacing.sm,
+  },
+  runningAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary50,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  runningAvatarText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+  runningCustomerName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  runningCustomerPhone: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  runningStatsGrid: {
+    flexDirection: "row",
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    gap: 6,
+    marginBottom: spacing.sm,
+  },
+  runningStatBox: {
+    flex: 1,
+  },
+  runningStatLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.textMuted,
+  },
+  runningStatVal: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 2,
+  },
+  runningRemarksRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: spacing.sm,
+  },
+  runningRemarksText: {
+    fontSize: 11,
+    color: colors.textMuted,
+    flex: 1,
+  },
+  completeActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#059669",
+    borderRadius: radius.pill,
+    paddingVertical: 12,
+    marginTop: 4,
+    ...shadow.sm,
+  },
+  completeActionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  // Empty Running Card
+  emptyRunningCard: {
+    backgroundColor: "#fff",
+    borderRadius: radius.xl,
+    padding: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginTop: spacing.xl,
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primary50,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  emptyRunningTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+    marginBottom: 6,
+  },
+  emptyRunningSub: {
+    fontSize: 13,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 18,
+    marginBottom: spacing.lg,
+  },
+  emptyActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+  },
+  emptyActionBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 13,
+  },
+
+  // Existing sections
   sectionTitle: { fontSize: 13, fontWeight: "800", color: colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: spacing.md },
   warnBox: {
     flexDirection: "row",
@@ -551,202 +1205,87 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
+    padding: spacing.md,
+    borderRadius: radius.lg,
     borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    ...shadow.card,
   },
-  machineCardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: `${colors.primary}08`,
-  },
-  machineCardOutsourced: {
-    borderColor: "#FFE082",
-    backgroundColor: "#FFFCF5",
-  },
-  machineCardOutsourcedSelected: {
-    borderColor: "#E65100",
-    backgroundColor: "#FFF8E1",
-  },
-  machineIconBox: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  machineName: { fontSize: 15, fontWeight: "800", color: colors.text },
-  machineNameSelected: { color: colors.primary },
-  machineCap: { fontSize: 12, color: colors.textMuted, marginTop: 2, fontWeight: "500" },
-  miniBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 6,
-  },
-  miniBadgeInhouse: {
-    backgroundColor: `${colors.primary}15`,
-  },
-  miniBadgeOutsourced: {
-    backgroundColor: "#FFE082",
-  },
-  miniBadgeText: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  miniBadgeTextInhouse: {
-    color: colors.primary,
-  },
-  miniBadgeTextOutsourced: {
-    color: "#E65100",
-  },
-  vendorNameSubtext: {
-    fontSize: 11,
-    color: "#E65100",
-    fontWeight: "700",
-    marginTop: 1,
-  },
-  vendorRateSubtext: {
-    fontSize: 11,
-    color: "#E65100",
-    fontWeight: "700",
-  },
-  selectedPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  selectedPillInhouse: {
-    backgroundColor: `${colors.primary}10`,
-    borderColor: `${colors.primary}30`,
-  },
-  selectedPillOutsourced: {
-    backgroundColor: "#FFF3E0",
-    borderColor: "#FFE082",
-  },
-  selectedPillText: {
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.2,
-  },
-  segmentRow: {
-    flexDirection: "row",
-    backgroundColor: "#F1F5F9",
-    borderRadius: radius.md,
-    padding: 3,
-    marginBottom: spacing.md,
-  },
-  segmentTab: {
-    flex: 1,
-    flexDirection: "row",
+  machineCardSelected: { borderColor: colors.primary, backgroundColor: "#F1F8E9" },
+  machineCardOutsourced: { borderColor: "#FFE082" },
+  machineCardOutsourcedSelected: { borderColor: "#E65100", backgroundColor: "#FFF8E1" },
+  machineIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 7,
-    borderRadius: radius.sm,
-    gap: 4,
   },
-  segmentTabActive: {
-    backgroundColor: "#fff",
-    ...shadow.sm,
-  },
-  segmentTabActiveInhouse: {
-    backgroundColor: colors.primary,
-    ...shadow.sm,
-  },
-  segmentTabActiveOutsourced: {
-    backgroundColor: "#E65100",
-    ...shadow.sm,
-  },
-  segmentTabText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.textMuted,
-  },
-  segmentTabTextActive: {
-    color: colors.text,
-  },
-  segmentTabTextActiveWhite: {
-    color: "#fff",
-  },
-  subGroupContainer: {
-    gap: spacing.xs,
-  },
-  subGroupHeader: {
+  machineName: { fontSize: 15, fontWeight: "700", color: colors.text },
+  machineNameSelected: { color: colors.primary, fontWeight: "800" },
+  machineCap: { fontSize: 12, color: colors.textMuted },
+  miniBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
+  miniBadgeInhouse: { backgroundColor: "#E8F5E9" },
+  miniBadgeOutsourced: { backgroundColor: "#FFF3E0" },
+  miniBadgeText: { fontSize: 10, fontWeight: "700" },
+  miniBadgeTextInhouse: { color: colors.primary },
+  miniBadgeTextOutsourced: { color: "#E65100" },
+  vendorNameSubtext: { fontSize: 11, color: "#E65100", fontWeight: "600", marginTop: 1 },
+  vendorRateSubtext: { fontSize: 11, color: "#E65100", fontWeight: "700" },
+  selectedPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
+  selectedPillInhouse: { backgroundColor: colors.primary50 },
+  selectedPillOutsourced: { backgroundColor: "#FFE082" },
+  selectedPillText: { fontSize: 11, fontWeight: "800" },
+  segmentRow: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.md },
+  segmentTab: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 4,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: "#f5f5f5",
   },
-  subGroupHeaderOutsourced: {
-    marginTop: spacing.xs,
-  },
-  subGroupTitle: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: colors.primary,
-    letterSpacing: 0.5,
-  },
-  subGroupPill: {
-    backgroundColor: `${colors.primary}15`,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-  },
-  subGroupPillText: {
-    fontSize: 9,
-    fontWeight: "800",
-    color: colors.primary,
-  },
-  vendorEmptyBox: {
-    padding: spacing.md,
-    backgroundColor: "#FFFDF9",
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: "#FFE082",
-    alignItems: "center",
-  },
-  vendorEmptyText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#E65100",
-  },
+  segmentTabActive: { backgroundColor: colors.text },
+  segmentTabActiveInhouse: { backgroundColor: colors.primary },
+  segmentTabActiveOutsourced: { backgroundColor: "#E65100" },
+  segmentTabText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
+  segmentTabTextActive: { color: "#fff" },
+  segmentTabTextActiveWhite: { color: "#fff" },
+  subGroupContainer: { gap: spacing.xs },
+  subGroupHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
+  subGroupHeaderOutsourced: {},
+  subGroupTitle: { fontSize: 11, fontWeight: "800", color: colors.primary, letterSpacing: 0.5 },
+  subGroupPill: { backgroundColor: colors.primary50, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
+  subGroupPillText: { fontSize: 10, fontWeight: "800", color: colors.primary },
+  vendorEmptyBox: { padding: spacing.md, backgroundColor: "#FFF8E1", borderRadius: radius.md, borderWidth: 1, borderColor: "#FFE082" },
+  vendorEmptyText: { fontSize: 12, color: "#E65100", fontWeight: "600" },
+
+  // DateTime Selector
   dateTimeField: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
+    padding: spacing.md,
+    borderRadius: radius.lg,
     borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    ...shadow.card,
   },
-  dateTimeIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: `${colors.primary}12`,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dateTimeText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.text,
-    marginLeft: spacing.sm,
-  },
+  dateTimeIconBox: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary50, alignItems: "center", justifyContent: "center", marginRight: spacing.sm },
+  dateTimeText: { flex: 1, fontSize: 14, fontWeight: "700", color: colors.text },
+
+  // Arrival item card
   arrivalCard: {
     backgroundColor: "#fff",
-    borderWidth: 1.5,
-    borderColor: colors.border,
     borderRadius: radius.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
-    ...shadow.card,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    marginBottom: spacing.sm,
   },
-  arrivalCardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: `${colors.primary}05`,
-  },
-  arrivalCardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  arrivalCardSelected: { borderColor: colors.primary, backgroundColor: "#F1F8E9" },
+  arrivalCardHeader: { flexDirection: "row", alignItems: "center" },
   customerName: { fontSize: 14, fontWeight: "800", color: colors.text },
-  batchNo: { fontSize: 11, color: colors.textMuted, marginTop: 2, fontWeight: "500" },
+  batchNo: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   checkbox: {
     width: 22,
     height: 22,
@@ -911,5 +1450,137 @@ const styles = StyleSheet.create({
   pickerSheetApplyText: {
     color: "#fff",
     fontWeight: "800",
+  },
+
+  // Complete Processing Modal
+  modalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  completeModalContent: {
+    backgroundColor: "#fff",
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    maxHeight: "85%",
+  },
+  completeModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: spacing.md,
+  },
+  completeModalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  completeModalSub: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  completeRefBox: {
+    flexDirection: "row",
+    backgroundColor: colors.primary50,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    marginBottom: spacing.md,
+    gap: spacing.md,
+  },
+  completeRefLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.primary,
+    letterSpacing: 0.5,
+  },
+  completeRefVal: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 2,
+  },
+  completeInputLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
+  completeTextInput: {
+    backgroundColor: colors.bg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  completeCalcBox: {
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: radius.md,
+    padding: 10,
+    marginTop: spacing.md,
+  },
+  completeCalcLabel: {
+    fontSize: 12,
+    color: "#92400E",
+    fontWeight: "600",
+  },
+  completeCalcVal: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#78350F",
+  },
+  completeNoticeBox: {
+    flexDirection: "row",
+    gap: 8,
+    backgroundColor: "#F0FDF4",
+    padding: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    marginTop: spacing.md,
+    alignItems: "center",
+  },
+  completeNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    color: "#166534",
+    lineHeight: 16,
+    fontWeight: "600",
+  },
+  completeActionsRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  completeCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: "center",
+  },
+  completeCancelBtnText: {
+    color: colors.textMuted,
+    fontWeight: "700",
+  },
+  completeSubmitBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    backgroundColor: "#059669",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completeSubmitBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 14,
   },
 });

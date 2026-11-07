@@ -290,7 +290,23 @@ async def send_drying_completed(
     branch_label = clean_branch_label(branch_name)
     lang = language_code or "en"
 
-    # 1. Try v3 (Thank you,\n{{5}} Branch - without E3 Agro)
+    # 1. Try v4 (Thanks,\n{{5}} only - approved in en, ta)
+    res_v4 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_drying_completed_v4",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            f"{dry_weight:,.2f}",
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v4.get("success"):
+        return res_v4
+
+    # 2. Try v3 (Thank you,\n{{5}} Branch - without E3 Agro)
     res = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_drying_completed_v3",
@@ -340,7 +356,28 @@ async def send_delivery_statement(
     branch_label = clean_branch_label(branch_name)
     lang = language_code or "en"
 
-    # 1. Try v3 (Thank you for choosing {{10}} Branch! - without E3 Agro)
+    # 1. Try v4 (Thanks,\n{{10}} only - approved in en, ta)
+    res_v4 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_delivery_statement_v4",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            f"{delivered_weight:,.2f}",
+            delivered_to or "Customer",
+            f"{bill_amount:,.2f}",
+            f"{amount_received:,.2f}",
+            f"{batch_pending:,.2f}",
+            f"{overall_pending:,.2f}",
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v4.get("success"):
+        return res_v4
+
+    # 2. Try v3 (Thank you for choosing {{10}} Branch! - without E3 Agro)
     res = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_delivery_statement_v3",
@@ -395,7 +432,24 @@ async def send_payment_receipt(
     branch_label = clean_branch_label(branch_name)
     lang = language_code or "en"
 
-    # 1. Try v3 (Thank you,\n{{6}} Branch - without E3 Agro)
+    # 1. Try v4 (Thanks,\n{{6}} only - approved in en, ta)
+    res_v4 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_payment_receipt_v4",
+        parameters=[
+            customer_name,
+            f"{amount:,.2f}",
+            date,
+            receipt_no,
+            f"{balance:,.2f}",
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v4.get("success"):
+        return res_v4
+
+    # 2. Try v3 (Thank you,\n{{6}} Branch - without E3 Agro)
     res = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_payment_receipt_v3",

@@ -350,11 +350,28 @@ export default function BatchDetail() {
           <Row label="Product" value={data.product?.name || "-"} />
           <Row label="Machine" value={data.machine?.name || "-"} />
           <Row label="Raw Weight" value={`${data.raw_weight} kg`} />
-          <Row label="Est. Dry Weight" value={`${data.estimated_dry_weight} kg`} />
-          {data.actual_dry_weight ? <Row label="Actual Dry Weight" value={`${data.actual_dry_weight} kg`} /> : null}
-          {data.weight_loss !== null && data.weight_loss !== undefined ? <Row label="Weight Loss" value={`${data.weight_loss} kg`} /> : null}
-          <Row label="Moisture" value={`${data.moisture}%`} />
-          <Row label="Bags" value={`${data.bags} × ${data.bag_weight}kg`} />
+          {data.actual_dry_weight ? (
+            <>
+              <Row label="Actual Dry Weight" value={`${data.actual_dry_weight} kg`} />
+              <Row
+                label="Weight Loss"
+                value={`${data.weight_loss != null ? data.weight_loss : Math.max(0, data.raw_weight - data.actual_dry_weight)} kg (${data.raw_weight > 0 ? (((data.raw_weight - data.actual_dry_weight) / data.raw_weight) * 100).toFixed(1) : "0"}%)`}
+              />
+            </>
+          ) : null}
+          {data.moisture && data.moisture > 0 ? (
+            <Row label="Moisture" value={`${data.moisture}%`} />
+          ) : null}
+          <Row
+            label="Bags"
+            value={
+              data.bags
+                ? data.bag_weight && data.bag_weight > 0
+                  ? `${data.bags} Bags (${data.bag_weight} kg/bag)`
+                  : `${data.bags} Bags`
+                : "-"
+            }
+          />
         </View>
 
         {/* Bill */}

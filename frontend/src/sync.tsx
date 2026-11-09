@@ -93,3 +93,4 @@ export function useSyncRefresh(loadFn?: () => Promise<void> | void) {
 
   return { refreshKey, isSyncing, triggerSync };
 }
+

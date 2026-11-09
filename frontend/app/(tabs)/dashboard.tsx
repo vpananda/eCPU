@@ -170,6 +170,7 @@ export default function Dashboard() {
   
   const [branchModalOpen, setBranchModalOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [alertsModalOpen, setAlertsModalOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(start);
   const [draftEnd, setDraftEnd] = useState(end);
 
@@ -181,6 +182,97 @@ export default function Dashboard() {
   const activeBranchName = selectedBranchId
     ? branches.find(b => b.id === selectedBranchId)?.name || "Selected Branch"
     : "All Branches";
+
+  const alertItems = React.useMemo(() => {
+    const list: Array<{
+      id: string;
+      title: string;
+      desc: string;
+      icon: any;
+      color: string;
+      badgeText?: string;
+      route: string;
+      roleRestricted?: boolean;
+    }> = [];
+
+    // 1. Drying completed -> Ready to deliver
+    const dryDone = data?.drying_completed_count || 0;
+    if (dryDone > 0) {
+      list.push({
+        id: "dry_done",
+        title: "Drying Completed — Ready for Delivery",
+        desc: `${dryDone} batch${dryDone > 1 ? "es" : ""} finished drying. Ready for bagging & delivery dispatch.`,
+        icon: "check-decagram",
+        color: "#2E7D32",
+        badgeText: `${dryDone} Ready`,
+        route: "/delivery-picker",
+      });
+    }
+
+    // 2. Pending Arrivals awaiting machine
+    const inCount = data?.today_arrival?.in_count || 0;
+    const inWeight = data?.today_arrival?.in_weight || 0;
+    if (inCount > 0) {
+      list.push({
+        id: "pending_arrivals",
+        title: "Pending Arrivals Awaiting Dryers",
+        desc: `${inCount} arrival${inCount > 1 ? "s" : ""} (${fmtNum(inWeight, "", " KG")}) waiting to be batched and loaded.`,
+        icon: "tray-arrow-down",
+        color: "#1E88E5",
+        badgeText: `${inCount} Pending`,
+        route: "/batching-form",
+      });
+    }
+
+    // 3. Pending Deliveries
+    const pendDeliv = data?.pending_deliveries_count || 0;
+    if (pendDeliv > 0 && pendDeliv !== dryDone) {
+      list.push({
+        id: "pending_deliv",
+        title: "Pending Customer Deliveries",
+        desc: `${pendDeliv} completed batch${pendDeliv > 1 ? "es" : ""} awaiting customer pickup / delivery.`,
+        icon: "truck-fast-outline",
+        color: "#EF6C00",
+        badgeText: `${pendDeliv} Batches`,
+        route: "/delivery-picker",
+      });
+    }
+
+    // 4. Machines Under Maintenance
+    const maintCount = data?.machines_maintenance || 0;
+    if (maintCount > 0) {
+      list.push({
+        id: "maint",
+        title: "Dryer Under Maintenance",
+        desc: `${maintCount} dryer${maintCount > 1 ? "s" : ""} offline for maintenance. Inspect or restore availability.`,
+        icon: "wrench-outline",
+        color: "#D32F2F",
+        badgeText: `${maintCount} Offline`,
+        route: "/maintenance",
+      });
+    }
+
+    // 5. Overdue Payments (Admin/Accounts role only)
+    if (user?.role === "Admin" && (data?.pending_payments_count || 0) > 0) {
+      list.push({
+        id: "overdue_pay",
+        title: "Pending Customer Receivables",
+        desc: `${fmtNum(data?.pending_payments || 0, "₹")} outstanding across ${data?.pending_payments_count} customer bills.`,
+        icon: "cash-multiple",
+        color: "#7B1FA2",
+        badgeText: fmtNum(data?.pending_payments || 0, "₹"),
+        route: "/payment-reminders",
+        roleRestricted: true,
+      });
+    }
+
+    return list;
+  }, [data, user?.role]);
+
+  const handleAlertAction = (route: string) => {
+    setAlertsModalOpen(false);
+    router.push(route as any);
+  };
 
   const isDryerRunning = (data?.machines_running ?? 0) > 0 || (data?.today_arrival?.processing_weight ?? 0) > 0;
   const isInhouseRunning = (data?.inhouse_machines_running ?? 0) > 0 || (data?.today_arrival?.inhouse_processing_weight ?? 0) > 0;
@@ -352,9 +444,18 @@ export default function Dashboard() {
             </Animated.View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.notificationBtn} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.notificationBtn}
+            activeOpacity={0.7}
+            onPress={() => setAlertsModalOpen(true)}
+            accessibilityLabel="System Alerts"
+          >
             <MaterialCommunityIcons name="bell-outline" size={24} color={colors.text} />
-            <View style={styles.unreadDot} />
+            {alertItems.length > 0 && (
+              <View style={styles.unreadDotBadge}>
+                <Text style={styles.unreadDotBadgeText}>{alertItems.length}</Text>
+              </View>
+            )}
           </TouchableOpacity>
 
           <View style={styles.avatarWrap}>
@@ -1069,6 +1170,118 @@ export default function Dashboard() {
           </View>
         </View>
       </Modal>
+
+      {/* In-App Alerts & Notifications Drawer/Modal */}
+      <Modal
+        visible={alertsModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setAlertsModalOpen(false)}
+      >
+        <View style={styles.alertModalOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setAlertsModalOpen(false)} />
+          <View style={styles.alertSheet}>
+            <View style={styles.alertSheetHandle} />
+            <View style={styles.alertSheetHeader}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={styles.alertSheetTitle}>Alerts & Notifications</Text>
+                  {alertItems.length > 0 && (
+                    <View style={styles.alertCountPill}>
+                      <Text style={styles.alertCountPillText}>{alertItems.length} Action Needed</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.alertSheetSubtitle}>
+                  Role: {role} • Branch: {activeBranchName}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setAlertsModalOpen(false)}
+                style={styles.alertCloseBtn}
+                activeOpacity={0.7}
+              >
+                <MaterialCommunityIcons name="close" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 28 }}>
+              {/* 1. Action Items */}
+              <Text style={styles.alertSectionHeading}>OPERATIONAL ALERTS</Text>
+
+              {alertItems.length === 0 ? (
+                <View style={styles.alertEmptyCard}>
+                  <MaterialCommunityIcons name="check-circle-outline" size={40} color={colors.primary} />
+                  <Text style={styles.alertEmptyTitle}>All Caught Up!</Text>
+                  <Text style={styles.alertEmptySub}>
+                    No pending drying completions, backlogs, or urgent alerts for this branch.
+                  </Text>
+                </View>
+              ) : (
+                alertItems.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.alertCard, { borderLeftColor: item.color }]}
+                    onPress={() => handleAlertAction(item.route)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={[styles.alertCardIconWrap, { backgroundColor: `${item.color}15` }]}>
+                      <MaterialCommunityIcons name={item.icon} size={22} color={item.color} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <Text style={styles.alertCardTitle}>{item.title}</Text>
+                        {item.badgeText && (
+                          <View style={[styles.alertCardBadge, { backgroundColor: `${item.color}15` }]}>
+                            <Text style={[styles.alertCardBadgeText, { color: item.color }]}>{item.badgeText}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.alertCardDesc}>{item.desc}</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6, gap: 4 }}>
+                        <Text style={[styles.alertCardActionText, { color: item.color }]}>Take Action</Text>
+                        <MaterialCommunityIcons name="arrow-right" size={14} color={item.color} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+
+              {/* 2. Live Activity Feed */}
+              <Text style={[styles.alertSectionHeading, { marginTop: spacing.lg }]}>RECENT ACTIVITIES</Text>
+              {(data?.recent_activities || []).slice(0, 4).length === 0 ? (
+                <Text style={styles.noActivityText}>No recent activity logged for this period.</Text>
+              ) : (
+                (data?.recent_activities || []).slice(0, 4).map((act: any, idx: number) => (
+                  <View key={idx} style={styles.activityFeedItem}>
+                    <View style={styles.activityFeedBullet} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.activityFeedText}>
+                        {act.user_name ? `${act.user_name} • ` : ""}
+                        {act.action ? act.action.replace(/_/g, " ") : "Activity"}
+                      </Text>
+                      <Text style={styles.activityFeedDate}>
+                        {act.timestamp ? new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now"}
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              )}
+
+              {/* 3. Push Notifications Info */}
+              <View style={styles.pushInfoBox}>
+                <MaterialCommunityIcons name="cellphone-sound" size={20} color={colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pushInfoTitle}>Push Notifications</Text>
+                  <Text style={styles.pushInfoDesc}>
+                    Mobile alerts are tailored by access level ({role}). Factory operators receive batch & dryer alerts, while management receives balance and billing summaries.
+                  </Text>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1190,6 +1403,217 @@ const styles = StyleSheet.create({
     right: 8,
     borderWidth: 1.5,
     borderColor: "#ffffff",
+  },
+  unreadDotBadge: {
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.danger,
+    position: "absolute",
+    top: -2,
+    right: -2,
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  unreadDotBadgeText: {
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  alertModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+    justifyContent: "flex-end",
+  },
+  alertSheet: {
+    backgroundColor: "#ffffff",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: "82%",
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    ...shadow.card,
+  },
+  alertSheetHandle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+    alignSelf: "center",
+    marginBottom: spacing.md,
+  },
+  alertSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingBottom: spacing.md,
+    marginBottom: spacing.md,
+  },
+  alertSheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  alertCountPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    backgroundColor: "#FEE2E2",
+  },
+  alertCountPillText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.danger,
+  },
+  alertSheetSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  alertCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertSectionHeading: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginBottom: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  alertEmptyCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 28,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: "#F0FDF4",
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  alertEmptyTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.primary,
+    marginTop: 8,
+  },
+  alertEmptySub: {
+    fontSize: 12,
+    color: colors.textMuted,
+    textAlign: "center",
+    marginTop: 4,
+    lineHeight: 17,
+  },
+  alertCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#ffffff",
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderLeftWidth: 4,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    gap: spacing.md,
+    ...shadow.card,
+  },
+  alertCardIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertCardTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+    flex: 1,
+    marginRight: 6,
+  },
+  alertCardBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  alertCardBadgeText: {
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  alertCardDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 3,
+    lineHeight: 17,
+  },
+  alertCardActionText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  activityFeedItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    gap: 10,
+  },
+  activityFeedBullet: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: colors.primary,
+  },
+  activityFeedText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.text,
+    textTransform: "capitalize",
+  },
+  activityFeedDate: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  noActivityText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontStyle: "italic",
+    paddingVertical: 6,
+  },
+  pushInfoBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  pushInfoTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  pushInfoDesc: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+    lineHeight: 15,
   },
   avatarWrap: {
     width: 40,

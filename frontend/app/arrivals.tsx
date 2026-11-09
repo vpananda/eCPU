@@ -216,7 +216,7 @@ export default function ArrivalsScreen() {
           <MaterialCommunityIcons name="magnify" size={18} color={colors.textMuted} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search customer name, code, phone, batch #..."
+            placeholder="Search spice, customer name, code, phone, batch #..."
             placeholderTextColor={colors.textLight}
             value={search}
             onChangeText={setSearch}

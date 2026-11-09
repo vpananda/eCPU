@@ -51,6 +51,11 @@ type Dash = {
     batch_count: number;
     total_weight: number;
   }[];
+  active_product_arrivals?: {
+    product_name: string;
+    batch_count: number;
+    total_weight: number;
+  }[];
 };
 
 function getSpiceTheme(name: string) {
@@ -438,56 +443,73 @@ export default function Dashboard() {
                 </TouchableOpacity>
               </View>
 
-              {/* Spices Arrival Breakdown (Only displayed if arrived) */}
-              {data?.product_arrivals && data.product_arrivals.length > 0 && (
-                <View style={styles.hubSpicesSection}>
-                  <View style={styles.hubSpicesHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <MaterialCommunityIcons name="leaf" size={14} color="#15803D" />
-                      <Text style={styles.hubSpicesTitle}>SPICES ARRIVAL BREAKDOWN</Text>
+              {/* Spices Arrival Breakdown */}
+              {(() => {
+                const periodArrivals = data?.product_arrivals || [];
+                const activeStock = data?.active_product_arrivals || [];
+                const displaySpices = periodArrivals.length > 0 ? periodArrivals : activeStock;
+                const isShowingActive = periodArrivals.length === 0 && activeStock.length > 0;
+
+                return (
+                  <View style={styles.hubSpicesSection}>
+                    <View style={styles.hubSpicesHeader}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <MaterialCommunityIcons name="leaf" size={14} color="#15803D" />
+                        <Text style={styles.hubSpicesTitle}>SPICES ARRIVAL BREAKDOWN</Text>
+                      </View>
+                      <Text style={styles.hubSpicesSubtitle}>
+                        {displaySpices.length > 0
+                          ? `${displaySpices.length} ${displaySpices.length === 1 ? "variety" : "varieties"} ${isShowingActive ? "in branch" : "arrived"}`
+                          : "0 varieties"}
+                      </Text>
                     </View>
-                    <Text style={styles.hubSpicesSubtitle}>
-                      {data.product_arrivals.length} {data.product_arrivals.length === 1 ? "variety" : "varieties"} arrived
-                    </Text>
-                  </View>
 
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.hubSpicesScroll}
-                  >
-                    {data.product_arrivals.map((item, idx) => {
-                      const theme = getSpiceTheme(item.product_name);
-                      return (
-                        <TouchableOpacity
-                          key={item.product_name + idx}
-                          style={[styles.hubSpiceCard, { borderColor: theme.border, backgroundColor: theme.bg }]}
-                          onPress={() => router.push({ pathname: "/arrivals", params: { tab: "in", q: item.product_name } })}
-                          activeOpacity={0.8}
-                        >
-                          <View style={styles.hubSpiceCardTop}>
-                            <View style={[styles.hubSpiceIconBox, { backgroundColor: theme.iconBg }]}>
-                              <MaterialCommunityIcons name={theme.icon as any} size={15} color={theme.color} />
-                            </View>
-                            <View style={[styles.hubSpiceBatchBadge, { backgroundColor: theme.iconBg }]}>
-                              <Text style={[styles.hubSpiceBatchText, { color: theme.color }]}>
-                                {item.batch_count} {item.batch_count === 1 ? "Lot" : "Lots"}
+                    {displaySpices.length === 0 ? (
+                      <View style={[styles.hubSpiceCard, { width: "100%", paddingVertical: 14, alignItems: "center", borderColor: colors.border, backgroundColor: "#FAFAFA" }]}>
+                        <Text style={{ fontSize: 12, color: colors.textMuted, fontWeight: "600" }}>
+                          No spices arrived for this period
+                        </Text>
+                      </View>
+                    ) : (
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.hubSpicesScroll}
+                      >
+                        {displaySpices.map((item, idx) => {
+                          const theme = getSpiceTheme(item.product_name);
+                          return (
+                            <TouchableOpacity
+                              key={item.product_name + idx}
+                              style={[styles.hubSpiceCard, { borderColor: theme.border, backgroundColor: theme.bg }]}
+                              onPress={() => router.push({ pathname: "/arrivals", params: { tab: "in", q: item.product_name } })}
+                              activeOpacity={0.8}
+                            >
+                              <View style={styles.hubSpiceCardTop}>
+                                <View style={[styles.hubSpiceIconBox, { backgroundColor: theme.iconBg }]}>
+                                  <MaterialCommunityIcons name={theme.icon as any} size={15} color={theme.color} />
+                                </View>
+                                <View style={[styles.hubSpiceBatchBadge, { backgroundColor: theme.iconBg }]}>
+                                  <Text style={[styles.hubSpiceBatchText, { color: theme.color }]}>
+                                    {item.batch_count} {item.batch_count === 1 ? "Lot" : "Lots"}
+                                  </Text>
+                                </View>
+                              </View>
+
+                              <Text style={styles.hubSpiceName} numberOfLines={1}>
+                                {item.product_name}
                               </Text>
-                            </View>
-                          </View>
-
-                          <Text style={styles.hubSpiceName} numberOfLines={1}>
-                            {item.product_name}
-                          </Text>
-                          <Text style={[styles.hubSpiceWeight, { color: theme.color }]}>
-                            {fmtNum(item.total_weight, "", " KG")}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
-              )}
+                              <Text style={[styles.hubSpiceWeight, { color: theme.color }]}>
+                                {fmtNum(item.total_weight, "", " KG")}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    )}
+                  </View>
+                );
+              })()}
 
               {/* Drying Division Header */}
               <View style={styles.hubDivisionBar}>

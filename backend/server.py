@@ -2262,9 +2262,9 @@ async def list_batches(user: dict = Depends(get_current_user),
         params.append(status)
         
     if q:
-        where_clauses.append("(b.batch_no ILIKE %s OR b.receipt_no ILIKE %s OR c.name ILIKE %s OR c.mobile ILIKE %s OR c.code ILIKE %s)")
+        where_clauses.append("(b.batch_no ILIKE %s OR b.receipt_no ILIKE %s OR c.name ILIKE %s OR c.mobile ILIKE %s OR c.code ILIKE %s OR p.name ILIKE %s)")
         q_like = f"%{q}%"
-        params.extend([q_like, q_like, q_like, q_like, q_like])
+        params.extend([q_like, q_like, q_like, q_like, q_like, q_like])
 
     limit = 500
     if has_balance:
@@ -3569,7 +3569,7 @@ async def dashboard(
     """
     full_exp_params = exp_params + [pstart, pend]
 
-    # Product-wise arrivals breakdown (only includes products that arrived)
+    # Product-wise arrivals breakdown (only includes products that arrived in period)
     product_sql = f"""
         SELECT
             COALESCE(p.name, 'Other') AS product_name,
@@ -3585,6 +3585,22 @@ async def dashboard(
     """
     product_params = batch_params + [pstart, pend, s_date, e_date]
 
+    # Active in-branch stock by product (Received, Loaded, Drying, Completed)
+    active_stock_sql = f"""
+        SELECT
+            COALESCE(p.name, 'Other') AS product_name,
+            COUNT(b.id) AS batch_count,
+            ROUND(COALESCE(SUM(b.raw_weight), 0)::numeric, 2) AS total_weight
+        FROM public.batches b
+        LEFT JOIN public.products p ON b.product_id = p.id
+        WHERE {" AND ".join(batch_where)}
+          AND b.status IN ('Received', 'Loaded', 'Drying', 'Completed')
+        GROUP BY p.name
+        HAVING COALESCE(SUM(b.raw_weight), 0) > 0
+        ORDER BY total_weight DESC
+    """
+    active_stock_params = list(batch_params)
+
     # Run all lightweight queries in parallel
     tasks = [
         db.query(batch_sql, full_batch_params),
@@ -3594,6 +3610,7 @@ async def dashboard(
         db.machines.find(machine_filter, {"_id": 0}).to_list(50),
         db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(15),
         db.query(product_sql, product_params),
+        db.query(active_stock_sql, active_stock_params),
     ]
 
     results = await asyncio.gather(*tasks)
@@ -3605,6 +3622,7 @@ async def dashboard(
     machines = results[4]
     recent = results[5]
     product_rows = results[6] if len(results) > 6 and results[6] else []
+    active_stock_rows = results[7] if len(results) > 7 and results[7] else []
 
     product_arrivals = [
         {
@@ -3613,6 +3631,15 @@ async def dashboard(
             "total_weight": round(float(r.get("total_weight") or 0), 2),
         }
         for r in product_rows
+    ]
+
+    active_product_arrivals = [
+        {
+            "product_name": str(r.get("product_name") or "Other"),
+            "batch_count": int(r.get("batch_count") or 0),
+            "total_weight": round(float(r.get("total_weight") or 0), 2),
+        }
+        for r in active_stock_rows
     ]
 
     period_received_weight = round(float(batch_stats.get("period_received_weight") or 0), 2)
@@ -3677,6 +3704,7 @@ async def dashboard(
         "total_machines": len(machines),
         "recent_activities": recent,
         "product_arrivals": product_arrivals,
+        "active_product_arrivals": active_product_arrivals,
     }
 
 
@@ -3707,9 +3735,9 @@ async def dashboard_arrivals(
             params.append(bid)
 
     if q:
-        where_clauses.append("(b.batch_no ILIKE %s OR c.name ILIKE %s OR c.code ILIKE %s OR c.mobile ILIKE %s)")
+        where_clauses.append("(b.batch_no ILIKE %s OR b.receipt_no ILIKE %s OR c.name ILIKE %s OR c.code ILIKE %s OR c.mobile ILIKE %s OR p.name ILIKE %s)")
         q_like = f"%{q}%"
-        params.extend([q_like, q_like, q_like, q_like])
+        params.extend([q_like, q_like, q_like, q_like, q_like, q_like])
             
     where_str = " AND ".join(where_clauses)
     

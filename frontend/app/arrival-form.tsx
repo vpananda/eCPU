@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Image, ActivityIndicator, Modal, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Image, ActivityIndicator, Modal, TextInput, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -180,7 +180,7 @@ export default function ArrivalForm() {
     }
   }, [selectedCustomer, receivedFromEdited]);
 
-  const submit = async () => {
+  const submit = async (allowDuplicate = false) => {
     if (!customerId) return toast.show("Select customer", "error");
     if (!productId) return toast.show("Select product (type of spice)", "error");
     const w = parseFloat(rawWeight);
@@ -188,6 +188,40 @@ export default function ArrivalForm() {
     if (!branchId) return toast.show("Branch required", "error");
     setSaving(true);
     try {
+      // Pre-check for duplicate if not already confirmed
+      if (!allowDuplicate) {
+        try {
+          const qs = new URLSearchParams({
+            customer_id: customerId,
+            product_id: productId,
+            raw_weight: String(w),
+            branch_id: branchId,
+            arrival_date: arrivalDate,
+          });
+          const check = await api<{ is_duplicate: boolean; existing_batch?: any; message?: string }>(
+            `/arrivals/check-duplicate?${qs.toString()}`
+          );
+          if (check.is_duplicate && check.existing_batch) {
+            setSaving(false);
+            Alert.alert(
+              "⚠️ Duplicate Entry Alert",
+              `An arrival with identical details already exists:\n\n• Batch: ${check.existing_batch.batch_no}\n• Receipt: ${check.existing_batch.receipt_no}\n• Customer: ${check.existing_batch.customer_name}\n• Spice: ${check.existing_batch.product_name}\n• Weight: ${check.existing_batch.raw_weight} KG\n• Date: ${check.existing_batch.arrival_date}\n\nDo you want to record another arrival with identical details?`,
+              [
+                { text: "Cancel (Avoid Duplicate)", style: "cancel" },
+                {
+                  text: "Yes, Save Anyway",
+                  style: "destructive",
+                  onPress: () => submit(true),
+                },
+              ]
+            );
+            return;
+          }
+        } catch {
+          // If check fails for transient reasons, proceed to submit
+        }
+      }
+
       const b = await api<any>("/arrivals", {
         method: "POST",
         body: {
@@ -201,9 +235,11 @@ export default function ArrivalForm() {
           branch_id: branchId,
           remarks,
           photos,
+          allow_duplicate: allowDuplicate,
         },
       });
-            toast.show(`Arrival ${b.batch_no || ""} recorded & WhatsApp sent!`);
+
+      toast.show(`Arrival ${b.batch_no || ""} recorded & WhatsApp sent!`);
       // Reset form fields to record the next arrival immediately
       setCustomerId(null);
       setRawWeight("");
@@ -213,7 +249,22 @@ export default function ArrivalForm() {
       setRemarks("");
       setPhotos([]);
     } catch (e: any) {
-      toast.show(e.message || "Failed", "error");
+      if (e.message && e.message.toLowerCase().includes("duplicate")) {
+        Alert.alert(
+          "⚠️ Duplicate Arrival Detected",
+          `${e.message}\n\nDo you want to save this arrival anyway?`,
+          [
+            { text: "Cancel (Avoid Duplicate)", style: "cancel" },
+            {
+              text: "Yes, Save Anyway",
+              style: "destructive",
+              onPress: () => submit(true),
+            },
+          ]
+        );
+      } else {
+        toast.show(e.message || "Failed to record arrival", "error");
+      }
     } finally { setSaving(false); }
   };
 

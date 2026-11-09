@@ -1001,6 +1001,7 @@ class ArrivalIn(BaseModel):
     photos: List[str] = []
     branch_id: Optional[str] = None
     received_from: Optional[str] = ""  # Who physically brought the produce
+    allow_duplicate: Optional[bool] = False
 
 
 class BatchIn(BaseModel):
@@ -1020,6 +1021,9 @@ class BatchIn(BaseModel):
     remarks: Optional[str] = ""
     photos: List[str] = []  # base64
     branch_id: Optional[str] = None
+    arrival_date: Optional[str] = None
+    received_from: Optional[str] = ""
+    allow_duplicate: Optional[bool] = False
 
 
 class BatchUpdate(BaseModel):
@@ -2484,10 +2488,40 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
     seq = await next_seq("batch")
     rseq = await next_seq("receipt")
     bid = str(uuid.uuid4())
+    est_dry = body.raw_weight
+    bill_amount = round(est_dry * body.rate_per_kg, 2)
     b = body.dict()
     b["branch_id"] = await resolve_branch_id(user, b.get("branch_id"))
     if not can_write_to_branch(user, b["branch_id"]):
         raise HTTPException(status_code=403, detail="Cannot create in this branch")
+
+    # Duplicate entry prevention
+    if not body.allow_duplicate:
+        check_date = (b.get("arrival_date") or now_utc().isoformat())[:10]
+        dup_sql = """
+            SELECT b.id, b.batch_no, b.receipt_no, b.raw_weight, b.arrival_date,
+                   c.name as customer_name, p.name as product_name
+            FROM public.batches b
+            LEFT JOIN public.customers c ON b.customer_id = c.id
+            LEFT JOIN public.products p ON b.product_id = p.id
+            WHERE b.branch_id = %s
+              AND b.customer_id = %s
+              AND b.product_id = %s
+              AND b.raw_weight = %s
+              AND b.arrival_date::date = %s::date
+            LIMIT 1
+        """
+        dup_rows = await db.query(dup_sql, [b["branch_id"], body.customer_id, body.product_id, body.raw_weight, check_date])
+        if dup_rows:
+            dup = dict(dup_rows[0])
+            cust_name = dup.get("customer_name") or "Customer"
+            prod_name = dup.get("product_name") or "Produce"
+            bno = dup.get("batch_no") or ""
+            rno = dup.get("receipt_no") or ""
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate arrival detected! An entry for {cust_name} ({prod_name}, {body.raw_weight} kg) on {check_date} already exists as Batch {bno} (Receipt {rno})."
+            )
     b.update({
         "id": bid,
         "batch_no": f"B{seq:05d}",
@@ -2550,6 +2584,53 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
     return clean(await clean_batch(b))
 
 
+@api.get("/arrivals/check-duplicate")
+async def check_arrival_duplicate(
+    customer_id: str,
+    product_id: str,
+    raw_weight: float,
+    branch_id: Optional[str] = None,
+    arrival_date: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Check if an arrival with same branch, customer, product, weight, and arrival date already exists."""
+    bid = await resolve_branch_id(user, branch_id)
+    check_date = (arrival_date or now_utc().isoformat())[:10]
+    dup_sql = """
+        SELECT b.id, b.batch_no, b.receipt_no, b.raw_weight, b.arrival_date, b.status,
+               c.name as customer_name, p.name as product_name, br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE b.branch_id = %s
+          AND b.customer_id = %s
+          AND b.product_id = %s
+          AND b.raw_weight = %s
+          AND b.arrival_date::date = %s::date
+        LIMIT 1
+    """
+    rows = await db.query(dup_sql, [bid, customer_id, product_id, raw_weight, check_date])
+    if rows:
+        dup = dict(rows[0])
+        return {
+            "is_duplicate": True,
+            "existing_batch": {
+                "id": str(dup["id"]),
+                "batch_no": dup.get("batch_no"),
+                "receipt_no": dup.get("receipt_no"),
+                "raw_weight": float(dup.get("raw_weight") or 0),
+                "customer_name": dup.get("customer_name"),
+                "product_name": dup.get("product_name"),
+                "branch_name": dup.get("branch_name"),
+                "arrival_date": str(dup.get("arrival_date"))[:10],
+                "status": dup.get("status"),
+            },
+            "message": f"Duplicate detected: Batch {dup.get('batch_no')} for {dup.get('customer_name')} ({dup.get('product_name')}, {raw_weight} kg) on {check_date} already exists."
+        }
+    return {"is_duplicate": False}
+
+
 @api.post("/arrivals")
 async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)):
     """Simplified arrival entry — captures only customer/product/weight/bags/photos.
@@ -2557,17 +2638,46 @@ async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)
     if body.raw_weight <= 0:
         raise HTTPException(status_code=400, detail="Weight must be > 0")
 
-    seq = await next_seq("batch")
-    rseq = await next_seq("receipt")
-    bid = str(uuid.uuid4())
     branch_id = await resolve_branch_id(user, body.branch_id)
     if not can_write_to_branch(user, branch_id):
         raise HTTPException(status_code=403, detail="Cannot create in this branch")
 
-    est_dry = body.raw_weight  # unknown until processed
-    bill_amount = round(est_dry * body.rate_per_kg, 2)
     created_at = now_utc().isoformat()
     arrival_date = body.arrival_date or created_at
+
+    # Duplicate entry prevention
+    if not body.allow_duplicate:
+        check_date = arrival_date[:10]
+        dup_sql = """
+            SELECT b.id, b.batch_no, b.receipt_no, b.raw_weight, b.arrival_date,
+                   c.name as customer_name, p.name as product_name
+            FROM public.batches b
+            LEFT JOIN public.customers c ON b.customer_id = c.id
+            LEFT JOIN public.products p ON b.product_id = p.id
+            WHERE b.branch_id = %s
+              AND b.customer_id = %s
+              AND b.product_id = %s
+              AND b.raw_weight = %s
+              AND b.arrival_date::date = %s::date
+            LIMIT 1
+        """
+        dup_rows = await db.query(dup_sql, [branch_id, body.customer_id, body.product_id, body.raw_weight, check_date])
+        if dup_rows:
+            dup = dict(dup_rows[0])
+            cust_name = dup.get("customer_name") or "Customer"
+            prod_name = dup.get("product_name") or "Produce"
+            bno = dup.get("batch_no") or ""
+            rno = dup.get("receipt_no") or ""
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate arrival detected! An entry for {cust_name} ({prod_name}, {body.raw_weight} kg) on {check_date} already exists as Batch {bno} (Receipt {rno})."
+            )
+
+    seq = await next_seq("batch")
+    rseq = await next_seq("receipt")
+    bid = str(uuid.uuid4())
+    est_dry = body.raw_weight
+    bill_amount = round(est_dry * body.rate_per_kg, 2)
 
     b = {
         "id": bid,

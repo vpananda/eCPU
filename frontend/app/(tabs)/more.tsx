@@ -1,10 +1,11 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from "react-native";
+import React, { useRef, useEffect } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Animated, Easing, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
+import { useSync } from "@/src/sync";
 import { ConnectionBadge } from "@/src/components/ConnectionBadge";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
@@ -35,8 +36,31 @@ const AUDIT_ITEMS = [
 
 export default function MoreScreen() {
   const { user, logout } = useAuth();
+  const { isSyncing, triggerSync } = useSync();
   const router = useRouter();
   const toast = useToast();
+
+  const spinVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isSyncing) {
+      Animated.loop(
+        Animated.timing(spinVal, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+        })
+      ).start();
+    } else {
+      spinVal.setValue(0);
+    }
+  }, [isSyncing, spinVal]);
+
+  const spin = spinVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
 
   const onLogout = async () => {
     await logout();
@@ -48,6 +72,18 @@ export default function MoreScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
         <View style={styles.header}>
           <Text style={styles.title}>More</Text>
+          <TouchableOpacity
+            testID="more-sync-button"
+            style={styles.syncBtn}
+            onPress={triggerSync}
+            disabled={isSyncing}
+            activeOpacity={0.7}
+            accessibilityLabel="Sync and Refresh"
+          >
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons name="sync" size={20} color={isSyncing ? colors.primary : colors.text} />
+            </Animated.View>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.profileCard}>
@@ -174,7 +210,23 @@ export default function MoreScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { padding: spacing.xl, paddingBottom: spacing.md },
+  header: {
+    padding: spacing.xl,
+    paddingBottom: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  syncBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   title: { fontSize: 26, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   profileCard: { flexDirection: "row", alignItems: "center", marginHorizontal: spacing.xl, backgroundColor: colors.card, padding: spacing.lg, borderRadius: radius.xl, gap: spacing.md, marginBottom: spacing.lg, ...shadow.card },
   profileAvatar: { width: 56, height: 56, borderRadius: 20, backgroundColor: colors.primary50, alignItems: "center", justifyContent: "center" },

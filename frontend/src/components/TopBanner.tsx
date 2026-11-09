@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Platform, Image } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Pressable, Platform, Image, Animated, Easing } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSegments, useRouter } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
+import { useSync } from "@/src/sync";
 import { colors, radius, spacing, shadow } from "@/src/theme";
 
 function getHeaderTitle(segments: string[]): string {
@@ -58,6 +59,29 @@ export function TopBanner() {
   const segments = useSegments();
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
+
+  const { isSyncing, triggerSync } = useSync();
+  const spinVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isSyncing) {
+      Animated.loop(
+        Animated.timing(spinVal, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+        })
+      ).start();
+    } else {
+      spinVal.setValue(0);
+    }
+  }, [isSyncing, spinVal]);
+
+  const spin = spinVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
 
   // If not logged in, do not render the banner
   if (!user) return null;
@@ -122,6 +146,24 @@ export function TopBanner() {
               </Text>
             </View>
           )}
+
+          {/* Sync / Refresh Button */}
+          <TouchableOpacity
+            onPress={triggerSync}
+            disabled={isSyncing}
+            style={styles.syncBtn}
+            testID="header-sync-button"
+            activeOpacity={0.7}
+            accessibilityLabel="Sync and Refresh"
+          >
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons
+                name="sync"
+                size={18}
+                color={isSyncing ? colors.primary : colors.textMuted}
+              />
+            </Animated.View>
+          </TouchableOpacity>
 
           {/* Home Page Icon */}
           <TouchableOpacity
@@ -337,6 +379,14 @@ const styles = StyleSheet.create({
   modalItemTextSelected: {
     color: colors.primary,
     fontWeight: "700",
+  },
+  syncBtn: {
+    padding: 6,
+    borderRadius: radius.sm,
+    backgroundColor: "#F1F5F9",
+    marginLeft: spacing.xs,
+    justifyContent: "center",
+    alignItems: "center",
   },
   homeBtn: {
     padding: 6,

@@ -8,6 +8,7 @@ import { colors, radius, shadow, spacing } from "@/src/theme";
 import { openWhatsApp, buildArrivalMessage } from "@/src/utils/notifications";
 import Calendar from "@/src/components/Calendar";
 import { storage } from "@/src/utils/storage";
+import { useSyncRefresh } from "@/src/sync";
 
 type Row = {
   batch_id: string;
@@ -178,6 +179,10 @@ export default function ArrivalsScreen() {
   }, [start, end, selectedBranchId, search]);
 
   useFocusEffect(useCallback(() => { load(!!data); }, [load, !!data]));
+
+  useSyncRefresh(useCallback(async () => {
+    await load(false);
+  }, [load]));
 
     const shareArrivalWhatsApp = async (r: Row) => {
     const msg = buildArrivalMessage({

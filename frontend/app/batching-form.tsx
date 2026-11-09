@@ -7,6 +7,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { useSyncRefresh } from "@/src/sync";
 
 type Machine = {
   id: string;
@@ -86,6 +87,11 @@ export default function BatchingForm() {
 
   const inhouseMachines = React.useMemo(() => machines.filter(m => !m.is_outsourced), [machines]);
   const outsourcedMachines = React.useMemo(() => machines.filter(m => !!m.is_outsourced), [machines]);
+  const displayMachines = React.useMemo(() => {
+    if (machineFilter === "In-House") return inhouseMachines;
+    if (machineFilter === "Outsourced") return outsourcedMachines;
+    return machines;
+  }, [machineFilter, machines, inhouseMachines, outsourcedMachines]);
   const selectedMachine = React.useMemo(() => machines.find(m => m.id === selectedMachineId), [machines, selectedMachineId]);
 
   // Date and Time picker states
@@ -137,6 +143,10 @@ export default function BatchingForm() {
       loadData();
     }, [loadData])
   );
+
+  useSyncRefresh(useCallback(async () => {
+    await loadData();
+  }, [loadData]));
 
   const toggleBatchSelect = (b: Batch) => {
     setSelectedBatchIds(prev => {
@@ -328,57 +338,73 @@ export default function BatchingForm() {
       <TouchableOpacity
         key={m.id}
         style={[
-          styles.machineCard,
-          isOut && styles.machineCardOutsourced,
-          isSelected && (isOut ? styles.machineCardOutsourcedSelected : styles.machineCardSelected),
+          styles.compactMachineCard,
+          isOut && styles.compactMachineCardOutsourced,
+          isSelected && (isOut ? styles.compactMachineCardOutsourcedSelected : styles.compactMachineCardSelected),
         ]}
         onPress={() => setSelectedMachineId(m.id)}
-        activeOpacity={0.9}
+        activeOpacity={0.85}
       >
-        <View
-          style={[
-            styles.machineIconBox,
-            { backgroundColor: isSelected ? (isOut ? "#FFE082" : colors.primary50) : (isOut ? "#FFF8E1" : "#f5f5f5") },
-          ]}
-        >
-          <MaterialCommunityIcons
-            name={isOut ? "truck-delivery-outline" : "generator-portable"}
-            size={22}
-            color={isSelected ? (isOut ? "#E65100" : colors.primary) : (isOut ? "#E65100" : colors.textMuted)}
-          />
-        </View>
-        <View style={{ flex: 1, marginLeft: spacing.sm }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Text style={[styles.machineName, isSelected && (isOut ? { color: "#E65100" } : styles.machineNameSelected)]}>
-              {m.name}
+        <View style={styles.compactCardTop}>
+          <View
+            style={[
+              styles.compactIconBox,
+              isSelected
+                ? (isOut ? { backgroundColor: "#FFE082" } : { backgroundColor: colors.primary50 })
+                : (isOut ? { backgroundColor: "#FFF8E1" } : { backgroundColor: "#F1F5F9" }),
+            ]}
+          >
+            <MaterialCommunityIcons
+              name={isOut ? "truck-delivery-outline" : "generator-portable"}
+              size={15}
+              color={isSelected ? (isOut ? "#E65100" : colors.primary) : (isOut ? "#E65100" : colors.textMuted)}
+            />
+          </View>
+          <View
+            style={[
+              styles.compactCapBadge,
+              isSelected && (isOut ? styles.compactCapBadgeOutSelected : styles.compactCapBadgeSelected),
+            ]}
+          >
+            <Text
+              style={[
+                styles.compactCapText,
+                isSelected && (isOut ? { color: "#E65100" } : { color: colors.primary }),
+              ]}
+            >
+              {m.capacity} KG
             </Text>
-            <View style={[styles.miniBadge, isOut ? styles.miniBadgeOutsourced : styles.miniBadgeInhouse]}>
-              <Text style={[styles.miniBadgeText, isOut ? styles.miniBadgeTextOutsourced : styles.miniBadgeTextInhouse]}>
-                {isOut ? "Vendor" : "In-House"}
-              </Text>
+          </View>
+        </View>
+
+        <View style={styles.compactCardBottom}>
+          <Text
+            style={[
+              styles.compactMachineName,
+              isSelected && (isOut ? { color: "#E65100" } : styles.compactMachineNameSelected),
+            ]}
+            numberOfLines={1}
+          >
+            {m.name}
+          </Text>
+          {isSelected ? (
+            <MaterialCommunityIcons
+              name="check-circle"
+              size={17}
+              color={isOut ? "#E65100" : colors.primary}
+            />
+          ) : isOut ? (
+            <View style={styles.miniVendorPill}>
+              <Text style={styles.miniVendorPillText}>Vendor</Text>
             </View>
-          </View>
-
-          {isOut && m.vendor_name ? (
-            <Text style={styles.vendorNameSubtext} numberOfLines={1}>
-              <MaterialCommunityIcons name="office-building" size={11} color="#E65100" /> {m.vendor_name}
-            </Text>
           ) : null}
-
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
-            <Text style={styles.machineCap}>Capacity: {m.capacity} KG</Text>
-            {isOut && m.vendor_rate_per_kg ? (
-              <Text style={styles.vendorRateSubtext}>• Rate: ₹{m.vendor_rate_per_kg}/KG</Text>
-            ) : null}
-          </View>
         </View>
-        {isSelected && (
-          <MaterialCommunityIcons
-            name="check-circle"
-            size={22}
-            color={isOut ? "#E65100" : colors.primary}
-          />
-        )}
+
+        {isOut && m.vendor_name ? (
+          <Text style={styles.compactVendorSub} numberOfLines={1}>
+            {m.vendor_name}
+          </Text>
+        ) : null}
       </TouchableOpacity>
     );
   };
@@ -575,19 +601,30 @@ export default function BatchingForm() {
             )}
 
             {/* 1. MACHINE SELECTOR */}
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs }}>
-              <Text style={styles.sectionTitle}>1. Select Dryer Machine</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={styles.sectionTitle}>1. Select Dryer Machine</Text>
+                <View style={styles.availCountBadge}>
+                  <Text style={styles.availCountText}>{machines.length} Available</Text>
+                </View>
+              </View>
               {selectedMachine && (
                 <View style={[styles.selectedPill, selectedMachine.is_outsourced ? styles.selectedPillOutsourced : styles.selectedPillInhouse]}>
+                  <MaterialCommunityIcons
+                    name="check-circle"
+                    size={12}
+                    color={selectedMachine.is_outsourced ? "#E65100" : colors.primary}
+                    style={{ marginRight: 3 }}
+                  />
                   <Text style={[styles.selectedPillText, selectedMachine.is_outsourced ? { color: "#E65100" } : { color: colors.primary }]}>
-                    {selectedMachine.is_outsourced ? "Vendor Dryer" : "In-House Dryer"}
+                    {selectedMachine.name} • {selectedMachine.capacity} KG
                   </Text>
                 </View>
               )}
             </View>
 
-            {/* Quick Segment Filter: All vs In-House vs Vendor */}
-            {machines.length > 0 && (
+            {/* Quick Segment Filter: Only show if outsourced machines exist */}
+            {outsourcedMachines.length > 0 && (
               <View style={styles.segmentRow}>
                 <TouchableOpacity
                   style={[styles.segmentTab, machineFilter === "All" && styles.segmentTabActive]}
@@ -626,44 +663,8 @@ export default function BatchingForm() {
                 <Text style={styles.warnText}>No available dryers found at this branch. Complete running batches to free up dryers.</Text>
               </View>
             ) : (
-              <View style={{ gap: spacing.md }}>
-                {/* In-House Group */}
-                {(machineFilter === "All" || machineFilter === "In-House") && inhouseMachines.length > 0 && (
-                  <View style={styles.subGroupContainer}>
-                    <View style={styles.subGroupHeader}>
-                      <MaterialCommunityIcons name="factory" size={15} color={colors.primary} />
-                      <Text style={styles.subGroupTitle}>IN-HOUSE DRYERS</Text>
-                      <View style={styles.subGroupPill}>
-                        <Text style={styles.subGroupPillText}>{inhouseMachines.length} Available</Text>
-                      </View>
-                    </View>
-                    <View style={styles.machineList}>
-                      {inhouseMachines.map(renderMachineItem)}
-                    </View>
-                  </View>
-                )}
-
-                {/* Outsourced Group */}
-                {(machineFilter === "All" || machineFilter === "Outsourced") && (
-                  <View style={styles.subGroupContainer}>
-                    <View style={[styles.subGroupHeader, styles.subGroupHeaderOutsourced]}>
-                      <MaterialCommunityIcons name="truck-delivery-outline" size={15} color="#E65100" />
-                      <Text style={[styles.subGroupTitle, { color: "#E65100" }]}>VENDOR / OUTSOURCED DRYERS</Text>
-                      <View style={[styles.subGroupPill, { backgroundColor: "#FFE082" }]}>
-                        <Text style={[styles.subGroupPillText, { color: "#E65100" }]}>{outsourcedMachines.length} Available</Text>
-                      </View>
-                    </View>
-                    {outsourcedMachines.length > 0 ? (
-                      <View style={styles.machineList}>
-                        {outsourcedMachines.map(renderMachineItem)}
-                      </View>
-                    ) : (
-                      <View style={styles.vendorEmptyBox}>
-                        <Text style={styles.vendorEmptyText}>No available outsourced vendor dryers at this branch.</Text>
-                      </View>
-                    )}
-                  </View>
-                )}
+              <View style={styles.machineGrid}>
+                {displayMachines.map(renderMachineItem)}
               </View>
             )}
 
@@ -1362,6 +1363,107 @@ const styles = StyleSheet.create({
   warnText: { flex: 1, fontSize: 12, color: colors.danger, fontWeight: "600", lineHeight: 18 },
   emptyState: { paddingVertical: 30, alignItems: "center", justifyContent: "center", backgroundColor: "#fff", borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   emptyText: { marginTop: spacing.sm, color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  machineGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 8,
+  },
+  compactMachineCard: {
+    width: "48.5%",
+    backgroundColor: "#ffffff",
+    paddingVertical: 10,
+    paddingHorizontal: 11,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    justifyContent: "center",
+  },
+  compactMachineCardSelected: {
+    borderColor: colors.primary,
+    backgroundColor: "#F1F8E9",
+  },
+  compactMachineCardOutsourced: {
+    borderColor: "#FFE082",
+  },
+  compactMachineCardOutsourcedSelected: {
+    borderColor: "#E65100",
+    backgroundColor: "#FFF8E1",
+  },
+  compactCardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  compactIconBox: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactCapBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    backgroundColor: "#F1F5F9",
+  },
+  compactCapBadgeSelected: {
+    backgroundColor: colors.primary50,
+  },
+  compactCapBadgeOutSelected: {
+    backgroundColor: "#FFE082",
+  },
+  compactCapText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+  },
+  compactCardBottom: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  compactMachineName: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.text,
+    flex: 1,
+    marginRight: 4,
+  },
+  compactMachineNameSelected: {
+    color: colors.primary,
+    fontWeight: "800",
+  },
+  miniVendorPill: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: radius.pill,
+    backgroundColor: "#FFF3E0",
+  },
+  miniVendorPillText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#E65100",
+  },
+  compactVendorSub: {
+    fontSize: 10,
+    color: "#E65100",
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  availCountBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    backgroundColor: "#E8F5E9",
+  },
+  availCountText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.primary,
+  },
   machineList: { gap: spacing.sm },
   machineCard: {
     flexDirection: "row",

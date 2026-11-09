@@ -8,6 +8,7 @@ import { useAuth } from "@/src/auth";
 import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
+import { useSyncRefresh } from "@/src/sync";
 
 const STATUSES = ["All", "Received", "Loaded", "Drying", "Completed", "Delivered"];
 
@@ -108,6 +109,10 @@ export default function BatchesScreen() {
       load();
     }, [load])
   );
+
+  useSyncRefresh(useCallback(async () => {
+    await load();
+  }, [load]));
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>

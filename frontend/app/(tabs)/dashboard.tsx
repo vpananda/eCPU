@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Image, Modal, Pressable, Platform, Dimensions, TextInput } from "react-native";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl, Image, Modal, Pressable, Platform, Dimensions, TextInput, Animated, Easing } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -7,6 +7,7 @@ import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { ConnectionBadge } from "@/src/components/ConnectionBadge";
 import { useConnection } from "@/src/connection";
+import { useSync, useSyncRefresh } from "@/src/sync";
 import Calendar from "@/src/components/Calendar";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
@@ -134,10 +135,33 @@ const DATE_PRESETS = [
 export default function Dashboard() {
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const { checkConnection } = useConnection();
+  const { isSyncing, triggerSync } = useSync();
   const router = useRouter();
   const [data, setData] = useState<Dash | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const spinVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isSyncing) {
+      Animated.loop(
+        Animated.timing(spinVal, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+        })
+      ).start();
+    } else {
+      spinVal.setValue(0);
+    }
+  }, [isSyncing, spinVal]);
+
+  const spin = spinVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [start, setStart] = useState(todayISO());
@@ -195,6 +219,12 @@ export default function Dashboard() {
     useCallback(() => {
       load(start, end, selectedBranchId, !!data);
     }, [load, start, end, selectedBranchId, !!data])
+  );
+
+  useSyncRefresh(
+    useCallback(async () => {
+      await load(start, end, selectedBranchId, false);
+    }, [load, start, end, selectedBranchId])
   );
 
   const onRefresh = () => {
@@ -304,7 +334,23 @@ export default function Dashboard() {
         </View>
 
         <View style={styles.headerRight}>
-          <ConnectionBadge style={{ marginRight: 8 }} />
+          <ConnectionBadge style={{ marginRight: 4 }} />
+
+          <TouchableOpacity
+            style={styles.syncBtn}
+            onPress={triggerSync}
+            disabled={isSyncing}
+            activeOpacity={0.7}
+            accessibilityLabel="Sync and Refresh"
+          >
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons
+                name="sync"
+                size={20}
+                color={isSyncing ? colors.primary : colors.text}
+              />
+            </Animated.View>
+          </TouchableOpacity>
 
           <TouchableOpacity style={styles.notificationBtn} activeOpacity={0.7}>
             <MaterialCommunityIcons name="bell-outline" size={24} color={colors.text} />
@@ -1111,7 +1157,17 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: spacing.sm,
+  },
+  syncBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.bg,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   notificationBtn: {
     width: 40,

@@ -1,10 +1,11 @@
-import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal } from "react-native";
+import React, { useCallback, useState, useRef, useEffect } from "react";
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal, Animated, Easing, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import { useSync, useSyncRefresh } from "@/src/sync";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
@@ -14,6 +15,7 @@ const STATUSES = ["All", "Active", "Inactive"];
 
 export default function CustomersScreen() {
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
+  const { isSyncing, triggerSync } = useSync();
   const router = useRouter();
   const [list, setList] = useState<Customer[]>([]);
   const [q, setQ] = useState("");
@@ -22,6 +24,28 @@ export default function CustomersScreen() {
   const [branchModalOpen, setBranchModalOpen] = useState(false);
   const [paymentFilter, setPaymentFilter] = useState<"All" | "FullyPaid" | "PartialPaid" | "NoPayment">("All");
   const [sortBy, setSortBy] = useState<"name" | "arrivals" | "billed" | "pending">("name");
+
+  const spinVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isSyncing) {
+      Animated.loop(
+        Animated.timing(spinVal, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+        })
+      ).start();
+    } else {
+      spinVal.setValue(0);
+    }
+  }, [isSyncing, spinVal]);
+
+  const spin = spinVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
 
   const load = useCallback(async (search = "", currentFilter = filter) => {
     setLoading(true);
@@ -39,6 +63,10 @@ export default function CustomersScreen() {
 
   useFocusEffect(useCallback(() => {
     load(q, filter);
+  }, [load, q, filter]));
+
+  useSyncRefresh(useCallback(async () => {
+    await load(q, filter);
   }, [load, q, filter]));
 
   const processedList = React.useMemo(() => {
@@ -113,10 +141,14 @@ export default function CustomersScreen() {
           <TouchableOpacity
             testID="refresh-customer-button"
             style={styles.refreshBtn}
-            onPress={() => load(q, filter)}
+            onPress={triggerSync}
+            disabled={isSyncing}
             activeOpacity={0.7}
+            accessibilityLabel="Sync and Refresh"
           >
-            <MaterialCommunityIcons name="refresh" size={20} color={colors.primary} />
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons name="sync" size={20} color={isSyncing ? colors.primary : colors.text} />
+            </Animated.View>
           </TouchableOpacity>
           <TouchableOpacity
             testID="add-customer-button"

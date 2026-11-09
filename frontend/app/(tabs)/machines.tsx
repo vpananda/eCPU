@@ -1,10 +1,11 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Modal } from "react-native";
+import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, Modal, Animated, Easing, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import { useSync, useSyncRefresh } from "@/src/sync";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
@@ -43,6 +44,29 @@ export default function MachinesScreen() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [sourceTab, setSourceTab] = useState<SourceTab>("All");
 
+  const { isSyncing, triggerSync } = useSync();
+  const spinVal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isSyncing) {
+      Animated.loop(
+        Animated.timing(spinVal, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.linear,
+          useNativeDriver: Platform.OS !== "web",
+        })
+      ).start();
+    } else {
+      spinVal.setValue(0);
+    }
+  }, [isSyncing, spinVal]);
+
+  const spin = spinVal.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+
   const load = useCallback(async (bid = selectedBranchId) => {
     try {
       const qs = new URLSearchParams();
@@ -60,6 +84,10 @@ export default function MachinesScreen() {
   useFocusEffect(useCallback(() => {
     setLoading(true);
     load(selectedBranchId);
+  }, [load, selectedBranchId]));
+
+  useSyncRefresh(useCallback(async () => {
+    await load(selectedBranchId);
   }, [load, selectedBranchId]));
 
   const handleSelectBranch = (bid: string) => {
@@ -217,15 +245,29 @@ export default function MachinesScreen() {
             )}
           </View>
         </View>
-        {user?.role === "Admin" && (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <TouchableOpacity
-            testID="add-machine-button"
-            style={styles.addBtn}
-            onPress={() => router.push("/machine-form")}
+            testID="refresh-machine-button"
+            style={styles.refreshBtn}
+            onPress={triggerSync}
+            disabled={isSyncing}
+            activeOpacity={0.7}
+            accessibilityLabel="Sync and Refresh"
           >
-            <MaterialCommunityIcons name="plus" size={22} color="#fff" />
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <MaterialCommunityIcons name="sync" size={20} color={isSyncing ? colors.primary : "#475569"} />
+            </Animated.View>
           </TouchableOpacity>
-        )}
+          {user?.role === "Admin" && (
+            <TouchableOpacity
+              testID="add-machine-button"
+              style={styles.addBtn}
+              onPress={() => router.push("/machine-form")}
+            >
+              <MaterialCommunityIcons name="plus" size={22} color="#fff" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Top Source Segmentation: All vs In-House vs Vendor */}
@@ -435,6 +477,16 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", padding: spacing.xl, paddingBottom: spacing.md },
   title: { fontSize: 26, fontWeight: "800", color: colors.text, letterSpacing: -0.5 },
   subtitle: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  refreshBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   addBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", ...shadow.fab },
   filterContainer: { marginBottom: spacing.md },
   chipsScroll: { paddingHorizontal: spacing.xl, gap: spacing.sm, paddingBottom: 2 },

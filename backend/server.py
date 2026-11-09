@@ -967,8 +967,15 @@ class MachineUpdate(BaseModel):
     vendor_rate_per_kg: Optional[float] = None
 
 
+class BatchLoadItem(BaseModel):
+    batch_id: str
+    load_weight: Optional[float] = None
+    load_bags: Optional[int] = None
+
+
 class MachineLoadIn(BaseModel):
-    batch_ids: List[str]
+    batch_ids: Optional[List[str]] = None
+    loads: Optional[List[BatchLoadItem]] = None
     start_time: Optional[str] = None
 
 
@@ -1686,43 +1693,159 @@ async def load_machine(mid: str, body: MachineLoadIn, user: dict = Depends(get_c
     if not m:
         raise HTTPException(status_code=404, detail="Machine not found")
     
-    if not body.batch_ids:
-        raise HTTPException(status_code=400, detail="At least one batch ID is required")
+    # Normalize inputs: support both body.loads (with partial load weights) and legacy body.batch_ids
+    load_items: List[BatchLoadItem] = []
+    if body.loads:
+        load_items = body.loads
+    elif body.batch_ids:
+        load_items = [BatchLoadItem(batch_id=bid) for bid in body.batch_ids]
 
-    # Fetch batches and validate
-    batches = []
-    for bid in body.batch_ids:
-        b = await db.batches.find_one({"id": bid}, {"_id": 0})
-        if not b:
-            raise HTTPException(status_code=404, detail=f"Batch {bid} not found")
-        if b.get("branch_id") != m.get("branch_id"):
-            raise HTTPException(status_code=400, detail=f"Batch {bid} belongs to a different branch")
-        if b.get("status") != "Received":
-            raise HTTPException(status_code=400, detail=f"Batch {bid} status must be Received")
-        batches.append(b)
+    if not load_items:
+        raise HTTPException(status_code=400, detail="At least one batch must be selected to load")
 
-    # Load machine
     t_start = body.start_time or now_utc().isoformat()
+    loaded_batch_ids = []
+
+    for item in load_items:
+        b = await db.batches.find_one({"id": item.batch_id}, {"_id": 0})
+        if not b:
+            raise HTTPException(status_code=404, detail=f"Batch {item.batch_id} not found")
+        if b.get("branch_id") != m.get("branch_id"):
+            raise HTTPException(status_code=400, detail=f"Batch {item.batch_id} belongs to a different branch")
+        if b.get("status") != "Received":
+            raise HTTPException(status_code=400, detail=f"Batch {item.batch_id} status must be Received")
+
+        cur_weight = float(b.get("raw_weight") or 0)
+        load_w = float(item.load_weight) if item.load_weight is not None else cur_weight
+
+        if load_w <= 0:
+            raise HTTPException(status_code=400, detail=f"Load weight for {b.get('batch_no')} must be greater than 0")
+        if load_w > cur_weight + 0.001:
+            raise HTTPException(status_code=400, detail=f"Load weight ({load_w} kg) cannot exceed arrival weight ({cur_weight} kg) for {b.get('batch_no')}")
+
+        is_partial = (cur_weight - load_w) >= 0.1  # at least 100g remaining to split
+
+        if not is_partial:
+            # Full load (no split needed)
+            await db.batches.update_one({"id": b["id"]}, {"$set": {
+                "status": "Drying",
+                "machine_id": mid,
+                "remarks": f"Loaded in {m['name']} at {t_start}",
+                "updated_at": now_utc().isoformat(),
+                "updated_by": user["id"]
+            }})
+            loaded_batch_ids.append(b["id"])
+            await audit("load_machine", "batch", b["id"], user, {"status": "Received"}, {"status": "Drying", "machine_id": mid})
+        else:
+            # Partial load / split on the fly!
+            rem_w = round(cur_weight - load_w, 2)
+            cur_bags = int(b.get("bags") or 1)
+
+            if item.load_bags is not None and item.load_bags > 0:
+                load_b = min(cur_bags, item.load_bags)
+            else:
+                load_b = max(1, round((load_w / cur_weight) * cur_bags))
+            rem_b = max(1, cur_bags - load_b)
+
+            base_batch_no = b["batch_no"].split("-")[0]
+            base_receipt_no = (b.get("receipt_no") or "").split("-")[0]
+
+            # Find existing sub-batches to assign sequential numbers
+            existing_sub_batches = await db.query(
+                "SELECT batch_no FROM public.batches WHERE batch_no LIKE %s",
+                [f"{base_batch_no}%"]
+            )
+            existing_suffixes = []
+            for row in existing_sub_batches:
+                bno = str(row.get("batch_no") or "")
+                if "-" in bno:
+                    try:
+                        existing_suffixes.append(int(bno.split("-")[-1]))
+                    except ValueError:
+                        pass
+            max_suffix = max(existing_suffixes) if existing_suffixes else 0
+
+            loaded_batch_no = b["batch_no"] if "-" in b["batch_no"] else f"{base_batch_no}-1"
+            loaded_receipt_no = b.get("receipt_no") if "-" in (b.get("receipt_no") or "") else f"{base_receipt_no}-1"
+
+            rem_suffix = max(max_suffix + 1, 2)
+            rem_batch_no = f"{base_batch_no}-{rem_suffix}"
+            rem_receipt_no = f"{base_receipt_no}-{rem_suffix}"
+
+            # 1. Update the portion being loaded in this machine
+            rate = float(b.get("rate_per_kg") or 12)
+            await db.batches.update_one({"id": b["id"]}, {"$set": {
+                "batch_no": loaded_batch_no,
+                "receipt_no": loaded_receipt_no,
+                "raw_weight": load_w,
+                "bags": load_b,
+                "bill_amount": round(load_w * rate, 2),
+                "balance_amount": round(load_w * rate, 2) - float(b.get("total_paid") or 0),
+                "status": "Drying",
+                "machine_id": mid,
+                "is_split": True,
+                "parent_batch_id": b.get("parent_batch_id") or b["id"],
+                "remarks": f"Split lot loaded in {m['name']} at {t_start}",
+                "updated_at": now_utc().isoformat(),
+                "updated_by": user["id"]
+            }})
+            loaded_batch_ids.append(b["id"])
+
+            # 2. Insert remainder portion as a new Received arrival
+            rem_id = str(uuid.uuid4())
+            rem_bill = round(rem_w * rate, 2)
+            rem_doc = {
+                "id": rem_id,
+                "batch_no": rem_batch_no,
+                "receipt_no": rem_receipt_no,
+                "qr_code": rem_batch_no,
+                "customer_id": b["customer_id"],
+                "product_id": b["product_id"],
+                "branch_id": b.get("branch_id"),
+                "raw_weight": rem_w,
+                "bags": rem_b,
+                "bag_weight": b.get("bag_weight") or 0,
+                "estimated_dry_weight": rem_w,
+                "moisture": b.get("moisture") or 0,
+                "rate_per_kg": rate,
+                "loading_charges": 0,
+                "discount": 0,
+                "advance_paid": 0,
+                "total_paid": 0,
+                "bill_amount": rem_bill,
+                "balance_amount": rem_bill,
+                "status": "Received",
+                "machine_id": None,
+                "is_split": True,
+                "parent_batch_id": b.get("parent_batch_id") or b["id"],
+                "arrival_date": b.get("arrival_date") or now_utc().isoformat(),
+                "received_from": b.get("received_from"),
+                "remarks": f"Split remaining from {b['batch_no']} ({rem_w} kg pending)",
+                "created_at": now_utc().isoformat(),
+                "created_by": user["id"],
+                "updated_at": now_utc().isoformat(),
+                "updated_by": user["id"],
+            }
+            await db.batches.insert_one(rem_doc)
+            await audit("split_batch", "batch", rem_id, user, None, {
+                "parent_batch_id": b["id"],
+                "original_weight": cur_weight,
+                "loaded_weight": load_w,
+                "remainder_weight": rem_w,
+                "loaded_batch_no": loaded_batch_no,
+                "remainder_batch_no": rem_batch_no,
+            })
+
+    # Update machine status to Running
     await db.machines.update_one({"id": mid}, {"$set": {
         "status": "Running",
-        "current_batch_id": body.batch_ids[0],
+        "current_batch_id": loaded_batch_ids[0] if loaded_batch_ids else None,
         "updated_at": now_utc().isoformat(),
         "updated_by": user["id"]
     }})
 
-    # Update batches to Drying
-    for b in batches:
-        await db.batches.update_one({"id": b["id"]}, {"$set": {
-            "status": "Drying",
-            "machine_id": mid,
-            "remarks": f"Loaded in {m['name']} at {t_start}",
-            "updated_at": now_utc().isoformat(),
-            "updated_by": user["id"]
-        }})
-        await audit("load_machine", "batch", b["id"], user, {"status": "Received"}, {"status": "Drying", "machine_id": mid})
-
-    await audit("load", "machine", mid, user, None, {"batch_ids": body.batch_ids, "start_time": t_start})
-    return {"ok": True}
+    await audit("load", "machine", mid, user, None, {"batch_ids": loaded_batch_ids, "start_time": t_start})
+    return {"ok": True, "loaded_batch_ids": loaded_batch_ids}
 
 
 @api.post("/machines/{mid}/stop")

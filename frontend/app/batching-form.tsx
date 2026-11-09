@@ -72,6 +72,8 @@ export default function BatchingForm() {
 
   const [selectedMachineId, setSelectedMachineId] = useState("");
   const [selectedBatchIds, setSelectedBatchIds] = useState<Record<string, boolean>>({});
+  const [loadWeights, setLoadWeights] = useState<Record<string, string>>({});
+  const [loadBags, setLoadBags] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [machineFilter, setMachineFilter] = useState<"All" | "In-House" | "Outsourced">("All");
 
@@ -136,11 +138,40 @@ export default function BatchingForm() {
     }, [loadData])
   );
 
-  const toggleBatchSelect = (id: string) => {
-    setSelectedBatchIds(prev => ({
-      ...prev,
-      [id]: !prev[id]
-    }));
+  const toggleBatchSelect = (b: Batch) => {
+    setSelectedBatchIds(prev => {
+      const isSelected = !prev[b.id];
+      if (isSelected) {
+        setLoadWeights(lw => ({ ...lw, [b.id]: lw[b.id] || String(b.raw_weight) }));
+        setLoadBags(lb => ({ ...lb, [b.id]: lb[b.id] || String(b.bags || 1) }));
+      }
+      return { ...prev, [b.id]: isSelected };
+    });
+  };
+
+  const handleWeightChange = (bid: string, val: string, rawWeight: number, totalBags: number) => {
+    setLoadWeights(prev => ({ ...prev, [bid]: val }));
+    const w = parseFloat(val);
+    if (!isNaN(w) && w > 0 && rawWeight > 0) {
+      const autoBags = Math.max(1, Math.round((w / rawWeight) * (totalBags || 1)));
+      setLoadBags(prev => ({ ...prev, [bid]: String(autoBags) }));
+    }
+  };
+
+  const handleBagsChange = (bid: string, val: string) => {
+    setLoadBags(prev => ({ ...prev, [bid]: val }));
+  };
+
+  const handleQuickFill = (bid: string, capacity: number, rawWeight: number, totalBags: number) => {
+    const fillWeight = Math.min(capacity, rawWeight);
+    setLoadWeights(prev => ({ ...prev, [bid]: String(fillWeight) }));
+    const autoBags = Math.max(1, Math.round((fillWeight / rawWeight) * (totalBags || 1)));
+    setLoadBags(prev => ({ ...prev, [bid]: String(autoBags) }));
+  };
+
+  const handleResetFull = (bid: string, rawWeight: number, totalBags: number) => {
+    setLoadWeights(prev => ({ ...prev, [bid]: String(rawWeight) }));
+    setLoadBags(prev => ({ ...prev, [bid]: String(totalBags || 1) }));
   };
 
   const openDateTimePicker = () => {
@@ -189,9 +220,37 @@ export default function BatchingForm() {
       return;
     }
 
-    const ids = Object.keys(selectedBatchIds).filter(id => selectedBatchIds[id]);
-    if (ids.length === 0) {
+    const selectedIds = Object.keys(selectedBatchIds).filter(id => selectedBatchIds[id]);
+    if (selectedIds.length === 0) {
       Alert.alert("Selection Required", "Please select at least one customer arrival stock to process.");
+      return;
+    }
+
+    const loads = selectedIds.map(id => {
+      const b = batches.find(x => x.id === id);
+      const rawW = b?.raw_weight || 0;
+      const w = parseFloat(loadWeights[id] ?? String(rawW));
+      const bagsNum = parseInt(loadBags[id] ?? String(b?.bags || 1), 10);
+      return {
+        batch_id: id,
+        load_weight: isNaN(w) || w <= 0 ? rawW : w,
+        load_bags: isNaN(bagsNum) || bagsNum <= 0 ? (b?.bags || 1) : bagsNum,
+      };
+    });
+
+    for (const item of loads) {
+      const b = batches.find(x => x.id === item.batch_id);
+      if (b && item.load_weight > b.raw_weight + 0.001) {
+        Alert.alert("Invalid Weight", `Load weight (${item.load_weight} kg) cannot exceed arrival weight (${b.raw_weight} kg) for ${b.batch_no}`);
+        return;
+      }
+    }
+
+    if (selectedMachine && totalLoadWeight > selectedMachine.capacity) {
+      Alert.alert(
+        "Capacity Exceeded",
+        `Total load weight (${totalLoadWeight.toFixed(2)} kg) exceeds ${selectedMachine.name} capacity of ${selectedMachine.capacity} kg. Please adjust load weights.`
+      );
       return;
     }
 
@@ -199,10 +258,12 @@ export default function BatchingForm() {
     try {
       await api(`/machines/${selectedMachineId}/load`, {
         method: "POST",
-        body: { batch_ids: ids, start_time: processTime.toISOString() }
+        body: { loads, start_time: processTime.toISOString() }
       });
-      Alert.alert("Success", "Dryer loaded and process started successfully.");
+      Alert.alert("Dryer Loaded", "Process started successfully! Any split sub-batches remain in pending arrivals ready for the next machine.");
       setSelectedBatchIds({});
+      setLoadWeights({});
+      setLoadBags({});
       setSelectedMachineId("");
       await loadData();
       setActiveTab("running");
@@ -250,11 +311,15 @@ export default function BatchingForm() {
     }
   };
 
-  const totalRawWeight = batches
+  const totalLoadWeight = batches
     .filter(b => selectedBatchIds[b.id])
-    .reduce((sum, b) => sum + (b.raw_weight || 0), 0);
+    .reduce((sum, b) => {
+      const w = parseFloat(loadWeights[b.id] ?? String(b.raw_weight));
+      return sum + (isNaN(w) || w <= 0 ? 0 : w);
+    }, 0);
 
   const selectedCount = Object.keys(selectedBatchIds).filter(id => selectedBatchIds[id]).length;
+  const isOverCapacity = !!selectedMachine && totalLoadWeight > selectedMachine.capacity;
 
   const renderMachineItem = (m: Machine) => {
     const isSelected = selectedMachineId === m.id;
@@ -626,28 +691,110 @@ export default function BatchingForm() {
             ) : (
               batches.map(b => {
                 const isSelected = !!selectedBatchIds[b.id];
+                const rawW = b.raw_weight || 0;
+                const totalBags = b.bags || 1;
+                const curLoadWStr = loadWeights[b.id] ?? String(rawW);
+                const curLoadW = parseFloat(curLoadWStr);
+                const curLoadBagsStr = loadBags[b.id] ?? String(totalBags);
+                const curLoadBags = parseInt(curLoadBagsStr, 10);
+
+                const validW = !isNaN(curLoadW) && curLoadW > 0 ? curLoadW : rawW;
+                const isPartial = isSelected && (rawW - validW) >= 0.1;
+                const remainingW = Math.max(0, rawW - validW);
+                const remainingBags = Math.max(1, totalBags - (isNaN(curLoadBags) ? 1 : curLoadBags));
+
                 return (
-                  <TouchableOpacity
+                  <View
                     key={b.id}
                     style={[styles.arrivalCard, isSelected && styles.arrivalCardSelected]}
-                    onPress={() => toggleBatchSelect(b.id)}
-                    activeOpacity={0.9}
                   >
-                    <View style={styles.arrivalCardHeader}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.customerName}>{b.customer?.name || "Unknown Customer"}</Text>
-                        <Text style={styles.batchNo}>{b.batch_no} • {b.product?.name || "N/A"}</Text>
+                    <TouchableOpacity
+                      onPress={() => toggleBatchSelect(b)}
+                      activeOpacity={0.88}
+                    >
+                      <View style={styles.arrivalCardHeader}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.customerName}>{b.customer?.name || "Unknown Customer"}</Text>
+                          <Text style={styles.batchNo}>
+                            {b.batch_no} • {b.product?.name || "N/A"}
+                            {b.receipt_no ? ` • Receipt: ${b.receipt_no}` : ""}
+                          </Text>
+                        </View>
+                        <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                          {isSelected && <MaterialCommunityIcons name="check" size={16} color="#fff" />}
+                        </View>
                       </View>
-                      <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                        {isSelected && <MaterialCommunityIcons name="check" size={16} color="#fff" />}
+                      <View style={styles.arrivalDivider} />
+                      <View style={styles.arrivalMeta}>
+                        <Text style={styles.metaLabel}>Arrival Lot: <Text style={styles.metaVal}>{rawW} KG</Text></Text>
+                        <Text style={styles.metaLabel}>Total Bags: <Text style={styles.metaVal}>{totalBags} Bags</Text></Text>
                       </View>
-                    </View>
-                    <View style={styles.arrivalDivider} />
-                    <View style={styles.arrivalMeta}>
-                      <Text style={styles.metaLabel}>Raw: <Text style={styles.metaVal}>{b.raw_weight} KG</Text></Text>
-                      <Text style={styles.metaLabel}>Bags: <Text style={styles.metaVal}>{b.bags} Bags</Text></Text>
-                    </View>
-                  </TouchableOpacity>
+                    </TouchableOpacity>
+
+                    {/* On-The-Fly Split Configuration when selected */}
+                    {isSelected && (
+                      <View style={styles.splitConfigContainer}>
+                        <View style={styles.splitConfigHeader}>
+                          <Text style={styles.splitConfigTitle}>ALLOCATE WEIGHT FOR THIS DRYER</Text>
+                          <View style={{ flexDirection: "row", gap: 6 }}>
+                            {selectedMachine && selectedMachine.capacity < rawW && (
+                              <TouchableOpacity
+                                style={styles.splitQuickPill}
+                                onPress={() => handleQuickFill(b.id, selectedMachine.capacity, rawW, totalBags)}
+                              >
+                                <MaterialCommunityIcons name="lightning-bolt" size={12} color="#B45309" />
+                                <Text style={styles.splitQuickPillText}>Fill Dryer ({selectedMachine.capacity} kg)</Text>
+                              </TouchableOpacity>
+                            )}
+                            {isPartial && (
+                              <TouchableOpacity
+                                style={styles.splitResetPill}
+                                onPress={() => handleResetFull(b.id, rawW, totalBags)}
+                              >
+                                <Text style={styles.splitResetPillText}>Full Lot ({rawW} kg)</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+
+                        <View style={{ flexDirection: "row", gap: spacing.md, marginTop: 8 }}>
+                          <View style={{ flex: 1.5 }}>
+                            <Text style={styles.splitFieldLabel}>Weight to Load (KG) *</Text>
+                            <TextInput
+                              style={[
+                                styles.splitWeightInput,
+                                isPartial && styles.splitWeightInputActive
+                              ]}
+                              value={curLoadWStr}
+                              onChangeText={(txt) => handleWeightChange(b.id, txt, rawW, totalBags)}
+                              keyboardType="decimal-pad"
+                              placeholder={String(rawW)}
+                            />
+                          </View>
+
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.splitFieldLabel}>Bags to Load</Text>
+                            <TextInput
+                              style={styles.splitWeightInput}
+                              value={curLoadBagsStr}
+                              onChangeText={(txt) => handleBagsChange(b.id, txt)}
+                              keyboardType="number-pad"
+                              placeholder={String(totalBags)}
+                            />
+                          </View>
+                        </View>
+
+                        {isPartial && (
+                          <View style={styles.splitNoticeBadge}>
+                            <MaterialCommunityIcons name="content-cut" size={14} color="#B45309" />
+                            <Text style={styles.splitNoticeText}>
+                              Splitting lot on the fly: {validW} KG into this dryer. The remaining {remainingW.toFixed(2)} KG ({remainingBags} Bags) will remain in pending arrivals ready for the next machine.
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
                 );
               })
             )}
@@ -657,13 +804,28 @@ export default function BatchingForm() {
           {/* CONFIRM ACTION BAR */}
           <View style={styles.buttonBar}>
             <View style={styles.summaryInfo}>
-              <Text style={styles.summaryLabel}>Selected: {selectedCount} arrivals</Text>
-              <Text style={styles.summaryVal}>Weight: {totalRawWeight.toFixed(2)} KG</Text>
+              <Text style={styles.summaryLabel}>
+                Selected: {selectedCount} arrival{selectedCount === 1 ? "" : "s"}
+                {selectedMachine ? ` • ${selectedMachine.name}` : ""}
+              </Text>
+              <Text style={[styles.summaryVal, isOverCapacity && { color: colors.danger }]}>
+                Load Weight: {totalLoadWeight.toFixed(2)} KG
+              </Text>
+              {selectedMachine && (
+                <Text style={{ fontSize: 11, fontWeight: "700", marginTop: 2, color: isOverCapacity ? colors.danger : "#166534" }}>
+                  {isOverCapacity
+                    ? `⚠️ Exceeds capacity by ${(totalLoadWeight - selectedMachine.capacity).toFixed(1)} KG`
+                    : `✓ Fits capacity (${selectedMachine.capacity} KG cap)`}
+                </Text>
+              )}
             </View>
             <TouchableOpacity
-              style={[styles.actionBtn, (saving || !selectedMachineId || selectedCount === 0) && styles.actionBtnDisabled]}
+              style={[
+                styles.actionBtn,
+                (saving || !selectedMachineId || selectedCount === 0 || isOverCapacity) && styles.actionBtnDisabled
+              ]}
               onPress={handleStartProcess}
-              disabled={saving || !selectedMachineId || selectedCount === 0}
+              disabled={saving || !selectedMachineId || selectedCount === 0 || isOverCapacity}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -1303,6 +1465,95 @@ const styles = StyleSheet.create({
   arrivalMeta: { flexDirection: "row", gap: spacing.md },
   metaLabel: { fontSize: 12, color: colors.textMuted, fontWeight: "500" },
   metaVal: { fontWeight: "700", color: colors.text },
+
+  // On-the-fly Split Config Styles
+  splitConfigContainer: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  splitConfigHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  splitConfigTitle: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  splitQuickPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  splitQuickPillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  splitResetPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    backgroundColor: "#E2E8F0",
+  },
+  splitResetPillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  splitFieldLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
+  splitWeightInput: {
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  splitWeightInputActive: {
+    borderColor: "#D97706",
+    backgroundColor: "#FFFBEB",
+  },
+  splitNoticeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: radius.md,
+    padding: 8,
+    marginTop: 8,
+  },
+  splitNoticeText: {
+    flex: 1,
+    fontSize: 11,
+    color: "#92400E",
+    fontWeight: "600",
+    lineHeight: 15,
+  },
   buttonBar: {
     position: "absolute",
     bottom: 0,

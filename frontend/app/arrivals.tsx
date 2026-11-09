@@ -73,12 +73,14 @@ const TABS: { key: "in" | "processing" | "out"; label: string; icon: any; color:
   { key: "out", label: "Delivered", icon: "arrow-up-bold", color: "#7B1FA2" },
 ];
 
+let cachedMemoryArrivals: Payload | null = null;
+
 export default function ArrivalsScreen() {
   const { selectedBranchId } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string; q?: string }>();
-  const [data, setData] = useState<Payload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Payload | null>(cachedMemoryArrivals);
+  const [loading, setLoading] = useState(!cachedMemoryArrivals);
   const [search, setSearch] = useState(params.q || "");
   const [tab, setTab] = useState<"in" | "processing" | "out">((params.tab as any) || "in");
 
@@ -165,7 +167,7 @@ export default function ArrivalsScreen() {
   }, []);
 
   const load = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && !cachedMemoryArrivals && !data) setLoading(true);
     try {
       const qs = new URLSearchParams();
       if (start) qs.set("start", start);
@@ -174,9 +176,10 @@ export default function ArrivalsScreen() {
       if (search.trim()) qs.set("q", search.trim());
       const d = await api<Payload>(`/dashboard/arrivals?${qs.toString()}`);
       setData(d);
+      cachedMemoryArrivals = d;
       storage.setItem("cached_arrivals_dashboard", d);
     } finally { setLoading(false); }
-  }, [start, end, selectedBranchId, search]);
+  }, [start, end, selectedBranchId, search, data]);
 
   useFocusEffect(useCallback(() => { load(!!data); }, [load, !!data]));
 

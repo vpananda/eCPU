@@ -19,6 +19,7 @@ from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 import os
+import time
 import uuid
 import jwt
 import httpx
@@ -283,6 +284,7 @@ class PostgresCollection:
         
         query = f"INSERT INTO {self.table_name} ({', '.join(cols)}) VALUES ({', '.join(placeholders)}) RETURNING *"
         res = await self.db.query(query, vals, self.table_name)
+        fast_cache.clear()
         return res[0] if res else doc
 
     async def update_one(self, filter_dict, update_dict, upsert=False):
@@ -615,14 +617,16 @@ class PostgresDBWrapper:
                 "DATABASE_URL is not set in backend/.env! "
                 "Please configure DATABASE_URL (PostgreSQL/Supabase connection string) to start the server."
             )
+        min_size = int(os.getenv("DB_POOL_MIN_SIZE", "3"))
+        max_size = int(os.getenv("DB_POOL_MAX_SIZE", "25"))
         self.pool = AsyncConnectionPool(
             conninfo=self.dsn,
             open=False,
-            min_size=1,
-            max_size=10,
+            min_size=min_size,
+            max_size=max_size,
             max_idle=300.0,
             max_lifetime=1800.0,
-            timeout=30.0,
+            timeout=20.0,
             check=AsyncConnectionPool.check_connection,
             kwargs={"row_factory": dict_row}
         )
@@ -666,6 +670,7 @@ class PostgresDBWrapper:
                     async with conn.cursor() as cur:
                         await cur.execute(sql, params)
                         logger.info("DB EXECUTE success")
+                        fast_cache.clear()
                         return
             except psycopg.OperationalError as e:
                 logger.warning(f"DB EXECUTE OperationalError on attempt {attempt+1}: {e}")
@@ -716,6 +721,33 @@ if SUPABASE_URL and SUPABASE_KEY and not SUPABASE_URL.startswith("https://your-p
         logger.info("Supabase client initialized successfully.")
     except Exception as e:
         logger.warning(f"Could not connect to Supabase: {e}")
+
+
+# ---------------------------- HIGH-SPEED IN-MEMORY MICRO-CACHE ----------------------------
+class MicroCache:
+    def __init__(self):
+        self._store: Dict[str, tuple] = {}
+
+    def get(self, key: str) -> Optional[Any]:
+        if key in self._store:
+            exp, val = self._store[key]
+            if time.time() < exp:
+                return val
+            self._store.pop(key, None)
+        return None
+
+    def set(self, key: str, val: Any, ttl_seconds: float = 6.0):
+        self._store[key] = (time.time() + ttl_seconds, val)
+
+    def invalidate_prefix(self, prefix: str):
+        keys_to_del = [k for k in self._store if k.startswith(prefix)]
+        for k in keys_to_del:
+            self._store.pop(k, None)
+
+    def clear(self):
+        self._store.clear()
+
+fast_cache = MicroCache()
 
 
 # ---------------------------- HELPERS ----------------------------
@@ -1247,13 +1279,18 @@ async def seed():
 
 
 async def db_keepalive_worker():
-    """Background worker that pings the database every 10 minutes to prevent idle connection closure and Supabase inactivity pausing."""
+    """Background worker that pings the database and self-pings host every 8 minutes to prevent idle connection closure and cold starts."""
     while True:
         try:
-            await asyncio.sleep(600)
+            await asyncio.sleep(480)
             if db.pool:
                 await db.query("SELECT 1;")
                 logger.info("Database keep-alive ping successful.")
+            render_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("BACKEND_SELF_URL") or "https://ecpu.onrender.com"
+            if render_url:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.get(f"{render_url.rstrip('/')}/health")
+                    logger.info("Self-ping keep-alive successful.")
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -1411,6 +1448,9 @@ async def list_users(user: dict = Depends(require_roles("Admin", "Manager"))):
 # ---------------------------- PRODUCTS ----------------------------
 @api.get("/products")
 async def list_products(user: dict = Depends(get_current_user)):
+    cached = fast_cache.get("static_products")
+    if cached:
+        return cached
     products = await db.products.find({}, {"_id": 0}).to_list(200)
     rates = await db.branch_product_rates.find({}, {"_id": 0}).to_list(1000)
     
@@ -1426,6 +1466,7 @@ async def list_products(user: dict = Depends(get_current_user)):
     for p in products:
         p["branch_rates"] = product_rates.get(p["id"], {})
         p["default_rate"] = float(p.get("default_rate") or 0.0)
+    fast_cache.set("static_products", products, ttl_seconds=60.0)
     return products
 
 
@@ -1527,6 +1568,11 @@ async def update_product_rates(pid: str, body: List[BranchProductRateIn], user: 
 # ---------------------------- MACHINES ----------------------------
 @api.get("/machines")
 async def list_machines(user: dict = Depends(get_current_user), branch_id: Optional[str] = None):
+    cache_key = f"static_machines:{branch_id or user.get('branch_id') or 'all'}"
+    cached = fast_cache.get(cache_key)
+    if cached:
+        return cached
+
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
@@ -1559,6 +1605,7 @@ async def list_machines(user: dict = Depends(get_current_user), branch_id: Optio
                 "expected_delivery_date": first_b.get("expected_delivery_date"),
                 "status": first_b["status"],
             }
+    fast_cache.set(cache_key, machines, ttl_seconds=10.0)
     return machines
 
 
@@ -3713,6 +3760,7 @@ async def dashboard(
     start: Optional[str] = None,
     end: Optional[str] = None,
     branch_id: Optional[str] = None,
+    no_cache: Optional[bool] = False,
 ):
     tstart, tend = _today_range()
     pstart, pend = _parse_range(start, end)
@@ -3726,6 +3774,12 @@ async def dashboard(
         target_branch_id = branch_id
     elif role != "Admin" and ubid:
         target_branch_id = ubid
+
+    cache_key = f"dash:{target_branch_id or 'all'}:{pstart[:10]}:{pend[:10]}:{role}"
+    if not no_cache:
+        cached = fast_cache.get(cache_key)
+        if cached:
+            return cached
 
     batch_where = ["1=1"]
     batch_params = []
@@ -3939,6 +3993,8 @@ async def dashboard(
         "product_arrivals": product_arrivals,
         "active_product_arrivals": active_product_arrivals,
     }
+    fast_cache.set(cache_key, res, ttl_seconds=8.0)
+    return res
 
 
 @api.get("/dashboard/arrivals")
@@ -3949,8 +4005,15 @@ async def dashboard_arrivals(
     branch_id: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 150,
+    no_cache: Optional[bool] = False,
 ):
     """List arrivals + processing + deliveries with customer + branch + weights."""
+    target_bid = branch_id or user.get("branch_id")
+    cache_key = f"dash_arr:{target_bid or 'all'}:{start or ''}:{end or ''}:{limit}"
+    if not no_cache and not q:
+        cached = fast_cache.get(cache_key)
+        if cached:
+            return cached
     # Scoping
     where_clauses = ["1=1"]
     params = []
@@ -4109,7 +4172,7 @@ async def dashboard_arrivals(
     range_start = start if start else "All"
     range_end = (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10] if (start and end) else (end if end else "Time")
 
-    return {
+    res = {
         "range": {"start": range_start, "end": range_end},
         "totals": {
             "in_weight": total_in, "out_weight": total_out, "processing_weight": total_proc,
@@ -4119,6 +4182,9 @@ async def dashboard_arrivals(
         "out": out_list,
         "processing": proc_list,
     }
+    if not q:
+        fast_cache.set(cache_key, res, ttl_seconds=6.0)
+    return res
 
 
 @api.get("/reports/summary")
@@ -4317,7 +4383,12 @@ async def get_company(user: dict = Depends(get_current_user)):
 
 @api.get("/branches")
 async def list_branches(user: dict = Depends(get_current_user)):
-    return await db.branches.find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    cached = fast_cache.get("static_branches")
+    if cached:
+        return cached
+    res = await db.branches.find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    fast_cache.set("static_branches", res, ttl_seconds=60.0)
+    return res
 
 
 @api.post("/branches")

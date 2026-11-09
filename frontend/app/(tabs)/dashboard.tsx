@@ -132,13 +132,15 @@ const DATE_PRESETS = [
   { key: "all", label: "All Time" },
 ];
 
+let cachedMemoryDash: Dash | null = null;
+
 export default function Dashboard() {
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const { checkConnection } = useConnection();
   const { isSyncing, triggerSync } = useSync();
   const router = useRouter();
-  const [data, setData] = useState<Dash | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<Dash | null>(cachedMemoryDash);
+  const [loading, setLoading] = useState(!cachedMemoryDash);
   const [refreshing, setRefreshing] = useState(false);
 
   const spinVal = useRef(new Animated.Value(0)).current;
@@ -280,7 +282,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     storage.getItem<Dash | null>("cached_dashboard_data", null).then(cached => {
-      if (cached) {
+      if (cached && !cachedMemoryDash) {
+        cachedMemoryDash = cached;
         setData(cached);
         setLoading(false);
       }
@@ -288,7 +291,7 @@ export default function Dashboard() {
   }, []);
 
   const load = useCallback(async (s = start, e = end, bid = selectedBranchId, silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && !cachedMemoryDash && !data) setLoading(true);
     try {
       setLoadError(null);
       const qs = new URLSearchParams();
@@ -297,6 +300,7 @@ export default function Dashboard() {
       if (bid) qs.set("branch_id", bid);
       const d = await api<Dash>(`/dashboard?${qs.toString()}`);
       setData(d);
+      cachedMemoryDash = d;
       storage.setItem("cached_dashboard_data", d);
     } catch (err: any) {
       console.error("Dashboard data load failure:", err);

@@ -54,7 +54,7 @@ function getHeaderTitle(segments: string[]): string {
 }
 
 export function TopBanner() {
-  const { user, logout, branches, selectedBranchId, setSelectedBranchId } = useAuth();
+  const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const insets = useSafeAreaInsets();
   const segments = useSegments();
   const router = useRouter();
@@ -94,12 +94,6 @@ export function TopBanner() {
   const handleSelectBranch = (id: string) => {
     setSelectedBranchId(id);
     setModalOpen(false);
-  };
-
-  const handleSignOut = () => {
-    logout().then(() => {
-      router.replace("/login");
-    });
   };
 
   const handleBack = () => {
@@ -173,16 +167,6 @@ export function TopBanner() {
             activeOpacity={0.7}
           >
             <MaterialCommunityIcons name="home-outline" size={20} color={colors.primary} />
-          </TouchableOpacity>
-
-          {/* Log out */}
-          <TouchableOpacity
-            onPress={handleSignOut}
-            style={styles.logoutBtn}
-            testID="header-signout-button"
-            activeOpacity={0.7}
-          >
-            <MaterialCommunityIcons name="logout" size={20} color={colors.danger} />
           </TouchableOpacity>
 
           {/* Logged user avatar/initials */}
@@ -321,11 +305,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: colors.textMuted,
-  },
-  logoutBtn: {
-    padding: 6,
-    borderRadius: radius.sm,
-    backgroundColor: "#FFEBEE",
   },
   modalOverlay: {
     flex: 1,

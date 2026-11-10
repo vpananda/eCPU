@@ -10,6 +10,16 @@ import Calendar from "@/src/components/Calendar";
 import { storage } from "@/src/utils/storage";
 import { useSyncRefresh } from "@/src/sync";
 
+type SubBatch = {
+  batch_id: string;
+  batch_no: string;
+  raw_weight: number;
+  machine_id?: string;
+  machine_name?: string;
+  status: string;
+  actual_dry_weight?: number | null;
+};
+
 type Row = {
   batch_id: string;
   batch_no: string;
@@ -17,6 +27,7 @@ type Row = {
   customer_code: string;
   customer_mobile: string;
   product: string;
+  machine_id?: string;
   machine_name?: string;
   branch_id?: string;
   branch_name?: string;
@@ -29,14 +40,35 @@ type Row = {
   actual_dry_weight: number | null;
   delivery_date: string | null;
   status: string;
+  is_split?: boolean;
+  sub_batches?: SubBatch[];
+  machine_total_weight?: number;
+  machine_batch_count?: number;
+};
+
+type ProcessingMachine = {
+  machine_id: string;
+  machine_name: string;
+  total_weight: number;
+  batch_count: number;
+  batches: Row[];
 };
 
 type Payload = {
   range: { start: string; end: string };
-  totals: { in_weight: number; out_weight: number; processing_weight: number; in_count: number; out_count: number; processing_count: number };
+  totals: {
+    in_weight: number;
+    out_weight: number;
+    processing_weight: number;
+    in_count: number;
+    out_count: number;
+    processing_count: number;
+    processing_machine_count?: number;
+  };
   in: Row[];
   out: Row[];
   processing: Row[];
+  processing_machines?: ProcessingMachine[];
 };
 
 function fmtDate(iso?: string | null) {
@@ -203,6 +235,120 @@ export default function ArrivalsScreen() {
 
   const rows: Row[] = tab === "in" ? data?.in || [] : tab === "out" ? data?.out || [] : data?.processing || [];
 
+  const renderBatchCard = (r: Row, isInsideMachineGroup = false) => {
+    const dateStr = tab === "out" ? r.delivery_date : r.arrival_date;
+    const weightVal = tab === "out" ? (r.actual_dry_weight || 0) : r.raw_weight;
+    const weightLabel = tab === "out" ? "dried" : "wet / raw";
+    const accent = tab === "in" ? colors.primary : tab === "out" ? colors.purple : colors.warning;
+    const isProcessingTab = tab === "processing";
+    const hasSplitLots = tab === "in" && r.is_split && r.sub_batches && r.sub_batches.length > 1;
+
+    return (
+      <TouchableOpacity
+        key={r.batch_id}
+        testID={`arrival-${r.batch_id}`}
+        style={[styles.rowCard, isInsideMachineGroup && styles.rowCardIndented]}
+        onPress={() => router.push(`/batch/${r.batch_id}`)}
+        activeOpacity={0.85}
+      >
+        <View style={styles.cardTopRow}>
+          <View style={[styles.avatar, { backgroundColor: accent + "18" }]}>
+            <Text style={[styles.avatarText, { color: accent }]}>{r.customer_name.slice(0, 1).toUpperCase()}</Text>
+          </View>
+
+          <View style={{ flex: 1 }}>
+            <View style={styles.nameRow}>
+              <Text style={styles.name} numberOfLines={1}>{r.customer_name}</Text>
+              <View style={styles.codeChip}>
+                <Text style={styles.codeChipText}>{r.customer_code}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.metaRow}>
+              <Text style={styles.meta}>{r.product}</Text>
+              <Text style={styles.metaDot}>·</Text>
+              <MaterialCommunityIcons name="calendar" size={11} color={colors.textMuted} />
+              <Text style={styles.meta}>{fmtDate(dateStr)}</Text>
+            </View>
+
+            <View style={styles.metaRow}>
+              <MaterialCommunityIcons name="phone" size={11} color={colors.textMuted} />
+              <Text style={styles.meta}>{r.customer_mobile}</Text>
+              <Text style={styles.metaDot}>·</Text>
+              <Text style={styles.batchNo}>{r.batch_no}</Text>
+            </View>
+          </View>
+
+          <View style={{ alignItems: "flex-end" }}>
+            <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
+            <Text style={styles.weightLabel}>{weightLabel}</Text>
+          </View>
+        </View>
+
+        {/* Multi-lot split badges if loaded across different dryers */}
+        {hasSplitLots && (
+          <View style={styles.splitLotBox}>
+            <View style={styles.splitLotHeader}>
+              <MaterialCommunityIcons name="call-split" size={13} color={colors.primary} />
+              <Text style={styles.splitLotTitle}>{r.sub_batches!.length} Split Lots Loaded Across Dryers:</Text>
+            </View>
+            <View style={styles.splitPillsRow}>
+              {r.sub_batches!.map((sb, idx) => (
+                <View key={sb.batch_id || idx} style={styles.splitPill}>
+                  <Text style={styles.splitPillWeight}>{sb.raw_weight} kg</Text>
+                  <Text style={styles.splitPillMachine}>• {sb.machine_name || "Dryer"}</Text>
+                  <View style={[
+                    styles.splitPillStatusDot, 
+                    { backgroundColor: sb.status === 'Drying' ? '#F57C00' : sb.status === 'Completed' ? '#2E7D32' : '#757575' }
+                  ]} />
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Ledger Financials if available */}
+        {(r.bill_amount !== undefined && r.bill_amount > 0) ? (
+          <View style={styles.ledgerRow}>
+            <Text style={styles.ledgerBill}>Billed: ₹{r.bill_amount.toLocaleString()}{r.rate_per_kg ? ` (@ ₹${r.rate_per_kg}/kg)` : ""}</Text>
+            <Text style={styles.ledgerPaid}>• Recv: ₹{(r.total_paid || 0).toLocaleString()}</Text>
+            {(r.balance_amount || 0) > 0 ? (
+              <Text style={styles.ledgerBal}>• Bal ₹{(r.balance_amount || 0).toLocaleString()}</Text>
+            ) : (
+              <Text style={styles.ledgerPaidOk}>• Paid ✓</Text>
+            )}
+          </View>
+        ) : null}
+
+        {/* Last Line: Branch Name on Left, Machine Name on Right */}
+        <View style={styles.cardBottomRow}>
+          <View style={styles.bottomMetaItem}>
+            <MaterialCommunityIcons name="office-building" size={12} color={colors.primary} />
+            <Text style={styles.branchText}>{r.branch_name || "-"}</Text>
+          </View>
+
+          {r.machine_name && !isInsideMachineGroup ? (
+            <View style={styles.machineBadgeRight}>
+              <MaterialCommunityIcons name="generator-portable" size={12} color={colors.warning} />
+              <Text style={styles.machineTextRight} numberOfLines={1}>{r.machine_name}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {isProcessingTab && (
+          <TouchableOpacity
+            style={styles.cardCompleteBtn}
+            onPress={() => openCompleteModal(r)}
+            activeOpacity={0.8}
+          >
+            <MaterialCommunityIcons name="check-circle" size={14} color="#fff" />
+            <Text style={styles.cardCompleteBtnText}>Complete Processing</Text>
+          </TouchableOpacity>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.safe}>
       <View style={styles.header}>
@@ -312,6 +458,7 @@ export default function ArrivalsScreen() {
           const active = tab === t.key;
           const count = t.key === "in" ? data?.totals.in_count : t.key === "out" ? data?.totals.out_count : data?.totals.processing_count;
           const weight = t.key === "in" ? data?.totals.in_weight : t.key === "out" ? data?.totals.out_weight : data?.totals.processing_weight;
+          const machineCount = data?.totals.processing_machine_count;
           return (
             <TouchableOpacity
               key={t.key}
@@ -323,7 +470,11 @@ export default function ArrivalsScreen() {
               <MaterialCommunityIcons name={t.icon} size={18} color={active ? "#fff" : t.color} />
               <Text style={[styles.summaryCardLabel, active && { color: "#fff" }]}>{t.label}</Text>
               <Text style={[styles.summaryCardMeta, active && { color: "#ffffffd0" }]}>
-                {count || 0} - {(weight || 0).toLocaleString("en-IN")} kg
+                {t.key === "processing" && machineCount ? (
+                  `${machineCount} Dryer${machineCount > 1 ? "s" : ""} (${count || 0} Lots)`
+                ) : (
+                  `${count || 0} ${t.key === "in" ? "Arrivals" : "Batches"}`
+                )} - {(weight || 0).toLocaleString("en-IN")} kg
               </Text>
             </TouchableOpacity>
           );
@@ -340,95 +491,35 @@ export default function ArrivalsScreen() {
               <Text style={styles.emptyText}>No {tab === "in" ? "arrivals" : tab === "out" ? "deliveries" : "batches in processing"}</Text>
             </View>
           )}
-          {rows.map(r => {
-            const dateStr = tab === "out" ? r.delivery_date : r.arrival_date;
-            const weightVal = tab === "out" ? (r.actual_dry_weight || 0) : r.raw_weight;
-            const weightLabel = tab === "out" ? "dried" : "processing";
-            const accent = tab === "in" ? colors.primary : tab === "out" ? colors.purple : colors.warning;
-            const isProcessingTab = tab === "processing";
-            return (
-              <TouchableOpacity
-                key={r.batch_id}
-                testID={`arrival-${r.batch_id}`}
-                style={styles.rowCard}
-                onPress={() => router.push(`/batch/${r.batch_id}`)}
-                activeOpacity={0.85}
-              >
-                <View style={styles.cardTopRow}>
-                  <View style={[styles.avatar, { backgroundColor: accent + "18" }]}>
-                    <Text style={[styles.avatarText, { color: accent }]}>{r.customer_name.slice(0, 1).toUpperCase()}</Text>
-                  </View>
 
-                  <View style={{ flex: 1 }}>
-                    <View style={styles.nameRow}>
-                      <Text style={styles.name} numberOfLines={1}>{r.customer_name}</Text>
-                      <View style={styles.codeChip}>
-                        <Text style={styles.codeChipText}>{r.customer_code}</Text>
-                      </View>
+          {tab === "processing" && (data?.processing_machines && data.processing_machines.length > 0) ? (
+            data.processing_machines.map(pm => (
+              <View key={pm.machine_id} style={styles.machineGroupSection}>
+                <View style={styles.machineGroupHeader}>
+                  <View style={styles.machineGroupLeft}>
+                    <View style={styles.machineIconWrap}>
+                      <MaterialCommunityIcons name="generator-portable" size={18} color="#E65100" />
                     </View>
-                    
-                    <View style={styles.metaRow}>
-                      <Text style={styles.meta}>{r.product}</Text>
-                      <Text style={styles.metaDot}>·</Text>
-                      <MaterialCommunityIcons name="calendar" size={11} color={colors.textMuted} />
-                      <Text style={styles.meta}>{fmtDate(dateStr)}</Text>
-                    </View>
-
-                    <View style={styles.metaRow}>
-                      <MaterialCommunityIcons name="phone" size={11} color={colors.textMuted} />
-                      <Text style={styles.meta}>{r.customer_mobile}</Text>
-                      <Text style={styles.metaDot}>·</Text>
-                      <Text style={styles.batchNo}>{r.batch_no}</Text>
+                    <View>
+                      <Text style={styles.machineGroupName}>{pm.machine_name}</Text>
+                      <Text style={styles.machineGroupSubtitle}>
+                        {pm.batches.length > 1 ? `Multi-Lot Combined Batch (${pm.batches.length} Lots)` : "Single Customer Lot"}
+                      </Text>
                     </View>
                   </View>
-
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
-                    <Text style={styles.weightLabel}>{weightLabel}</Text>
+                  <View style={styles.machineGroupRight}>
+                    <Text style={styles.machineGroupTotalWeight}>{pm.total_weight} KG</Text>
+                    <Text style={styles.machineGroupTotalLabel}>Total Dryer Load</Text>
                   </View>
                 </View>
-
-                {/* Ledger Financials if available */}
-                {(r.bill_amount !== undefined && r.bill_amount > 0) ? (
-                  <View style={styles.ledgerRow}>
-                    <Text style={styles.ledgerBill}>Billed: ₹{r.bill_amount.toLocaleString()}{r.rate_per_kg ? ` (@ ₹${r.rate_per_kg}/kg)` : ""}</Text>
-                    <Text style={styles.ledgerPaid}>• Recv: ₹{(r.total_paid || 0).toLocaleString()}</Text>
-                    {(r.balance_amount || 0) > 0 ? (
-                      <Text style={styles.ledgerBal}>• Bal ₹{(r.balance_amount || 0).toLocaleString()}</Text>
-                    ) : (
-                      <Text style={styles.ledgerPaidOk}>• Paid ✓</Text>
-                    )}
-                  </View>
-                ) : null}
-
-                {/* Last Line: Branch Name on Left, Machine Name on Right */}
-                <View style={styles.cardBottomRow}>
-                  <View style={styles.bottomMetaItem}>
-                    <MaterialCommunityIcons name="office-building" size={12} color={colors.primary} />
-                    <Text style={styles.branchText}>{r.branch_name || "-"}</Text>
-                  </View>
-
-                  {r.machine_name ? (
-                    <View style={styles.machineBadgeRight}>
-                      <MaterialCommunityIcons name="generator-portable" size={12} color={colors.warning} />
-                      <Text style={styles.machineTextRight} numberOfLines={1}>{r.machine_name}</Text>
-                    </View>
-                  ) : null}
+                <View style={{ gap: spacing.xs, marginTop: 4 }}>
+                  {pm.batches.map(b => renderBatchCard(b, true))}
                 </View>
-
-                {isProcessingTab && (
-                  <TouchableOpacity
-                    style={styles.cardCompleteBtn}
-                    onPress={() => openCompleteModal(r)}
-                    activeOpacity={0.8}
-                  >
-                    <MaterialCommunityIcons name="check-circle" size={14} color="#fff" />
-                    <Text style={styles.cardCompleteBtnText}>Complete Processing</Text>
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+              </View>
+            ))
+          ) : (
+            rows.map(r => renderBatchCard(r, false))
+          )}
         </ScrollView>
       )}
 
@@ -788,5 +879,115 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "800",
     fontSize: 13,
+  },
+  splitLotBox: {
+    marginTop: 8,
+    backgroundColor: "#F0FDF4",
+    padding: 8,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  splitLotHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 6,
+  },
+  splitLotTitle: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  splitPillsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  splitPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    gap: 4,
+  },
+  splitPillWeight: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  splitPillMachine: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+  splitPillStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  machineGroupSection: {
+    marginBottom: spacing.sm,
+  },
+  machineGroupHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#FFF8E1",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "#FFE082",
+    marginBottom: 6,
+  },
+  machineGroupLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  machineIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFF3E0",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#FFCC80",
+  },
+  machineGroupName: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#E65100",
+  },
+  machineGroupSubtitle: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#B78103",
+    marginTop: 1,
+  },
+  machineGroupRight: {
+    alignItems: "flex-end",
+  },
+  machineGroupTotalWeight: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#E65100",
+  },
+  machineGroupTotalLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#B78103",
+    textTransform: "uppercase",
+  },
+  rowCardIndented: {
+    borderLeftWidth: 3,
+    borderLeftColor: "#F57C00",
   },
 });

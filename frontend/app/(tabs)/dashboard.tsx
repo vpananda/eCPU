@@ -24,10 +24,14 @@ type Dash = {
     out_count: number;
     processing_weight: number;
     processing_count: number;
+    processing_batches_count?: number;
+    processing_machines_count?: number;
     inhouse_processing_weight?: number;
     inhouse_processing_count?: number;
+    inhouse_processing_batches_count?: number;
     outsourced_processing_weight?: number;
     outsourced_processing_count?: number;
+    outsourced_processing_batches_count?: number;
   };
   period_customers: number;
   period_received_weight: number;
@@ -689,7 +693,9 @@ export default function Dashboard() {
                   <Text style={styles.hubDryingSubtitle}>Plant Dryers</Text>
                   <View style={styles.hubDryingBadge}>
                     <Text style={styles.hubDryingBadgeText}>
-                      {data?.today_arrival?.inhouse_processing_count || 0} batches • {data?.inhouse_machines_running || 0} dryers
+                      {data?.today_arrival?.inhouse_processing_batches_count && data.today_arrival.inhouse_processing_batches_count !== data.today_arrival.inhouse_processing_count
+                        ? `${data.today_arrival.inhouse_processing_count} arrivals (${data.today_arrival.inhouse_processing_batches_count} lots)`
+                        : `${data?.today_arrival?.inhouse_processing_count || 0} batches`} • {data?.inhouse_machines_running || 0} dryers
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -815,7 +821,9 @@ export default function Dashboard() {
                         {fmtNum(data.today_arrival.inhouse_processing_weight ?? 0, "", " KG")}
                       </Text>
                       <Text style={styles.liveSeparateSub}>
-                        {data.today_arrival.inhouse_processing_count ?? 0} batches drying • {data.inhouse_machines_running ?? 0} dryers active
+                        {data.today_arrival.inhouse_processing_batches_count && data.today_arrival.inhouse_processing_batches_count !== data.today_arrival.inhouse_processing_count
+                          ? `${data.today_arrival.inhouse_processing_count} arrivals (${data.today_arrival.inhouse_processing_batches_count} lots)`
+                          : `${data.today_arrival.inhouse_processing_count ?? 0} batches`} drying • {data.inhouse_machines_running ?? 0} dryers active
                       </Text>
                     </View>
                     <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />

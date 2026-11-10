@@ -58,7 +58,7 @@ UUID_FIELDS = {
     "profiles": ["id", "branch_id"],
     "machines": ["id", "branch_id", "current_batch_id"],
     "customers": ["id", "branch_id", "created_by", "updated_by"],
-    "batches": ["id", "customer_id", "product_id", "machine_id", "branch_id", "created_by", "updated_by"],
+    "batches": ["id", "customer_id", "product_id", "machine_id", "branch_id", "parent_batch_id", "created_by", "updated_by"],
     "batch_status_history": ["id", "batch_id", "changed_by"],
     "payments": ["id", "batch_id", "customer_id", "branch_id", "created_by"],
     "expenses": ["id", "branch_id", "machine_id", "created_by"],
@@ -1195,6 +1195,13 @@ async def seed():
     # Add machine_id column to public.expenses for tracking outsourced dryer payouts
     await db.execute("""
         ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS machine_id UUID REFERENCES public.machines(id) ON DELETE SET NULL;
+    """)
+    # Add is_split and parent_batch_id columns to public.batches for multi-machine split arrivals
+    await db.execute("""
+        ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS is_split BOOLEAN DEFAULT FALSE;
+    """)
+    await db.execute("""
+        ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS parent_batch_id UUID REFERENCES public.batches(id) ON DELETE SET NULL;
     """)
     # Create counters table if not exists
     await db.execute("""
@@ -2820,8 +2827,14 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
                                      {"$set": {"status": "Running", "current_batch_id": bid}})
     elif body.status == "Completed":
         if machine_id:
-            await db.machines.update_one({"id": machine_id},
-                                         {"$set": {"status": "Available", "current_batch_id": None}})
+            # Check if any OTHER active batches are still drying in this machine before marking machine Available
+            other_active = await db.query(
+                "SELECT id FROM public.batches WHERE machine_id::text = %s AND status = 'Drying' AND id::text != %s LIMIT 1",
+                [str(machine_id), str(bid)]
+            )
+            if not other_active:
+                await db.machines.update_one({"id": machine_id},
+                                             {"$set": {"status": "Available", "current_batch_id": None}})
         if body.actual_dry_weight is not None and body.actual_dry_weight > 0:
             upd["actual_dry_weight"] = body.actual_dry_weight
             raw = float(b.get("raw_weight") or 0)
@@ -3808,18 +3821,22 @@ async def dashboard(
         SELECT
             COALESCE(SUM(CASE WHEN (b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date) THEN b.raw_weight ELSE 0 END), 0) AS period_received_weight,
             COALESCE(SUM(CASE WHEN (b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date) THEN b.bill_amount ELSE 0 END), 0) AS period_billed,
-            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN 1 ELSE 0 END), 0) AS period_deliveries,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS period_deliveries,
             COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN b.actual_dry_weight ELSE 0 END), 0) AS period_delivered_weight,
             COALESCE(SUM(CASE WHEN b.created_at >= %s AND b.created_at < %s THEN b.raw_weight ELSE 0 END), 0) AS today_in_weight,
-            COALESCE(SUM(CASE WHEN b.created_at >= %s AND b.created_at < %s THEN 1 ELSE 0 END), 0) AS today_in_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.created_at >= %s AND b.created_at < %s THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_in_count,
             COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN b.actual_dry_weight ELSE 0 END), 0) AS today_out_weight,
-            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN 1 ELSE 0 END), 0) AS today_out_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_out_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN b.raw_weight ELSE 0 END), 0) AS processing_weight,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN 1 ELSE 0 END), 0) AS processing_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN 1 ELSE 0 END), 0) AS processing_batches_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND b.machine_id IS NOT NULL THEN b.machine_id ELSE NULL END), 0) AS processing_machines_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN b.raw_weight ELSE 0 END), 0) AS inhouse_processing_weight,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS inhouse_processing_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS inhouse_processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS inhouse_processing_batches_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN b.raw_weight ELSE 0 END), 0) AS outsourced_processing_weight,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS outsourced_processing_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS outsourced_processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS outsourced_processing_batches_count,
             COALESCE(SUM(CASE WHEN b.status = 'Completed' THEN 1 ELSE 0 END), 0) AS drying_completed_count,
             COALESCE(SUM(b.balance_amount), 0) AS pending_payments,
             COALESCE(SUM(CASE WHEN b.balance_amount > 0 THEN 1 ELSE 0 END), 0) AS pending_payments_count
@@ -3860,7 +3877,7 @@ async def dashboard(
     product_sql = f"""
         SELECT
             COALESCE(p.name, 'Other') AS product_name,
-            COUNT(b.id) AS batch_count,
+            COUNT(DISTINCT COALESCE(b.parent_batch_id, b.id)) AS batch_count,
             ROUND(COALESCE(SUM(b.raw_weight), 0)::numeric, 2) AS total_weight
         FROM public.batches b
         LEFT JOIN public.products p ON b.product_id = p.id
@@ -3876,7 +3893,7 @@ async def dashboard(
     active_stock_sql = f"""
         SELECT
             COALESCE(p.name, 'Other') AS product_name,
-            COUNT(b.id) AS batch_count,
+            COUNT(DISTINCT COALESCE(b.parent_batch_id, b.id)) AS batch_count,
             ROUND(COALESCE(SUM(b.raw_weight), 0)::numeric, 2) AS total_weight
         FROM public.batches b
         LEFT JOIN public.products p ON b.product_id = p.id
@@ -3941,10 +3958,14 @@ async def dashboard(
     
     processing_weight = round(float(batch_stats.get("processing_weight") or 0), 2)
     processing_count = int(batch_stats.get("processing_count") or 0)
+    processing_batches_count = int(batch_stats.get("processing_batches_count") or 0)
+    processing_machines_count = int(batch_stats.get("processing_machines_count") or 0)
     inhouse_processing_weight = round(float(batch_stats.get("inhouse_processing_weight") or 0), 2)
     inhouse_processing_count = int(batch_stats.get("inhouse_processing_count") or 0)
+    inhouse_processing_batches_count = int(batch_stats.get("inhouse_processing_batches_count") or 0)
     outsourced_processing_weight = round(float(batch_stats.get("outsourced_processing_weight") or 0), 2)
     outsourced_processing_count = int(batch_stats.get("outsourced_processing_count") or 0)
+    outsourced_processing_batches_count = int(batch_stats.get("outsourced_processing_batches_count") or 0)
     drying_completed_count = int(batch_stats.get("drying_completed_count") or 0)
     pending_deliveries_count = drying_completed_count
     
@@ -3966,10 +3987,14 @@ async def dashboard(
             "in_weight": today_in_weight, "in_count": today_in_count,
             "out_weight": today_out_weight, "out_count": today_out_count,
             "processing_weight": processing_weight, "processing_count": processing_count,
+            "processing_batches_count": processing_batches_count,
+            "processing_machines_count": processing_machines_count,
             "inhouse_processing_weight": inhouse_processing_weight,
             "inhouse_processing_count": inhouse_processing_count,
+            "inhouse_processing_batches_count": inhouse_processing_batches_count,
             "outsourced_processing_weight": outsourced_processing_weight,
             "outsourced_processing_count": outsourced_processing_count,
+            "outsourced_processing_batches_count": outsourced_processing_batches_count,
         },
         "period_customers": period_customers,
         "period_received_weight": period_received_weight,
@@ -4060,8 +4085,10 @@ async def dashboard_arrivals(
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
             b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
+            b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
+            m.id::text as machine_id,
             m.name as machine_name,
             br.name as branch_name
         FROM public.batches b
@@ -4097,8 +4124,10 @@ async def dashboard_arrivals(
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
             b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
+            b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
+            m.id::text as machine_id,
             m.name as machine_name,
             br.name as branch_name
         FROM public.batches b
@@ -4117,8 +4146,10 @@ async def dashboard_arrivals(
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
             b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
+            b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
             p.name as product_name,
+            m.id::text as machine_id,
             m.name as machine_name,
             br.name as branch_name
         FROM public.batches b
@@ -4147,6 +4178,7 @@ async def dashboard_arrivals(
             "customer_code": d.get("customer_code") or "",
             "customer_mobile": d.get("customer_mobile") or "",
             "product": d.get("product_name") or "",
+            "machine_id": d.get("machine_id"),
             "machine_name": d.get("machine_name") or "",
             "branch_id": d.get("branch_id"),
             "branch_name": d.get("branch_name") or "-",
@@ -4159,11 +4191,119 @@ async def dashboard_arrivals(
             "actual_dry_weight": float(d["actual_dry_weight"]) if d.get("actual_dry_weight") is not None else None,
             "delivery_date": d.get("delivery_date"),
             "status": d["status"],
+            "is_split": bool(d.get("is_split")),
+            "parent_batch_id": d.get("parent_batch_id"),
         }
         
-    in_list = [format_row(r) for r in in_rows]
+    # Consolidate arrivals: group split batches under their physical parent arrival
+    arrival_groups = {}
+    for r in in_rows:
+        row = format_row(r)
+        bno = str(row["batch_no"] or "")
+        base_bno = bno.split("-")[0] if "-" in bno else bno
+        
+        # Primary parent identifier
+        parent_key = row["parent_batch_id"] or row["batch_id"]
+        # Fallback grouping by customer + base batch number if parent_batch_id was null
+        if not row["parent_batch_id"] and "-" in bno:
+            parent_key = f"{row['customer_code'] or row['customer_name']}_{base_bno}"
+
+        if parent_key not in arrival_groups:
+            arrival_groups[parent_key] = {
+                **row,
+                "_base_bno": base_bno,
+                "raw_weight": 0.0,
+                "bill_amount": 0.0,
+                "total_paid": 0.0,
+                "balance_amount": 0.0,
+                "actual_dry_weight": 0.0 if row["actual_dry_weight"] is not None else None,
+                "sub_batches": [],
+                "_machines": set(),
+                "_statuses": set(),
+            }
+        
+        grp = arrival_groups[parent_key]
+        grp["raw_weight"] = round(grp["raw_weight"] + row["raw_weight"], 2)
+        grp["bill_amount"] = round(grp["bill_amount"] + (row["bill_amount"] or 0), 2)
+        grp["total_paid"] = round(grp["total_paid"] + (row["total_paid"] or 0), 2)
+        grp["balance_amount"] = round(grp["balance_amount"] + (row["balance_amount"] or 0), 2)
+        if row["actual_dry_weight"] is not None:
+            grp["actual_dry_weight"] = round((grp["actual_dry_weight"] or 0) + row["actual_dry_weight"], 2)
+        if row.get("machine_name"):
+            grp["_machines"].add(row["machine_name"])
+        grp["_statuses"].add(row["status"])
+        grp["sub_batches"].append({
+            "batch_id": row["batch_id"],
+            "batch_no": row["batch_no"],
+            "raw_weight": row["raw_weight"],
+            "machine_id": row.get("machine_id"),
+            "machine_name": row.get("machine_name") or "Unassigned",
+            "status": row["status"],
+            "actual_dry_weight": row.get("actual_dry_weight"),
+        })
+
+    in_list = []
+    for grp in arrival_groups.values():
+        is_multi = len(grp["sub_batches"]) > 1
+        if is_multi:
+            grp["batch_no"] = f"{grp['_base_bno']} ({len(grp['sub_batches'])} Lots)"
+            grp["is_split"] = True
+        else:
+            grp["batch_no"] = grp["sub_batches"][0]["batch_no"]
+            grp["is_split"] = False
+        
+        if grp["_machines"]:
+            grp["machine_name"] = " & ".join(sorted(grp["_machines"]))
+        else:
+            grp["machine_name"] = ""
+
+        # Status priority: Drying > Loaded > Completed > Received
+        if "Drying" in grp["_statuses"]:
+            grp["status"] = "Drying"
+        elif "Loaded" in grp["_statuses"]:
+            grp["status"] = "Loaded"
+        elif "Completed" in grp["_statuses"] and len(grp["_statuses"]) == 1:
+            grp["status"] = "Completed"
+        elif "Delivered" in grp["_statuses"] and len(grp["_statuses"]) == 1:
+            grp["status"] = "Delivered"
+        elif "Received" in grp["_statuses"] and len(grp["_statuses"]) == 1:
+            grp["status"] = "Received"
+        else:
+            grp["status"] = "/".join(sorted(grp["_statuses"]))
+
+        grp.pop("_machines", None)
+        grp.pop("_statuses", None)
+        grp.pop("_base_bno", None)
+        in_list.append(grp)
+
     out_list = [format_row(r) for r in out_rows]
     proc_list = [format_row(r) for r in proc_rows]
+    
+    # Group processing batches by machine
+    machines_map = {}
+    for row in proc_list:
+        mid = row.get("machine_id") or "unassigned"
+        mname = row.get("machine_name") or "Unassigned Machine"
+        if mid not in machines_map:
+            machines_map[mid] = {
+                "machine_id": mid,
+                "machine_name": mname,
+                "total_weight": 0.0,
+                "batch_count": 0,
+                "batches": []
+            }
+        machines_map[mid]["total_weight"] = round(machines_map[mid]["total_weight"] + row["raw_weight"], 2)
+        machines_map[mid]["batch_count"] += 1
+        machines_map[mid]["batches"].append(row)
+
+    # Attach consolidated machine load info to each processing row
+    for row in proc_list:
+        mid = row.get("machine_id") or "unassigned"
+        row["machine_total_weight"] = machines_map[mid]["total_weight"]
+        row["machine_batch_count"] = machines_map[mid]["batch_count"]
+
+    proc_machines = list(machines_map.values())
+    active_machines_count = len([m for m in proc_machines if m["machine_id"] != "unassigned"])
     
     total_in = round(sum(r["raw_weight"] for r in in_list), 2)
     total_out = round(sum((r["actual_dry_weight"] or 0) for r in out_list), 2)
@@ -4177,10 +4317,12 @@ async def dashboard_arrivals(
         "totals": {
             "in_weight": total_in, "out_weight": total_out, "processing_weight": total_proc,
             "in_count": len(in_list), "out_count": len(out_list), "processing_count": len(proc_list),
+            "processing_machine_count": active_machines_count,
         },
         "in": in_list,
         "out": out_list,
         "processing": proc_list,
+        "processing_machines": proc_machines,
     }
     if not q:
         fast_cache.set(cache_key, res, ttl_seconds=6.0)

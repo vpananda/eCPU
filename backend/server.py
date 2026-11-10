@@ -1106,6 +1106,7 @@ class DeliveryIn(BaseModel):
     payment_mode: Optional[str] = "Cash"
     signature: Optional[str] = ""             # base64
     remarks: Optional[str] = ""
+    deliver_siblings: Optional[bool] = False  # deliver all split lots in arrival together
 
 
 class PaymentIn(BaseModel):
@@ -3010,6 +3011,54 @@ async def deliver_batch(bid: str, body: DeliveryIn,
                                      {"$set": {"status": "Available", "current_batch_id": None}})
     await audit("delivery", "batch", bid, user, None, delivery)
 
+    # If deliver_siblings requested, deliver all sibling batches in the split arrival together
+    combined_batch_no = b.get("batch_no", "")
+    combined_delivered_weight = float(body.actual_dry_weight)
+    combined_bill = float(totals.get("bill_amount") or 0)
+    combined_balance = float(totals.get("balance_amount") or 0)
+
+    if body.deliver_siblings:
+        parent_id = b.get("parent_batch_id") or b["id"]
+        base_bno = b["batch_no"].split("-")[0] if "-" in (b.get("batch_no") or "") else b.get("batch_no")
+        sibling_sql = """
+            SELECT id::text, batch_no, raw_weight, actual_dry_weight, processed_bags, status, machine_id::text, bill_amount, total_paid, balance_amount, rate_per_kg
+            FROM public.batches
+            WHERE (parent_batch_id = %s OR id = %s OR (customer_id = %s AND batch_no LIKE %s)) AND id != %s
+            ORDER BY batch_no ASC
+        """
+        siblings = await db.query(sibling_sql, [parent_id, parent_id, b["customer_id"], f"{base_bno}%", bid])
+        if siblings:
+            combined_batch_no = f"{base_bno} ({len(siblings) + 1} Lots)"
+            for sb in siblings:
+                sb_id = sb["id"]
+                sb_dry = float(sb.get("actual_dry_weight") or 0)
+                combined_delivered_weight += sb_dry
+                sb_upd = {
+                    "status": "Delivered",
+                    "delivered_at": delivery["delivery_date"],
+                    "received_by": delivery["received_by"],
+                    "received_by_phone": delivery["received_by_phone"],
+                    "signature": delivery["signature"],
+                    "delivery_remarks": delivery["remarks"],
+                    "updated_at": now_utc().isoformat(),
+                    "updated_by": user["id"],
+                }
+                if body.rate_per_kg:
+                    sb_upd["rate_per_kg"] = body.rate_per_kg
+                sb_full = await db.batches.find_one({"id": sb_id}, {"_id": 0})
+                if sb_full:
+                    sb_totals = await recompute_batch_totals({**sb_full, **sb_upd})
+                    sb_upd.update(sb_totals)
+                    combined_bill += float(sb_totals.get("bill_amount") or 0)
+                    combined_balance += float(sb_totals.get("balance_amount") or 0)
+                await db.batches.update_one({"id": sb_id}, {"$set": sb_upd})
+                if sb.get("machine_id"):
+                    await db.machines.update_one({"id": sb["machine_id"]},
+                                                 {"$set": {"status": "Available", "current_batch_id": None}})
+            combined_delivered_weight = round(combined_delivered_weight, 2)
+            combined_bill = round(combined_bill, 2)
+            combined_balance = round(combined_balance, 2)
+
     # Auto-dispatch WhatsApp Delivery Statement with full financial breakdown
     try:
         cust = await db.customers.find_one({"id": b.get("customer_id")}, {"_id": 0})
@@ -3035,12 +3084,12 @@ async def deliver_batch(bid: str, body: DeliveryIn,
                     to_phone=phone,
                     customer_name=cust.get("name", "Valued Customer"),
                     product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
-                    batch_no=b.get("batch_no", ""),
-                    delivered_weight=float(body.actual_dry_weight),
+                    batch_no=combined_batch_no,
+                    delivered_weight=combined_delivered_weight,
                     delivered_to=delivered_to,
-                    bill_amount=float(totals.get("bill_amount") or 0),
+                    bill_amount=combined_bill,
                     amount_received=float(body.amount_received or 0),
-                    batch_pending=float(totals.get("balance_amount") or 0),
+                    batch_pending=combined_balance,
                     overall_pending=float(overall_pending),
                     branch_name=branch_name,
                     language_code=cust.get("preferred_language") or "en"
@@ -3050,6 +3099,7 @@ async def deliver_batch(bid: str, body: DeliveryIn,
     except Exception as e:
         logger.error(f"Failed to queue WhatsApp delivery statement: {e}")
 
+    fast_cache.clear()
     return {"ok": True, "weight_loss": weight_loss, "bill_amount": totals["bill_amount"], "balance_amount": totals["balance_amount"]}
 
 

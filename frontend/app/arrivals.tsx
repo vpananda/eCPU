@@ -290,18 +290,27 @@ export default function ArrivalsScreen() {
           <View style={styles.splitLotBox}>
             <View style={styles.splitLotHeader}>
               <MaterialCommunityIcons name="call-split" size={13} color={colors.primary} />
-              <Text style={styles.splitLotTitle}>{r.sub_batches!.length} Split Lots Loaded Across Dryers:</Text>
+              <Text style={styles.splitLotTitle}>{r.sub_batches!.length} Split Lots Loaded Across Dryers (Tap to Edit):</Text>
             </View>
             <View style={styles.splitPillsRow}>
               {r.sub_batches!.map((sb, idx) => (
-                <View key={sb.batch_id || idx} style={styles.splitPill}>
+                <TouchableOpacity
+                  key={sb.batch_id || idx}
+                  style={styles.splitPill}
+                  activeOpacity={0.7}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    router.push(`/batch/${sb.batch_id}`);
+                  }}
+                >
                   <Text style={styles.splitPillWeight}>{sb.raw_weight} kg</Text>
                   <Text style={styles.splitPillMachine}>• {sb.machine_name || "Dryer"}</Text>
                   <View style={[
                     styles.splitPillStatusDot, 
                     { backgroundColor: sb.status === 'Drying' ? '#F57C00' : sb.status === 'Completed' ? '#2E7D32' : '#757575' }
                   ]} />
-                </View>
+                  <MaterialCommunityIcons name="pencil-outline" size={11} color={colors.primary} />
+                </TouchableOpacity>
               ))}
             </View>
           </View>

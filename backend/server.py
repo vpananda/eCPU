@@ -1067,6 +1067,20 @@ class BatchUpdate(BaseModel):
     product_id: Optional[str] = None
     remarks: Optional[str] = None
     received_from: Optional[str] = None
+    machine_id: Optional[str] = None
+    status: Optional[str] = None
+
+
+class SplitLotAdjustment(BaseModel):
+    batch_id: str
+    raw_weight: float
+    machine_id: Optional[str] = None
+    status: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class AdjustSplitIn(BaseModel):
+    lots: List[SplitLotAdjustment]
 
 
 class BatchStatusUpdate(BaseModel):
@@ -2524,6 +2538,33 @@ async def get_batch(bid: str, user: dict = Depends(get_current_user)):
     b["product"] = clean(await db.products.find_one({"id": b["product_id"]}, {"_id": 0}))
     b["machine"] = clean(await db.machines.find_one({"id": b["machine_id"]}, {"_id": 0}))
     b["payments"] = await db.payments.find({"batch_id": bid}, {"_id": 0}).sort("created_at", -1).to_list(200)
+
+    # Attach sibling split batches if this arrival was split across dryers
+    parent_id = b.get("parent_batch_id") or b["id"]
+    base_bno = b["batch_no"].split("-")[0] if "-" in (b.get("batch_no") or "") else b.get("batch_no")
+    sibling_sql = """
+        SELECT b2.id::text, b2.batch_no, b2.raw_weight, b2.status, b2.machine_id::text, m.name as machine_name, b2.actual_dry_weight
+        FROM public.batches b2
+        LEFT JOIN public.machines m ON b2.machine_id = m.id
+        WHERE (b2.parent_batch_id = %s OR b2.id = %s OR (b2.customer_id = %s AND b2.batch_no LIKE %s))
+        ORDER BY b2.batch_no ASC
+    """
+    sibling_rows = await db.query(sibling_sql, [parent_id, parent_id, b["customer_id"], f"{base_bno}%"])
+    if sibling_rows and len(sibling_rows) > 1:
+        b["is_split"] = True
+        b["total_arrival_weight"] = round(sum(float(r.get("raw_weight") or 0) for r in sibling_rows), 2)
+        b["sibling_batches"] = [
+            {
+                "id": str(r["id"]),
+                "batch_no": r["batch_no"],
+                "raw_weight": float(r.get("raw_weight") or 0),
+                "status": r.get("status"),
+                "machine_id": str(r["machine_id"]) if r.get("machine_id") else None,
+                "machine_name": r.get("machine_name") or "Unassigned",
+                "actual_dry_weight": float(r["actual_dry_weight"]) if r.get("actual_dry_weight") is not None else None,
+            }
+            for r in sibling_rows
+        ]
     await clean_batch(b)
     return b
 
@@ -2809,22 +2850,27 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
     if body.status not in allowed:
         raise HTTPException(status_code=400, detail="Invalid status")
 
-    entry = {"status": body.status, "at": now_utc().isoformat(), "by": user["id"], "remarks": body.remarks or ""}
-    history = b.get("status_history", [])
-    history.append(entry)
+    try:
+        await db.execute("""
+            INSERT INTO public.batch_status_history (id, batch_id, status, changed_at, changed_by, remarks)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, [str(uuid.uuid4()), bid, body.status, now_utc().isoformat(), user["id"], body.remarks or ""])
+    except Exception as e:
+        logger.warning(f"Could not record batch_status_history: {e}")
 
-    upd = {"status": body.status, "status_history": history, "updated_at": now_utc().isoformat(), "updated_by": user["id"]}
+    upd = {"status": body.status, "updated_at": now_utc().isoformat(), "updated_by": user["id"]}
 
-    # Machine linkage — allow assignment at Load step
+    # Machine linkage — allow assignment at Load / Drying step
     machine_id = b.get("machine_id")
-    if body.status == "Loaded":
+    if body.status in ("Loaded", "Drying"):
         if body.machine_id:
             machine_id = body.machine_id
             upd["machine_id"] = machine_id
-        if not machine_id:
+        if not machine_id and body.status == "Loaded":
             raise HTTPException(status_code=400, detail="Machine required to load batch")
-        await db.machines.update_one({"id": machine_id},
-                                     {"$set": {"status": "Running", "current_batch_id": bid}})
+        if machine_id:
+            await db.machines.update_one({"id": machine_id},
+                                         {"$set": {"status": "Running", "current_batch_id": bid}})
     elif body.status == "Completed":
         if machine_id:
             # Check if any OTHER active batches are still drying in this machine before marking machine Available
@@ -3051,6 +3097,40 @@ async def update_batch_fields(
     if body.received_from is not None:
         upd["received_from"] = body.received_from
 
+    if body.machine_id is not None:
+        new_mid = body.machine_id.strip() if body.machine_id else None
+        upd["machine_id"] = new_mid
+        old_mid = b.get("machine_id")
+        if new_mid:
+            await db.machines.update_one({"id": new_mid}, {"$set": {"status": "Running", "current_batch_id": bid}})
+            if b.get("status") == "Received" and not body.status:
+                upd["status"] = "Drying"
+        elif old_mid:
+            other = await db.query(
+                "SELECT id FROM public.batches WHERE machine_id::text = %s AND status = 'Drying' AND id::text != %s LIMIT 1",
+                [str(old_mid), str(bid)]
+            )
+            if not other:
+                await db.machines.update_one({"id": old_mid}, {"$set": {"status": "Available", "current_batch_id": None}})
+
+    if body.status is not None:
+        allowed = {"Received", "Loaded", "Drying", "Completed", "Delivered"}
+        if body.status in allowed:
+            upd["status"] = body.status
+            if body.status in ("Loaded", "Drying"):
+                target_mid = upd.get("machine_id") or b.get("machine_id")
+                if target_mid:
+                    await db.machines.update_one({"id": target_mid}, {"$set": {"status": "Running", "current_batch_id": bid}})
+            elif body.status in ("Completed", "Delivered", "Received"):
+                curr_mid = b.get("machine_id")
+                if curr_mid:
+                    other = await db.query(
+                        "SELECT id FROM public.batches WHERE machine_id::text = %s AND status = 'Drying' AND id::text != %s LIMIT 1",
+                        [str(curr_mid), str(bid)]
+                    )
+                    if not other:
+                        await db.machines.update_one({"id": curr_mid}, {"$set": {"status": "Available", "current_batch_id": None}})
+
     # Recalculate bill and balance if weight or rate changed
     new_weight = upd.get("raw_weight", b.get("raw_weight", 0))
     new_rate = upd.get("rate_per_kg", b.get("rate_per_kg", 10))
@@ -3068,7 +3148,66 @@ async def update_batch_fields(
     upd["updated_by"] = user["id"]
 
     await db.batches.update_one({"id": bid}, {"$set": upd})
+    fast_cache.clear()
     await audit("update_batch", "batch", bid, user, b, upd)
+    return {"ok": True}
+
+
+@api.post("/batches/{bid}/adjust-split")
+async def adjust_split_batches(
+    bid: str,
+    body: AdjustSplitIn,
+    user: dict = Depends(get_current_user)
+):
+    """Adjust split weights and machine assignments across sibling sub-lots of an arrival."""
+    b = await db.batches.find_one({"id": bid}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    if not can_write_to_branch(user, b.get("branch_id")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    for item in body.lots:
+        target = await db.batches.find_one({"id": item.batch_id}, {"_id": 0})
+        if not target:
+            continue
+        upd = {}
+        if item.raw_weight is not None and item.raw_weight > 0:
+            upd["raw_weight"] = float(item.raw_weight)
+            upd["estimated_dry_weight"] = float(item.raw_weight)
+            rate = float(target.get("rate_per_kg") or 12)
+            new_bill = round(float(item.raw_weight) * rate, 2)
+            upd["bill_amount"] = new_bill
+            total_paid = float(target.get("total_paid") or 0)
+            upd["balance_amount"] = round(new_bill - total_paid, 2)
+
+        if item.machine_id is not None:
+            new_mid = item.machine_id.strip() if item.machine_id else None
+            upd["machine_id"] = new_mid
+            old_mid = target.get("machine_id")
+            if new_mid:
+                upd["status"] = "Drying"
+                await db.machines.update_one({"id": new_mid}, {"$set": {"status": "Running", "current_batch_id": item.batch_id}})
+            elif old_mid:
+                other = await db.query(
+                    "SELECT id FROM public.batches WHERE machine_id::text = %s AND status = 'Drying' AND id::text != %s LIMIT 1",
+                    [str(old_mid), str(item.batch_id)]
+                )
+                if not other:
+                    await db.machines.update_one({"id": old_mid}, {"$set": {"status": "Available", "current_batch_id": None}})
+
+        if item.status:
+            upd["status"] = item.status
+
+        if item.remarks:
+            upd["remarks"] = item.remarks
+
+        if upd:
+            upd["updated_at"] = now_utc().isoformat()
+            upd["updated_by"] = user["id"]
+            await db.batches.update_one({"id": item.batch_id}, {"$set": upd})
+            await audit("adjust_split", "batch", item.batch_id, user, target, upd)
+
+    fast_cache.clear()
     return {"ok": True}
 
 

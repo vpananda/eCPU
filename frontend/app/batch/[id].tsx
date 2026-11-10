@@ -19,6 +19,7 @@ export default function BatchDetail() {
   const toast = useToast();
   const { user } = useAuth();
   const [data, setData] = useState<any>(null);
+  const [machines, setMachines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
 
@@ -31,6 +32,8 @@ export default function BatchDetail() {
   const [newBags, setNewBags] = useState("");
   const [newReceivedFrom, setNewReceivedFrom] = useState("");
   const [newRemarks, setNewRemarks] = useState("");
+  const [newMachineId, setNewMachineId] = useState("");
+  const [newStatus, setNewStatus] = useState("");
 
   const [compDryWeight, setCompDryWeight] = useState("");
   const [compPadiWeight, setCompPadiWeight] = useState("");
@@ -79,6 +82,8 @@ export default function BatchDetail() {
       setNewBags(data.bags != null ? String(data.bags) : "1");
       setNewReceivedFrom(data.received_from || "");
       setNewRemarks(data.remarks || "");
+      setNewMachineId(data.machine_id || "");
+      setNewStatus(data.status || "Received");
     }
     setEditOpen(true);
   };
@@ -92,8 +97,12 @@ export default function BatchDetail() {
   const load = useCallback(async () => {
     if (!id || id === "[id]") return;
     try {
-      const d = await api<any>(`/batches/${id}`);
+      const [d, mList] = await Promise.all([
+        api<any>(`/batches/${id}`),
+        api<any[]>(`/machines`).catch(() => []),
+      ]);
       setData(d);
+      setMachines(mList || []);
     } catch (e: any) {
       toast.show(e.message || "Failed to load batch detail", "error");
     } finally { setLoading(false); }
@@ -157,9 +166,11 @@ export default function BatchDetail() {
           bags: newBags ? parseInt(newBags, 10) : 1,
           received_from: newReceivedFrom,
           remarks: newRemarks,
+          machine_id: newMachineId || null,
+          status: newStatus || undefined,
         }
       });
-      toast.show("Arrival details updated successfully");
+      toast.show("Arrival & dryer details updated successfully");
       setEditOpen(false);
       await load();
     } catch (e: any) {
@@ -323,6 +334,47 @@ export default function BatchDetail() {
                 placeholder="Optional notes..."
                 placeholderTextColor={colors.textLight}
               />
+
+              <Text style={styles.modalLabel}>Assigned Dryer Machine</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginBottom: spacing.md }}>
+                <TouchableOpacity
+                  onPress={() => setNewMachineId("")}
+                  style={[styles.pillOption, !newMachineId && styles.pillOptionActive]}
+                >
+                  <Text style={[styles.pillOptionText, !newMachineId && styles.pillOptionTextActive]}>
+                    Unassigned (Floor)
+                  </Text>
+                </TouchableOpacity>
+                {machines.map(m => (
+                  <TouchableOpacity
+                    key={m.id}
+                    onPress={() => {
+                      setNewMachineId(m.id);
+                      if (newStatus === "Received") setNewStatus("Drying");
+                    }}
+                    style={[styles.pillOption, newMachineId === m.id && styles.pillOptionActive]}
+                  >
+                    <Text style={[styles.pillOptionText, newMachineId === m.id && styles.pillOptionTextActive]}>
+                      {m.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={styles.modalLabel}>Processing Status</Text>
+              <View style={{ flexDirection: "row", gap: 6, marginBottom: spacing.md, flexWrap: "wrap" }}>
+                {["Received", "Drying", "Completed", "Delivered"].map(st => (
+                  <TouchableOpacity
+                    key={st}
+                    onPress={() => setNewStatus(st)}
+                    style={[styles.pillOption, newStatus === st && styles.pillOptionActive]}
+                  >
+                    <Text style={[styles.pillOptionText, newStatus === st && styles.pillOptionTextActive]}>
+                      {st}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </ScrollView>
 
             <View style={[styles.modalButtons, { marginTop: spacing.md }]}>
@@ -505,6 +557,56 @@ export default function BatchDetail() {
             <Text style={styles.qrPillBtnText}>View QR Code</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Multi-Dryer Split Batches */}
+        {data.sibling_batches && data.sibling_batches.length > 1 && (
+          <View style={styles.siblingCard}>
+            <View style={styles.siblingHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <MaterialCommunityIcons name="call-split" size={18} color={colors.primary} />
+                <Text style={styles.siblingTitle}>Multi-Dryer Split Arrival</Text>
+              </View>
+              <Text style={styles.siblingTotalWeight}>Arrival Total: {data.total_arrival_weight} KG</Text>
+            </View>
+            <Text style={styles.siblingSubtitle}>
+              This arrival is split across {data.sibling_batches.length} dryer loads. Tap any lot to view or edit:
+            </Text>
+            <View style={styles.siblingList}>
+              {data.sibling_batches.map((sb: any) => {
+                const isCurrent = sb.id === data.id;
+                return (
+                  <TouchableOpacity
+                    key={sb.id}
+                    disabled={isCurrent}
+                    onPress={() => router.push(`/batch/${sb.id}`)}
+                    style={[styles.siblingItem, isCurrent && styles.siblingItemActive]}
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text style={[styles.siblingBatchNo, isCurrent && { color: colors.primary }]}>{sb.batch_no}</Text>
+                        {isCurrent && (
+                          <View style={styles.currentBadge}>
+                            <Text style={styles.currentBadgeText}>THIS LOT</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.siblingMeta}>
+                        {sb.machine_name || "Unassigned"} • {sb.status}
+                      </Text>
+                    </View>
+                    <Text style={[styles.siblingWeight, isCurrent && { color: colors.primary }]}>
+                      {sb.raw_weight} kg
+                    </Text>
+                    {!isCurrent && (
+                      <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {/* Timeline */}
         <View style={styles.card}>
@@ -807,4 +909,101 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 16, color: colors.textMuted, textAlign: "center", fontWeight: "600" },
   errorBtn: { paddingHorizontal: 20, paddingVertical: 10, backgroundColor: colors.primary, borderRadius: radius.pill },
   errorBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  siblingCard: {
+    marginHorizontal: spacing.xl,
+    backgroundColor: "#F0FDF4",
+    borderRadius: radius.xl,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    ...shadow.sm,
+  },
+  siblingHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  siblingTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#166534",
+  },
+  siblingTotalWeight: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#166534",
+  },
+  siblingSubtitle: {
+    fontSize: 11,
+    color: "#15803D",
+    marginBottom: spacing.sm,
+  },
+  siblingList: {
+    gap: 6,
+  },
+  siblingItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  siblingItemActive: {
+    backgroundColor: "#DCFCE7",
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+  },
+  siblingBatchNo: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  currentBadge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+  },
+  currentBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  siblingMeta: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  siblingWeight: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+    marginRight: 4,
+  },
+  pillOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  pillOptionActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  pillOptionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  pillOptionTextActive: {
+    color: "#fff",
+  },
 });

@@ -19,7 +19,7 @@ export default function DeliveryScreen() {
   const [batch, setBatch] = useState<any>(null);
   const [loadingData, setLoadingData] = useState(true);
 
-  const [deliverCombined, setDeliverCombined] = useState(true);
+  const [deliverCombined, setDeliverCombined] = useState(false);
   const [dryWeight, setDryWeight] = useState("");
   const [processedBags, setProcessedBags] = useState("");
   const [rate, setRate] = useState("12");
@@ -38,12 +38,20 @@ export default function DeliveryScreen() {
       if (b.rate_per_kg) setRate(String(b.rate_per_kg));
 
       const hasSiblings = b.sibling_batches && b.sibling_batches.length > 1;
-      if (hasSiblings) {
+      const allDone = hasSiblings && b.sibling_batches.every(
+        (s: any) => s.status === "Completed" || s.status === "Delivered"
+      );
+
+      if (allDone) {
+        // All lots finished drying! Combined delivery is available & enabled by default
+        setDeliverCombined(true);
         const totalDry = b.sibling_batches.reduce((acc: number, s: any) => acc + Number(s.actual_dry_weight || 0), 0);
         const totalBags = b.sibling_batches.reduce((acc: number, s: any) => acc + Number(s.processed_bags || 0), 0);
         setDryWeight(totalDry > 0 ? String(totalDry) : (b.actual_dry_weight ? String(b.actual_dry_weight) : ""));
         setProcessedBags(totalBags > 0 ? String(totalBags) : (b.processed_bags ? String(b.processed_bags) : ""));
       } else {
+        // Some siblings are still drying or received. Keep combined OFF to protect active dryers!
+        setDeliverCombined(false);
         if (b.actual_dry_weight) setDryWeight(String(b.actual_dry_weight));
         if (b.processed_bags) setProcessedBags(String(b.processed_bags));
       }
@@ -56,6 +64,35 @@ export default function DeliveryScreen() {
 
   const isSplit = Boolean(batch?.sibling_batches && batch.sibling_batches.length > 1);
   const siblingBatches: any[] = batch?.sibling_batches || [];
+
+  const allSiblingsCompleted = isSplit && siblingBatches.every(
+    (s: any) => s.status === "Completed" || s.status === "Delivered"
+  );
+  const incompleteLots = isSplit ? siblingBatches.filter(
+    (s: any) => s.status !== "Completed" && s.status !== "Delivered"
+  ) : [];
+
+  const handleToggleCombined = () => {
+    if (!allSiblingsCompleted) {
+      const pendingNames = incompleteLots.map((s: any) => `${s.batch_no} (${s.status})`).join(", ");
+      toast.show(
+        `Combined delivery locked: ${pendingNames} still in progress. Active dryers will not be stopped. Deliver this lot individually or wait for all dryers.`,
+        "error"
+      );
+      return;
+    }
+    const next = !deliverCombined;
+    setDeliverCombined(next);
+    if (next) {
+      const totalDry = siblingBatches.reduce((acc: number, s: any) => acc + Number(s.actual_dry_weight || 0), 0);
+      const totalBags = siblingBatches.reduce((acc: number, s: any) => acc + Number(s.processed_bags || 0), 0);
+      setDryWeight(totalDry > 0 ? String(totalDry) : (batch?.actual_dry_weight ? String(batch.actual_dry_weight) : ""));
+      setProcessedBags(totalBags > 0 ? String(totalBags) : (batch?.processed_bags ? String(batch.processed_bags) : ""));
+    } else {
+      setDryWeight(batch?.actual_dry_weight ? String(batch.actual_dry_weight) : "");
+      setProcessedBags(batch?.processed_bags ? String(batch.processed_bags) : "");
+    }
+  };
 
   const arrivalWeight = isSplit && deliverCombined
     ? Number(batch?.total_arrival_weight || batch?.raw_weight || 0)
@@ -74,10 +111,9 @@ export default function DeliveryScreen() {
   const remaining = Math.max(0, balanceDue - receivedNum);
 
   const isCompleted = batch?.status === "Completed" || batch?.status === "Delivered";
-  const anyIncomplete = isSplit && deliverCombined && siblingBatches.some((s: any) => s.status !== "Completed" && s.status !== "Delivered");
 
   const submit = async () => {
-    if (!isCompleted && !(isSplit && deliverCombined)) {
+    if (!isCompleted && !(isSplit && deliverCombined && allSiblingsCompleted)) {
       return toast.show(`Batch cannot be delivered until processing is Completed (currently ${batch.status})`, "error");
     }
     if (!dryNum || dryNum <= 0) return toast.show("Enter processed dry weight", "error");
@@ -95,14 +131,14 @@ export default function DeliveryScreen() {
           amount_received: receivedNum,
           payment_mode: paymentMode,
           remarks,
-          deliver_siblings: isSplit && deliverCombined,
+          deliver_siblings: isSplit && deliverCombined && allSiblingsCompleted,
         },
       });
       await storage.removeItem("cached_arrivals_dashboard");
       toast.show(
-        isSplit && deliverCombined
+        isSplit && deliverCombined && allSiblingsCompleted
           ? `All ${siblingBatches.length} split lots delivered combinedly & WhatsApp statement sent!`
-          : "Batch delivered successfully"
+          : `Lot ${batch.batch_no} delivered successfully. Active dryers continue running!`
       );
       router.replace(`/batch/${id}`);
     } catch (e: any) {
@@ -127,7 +163,9 @@ export default function DeliveryScreen() {
     );
   }
 
-  const weightLoss = dryNum > 0 ? Math.max(0, batch.raw_weight - dryNum) : 0;
+  const weightLoss = dryNum > 0 ? Math.max(0, arrivalWeight - dryNum) : 0;
+  const lossPct = arrivalWeight > 0 && dryNum > 0 ? ((weightLoss / arrivalWeight) * 100).toFixed(1) : "0.0";
+  const yieldPct = arrivalWeight > 0 && dryNum > 0 ? ((dryNum / arrivalWeight) * 100).toFixed(1) : "0.0";
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
@@ -142,7 +180,7 @@ export default function DeliveryScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 
-          {(!isCompleted && !(isSplit && deliverCombined)) && (
+          {!isCompleted && !(isSplit && deliverCombined && allSiblingsCompleted) && (
             <View style={styles.notCompletedBanner}>
               <MaterialCommunityIcons name="alert-circle" size={18} color="#B45309" />
               <Text style={styles.notCompletedText}>
@@ -151,16 +189,23 @@ export default function DeliveryScreen() {
             </View>
           )}
 
-          {anyIncomplete && (
-            <View style={styles.notCompletedBanner}>
-              <MaterialCommunityIcons name="alert-circle" size={18} color="#B45309" />
-              <Text style={styles.notCompletedText}>
-                ⚠️ Note: Some split lots are still drying. Delivering combined will record and deliver all finished lots once drying completes.
+          {/* Active Dryer Protection Banner if any sibling is still drying */}
+          {isSplit && !allSiblingsCompleted && (
+            <View style={styles.dryerProtectedBanner}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <MaterialCommunityIcons name="shield-check" size={20} color="#047857" />
+                <Text style={styles.dryerProtectedTitle}>Active Dryers Protected (No Auto-Close)</Text>
+              </View>
+              <Text style={styles.dryerProtectedText}>
+                Split sibling lot(s) currently drying ({incompleteLots.map((s: any) => `${s.batch_no} in ${s.machine_name || 'Dryer'}`).join(", ")}) will <Text style={{ fontWeight: "800", color: "#065F46" }}>NOT</Text> be stopped or closed.
+              </Text>
+              <Text style={[styles.dryerProtectedText, { marginTop: 4 }]}>
+                Confirming now will deliver <Text style={{ fontWeight: "800", color: "#065F46" }}>ONLY Lot {batch.batch_no}</Text> ({arrivalWeight} kg wet • {dryNum || batch.actual_dry_weight || 0} kg dry • ₹{totalAmount.toFixed(0)}). Active dryers continue running until drying completes.
               </Text>
             </View>
           )}
 
-          {/* Multi-Dryer Combined Delivery Section if arrival was split */}
+          {/* Multi-Dryer Split Arrival Section */}
           {isSplit && (
             <View style={styles.combinedBox}>
               <View style={styles.combinedHeader}>
@@ -169,25 +214,37 @@ export default function DeliveryScreen() {
                   <Text style={styles.combinedTitle}>Split Arrival ({siblingBatches.length} Lots)</Text>
                 </View>
                 <TouchableOpacity
-                  style={[styles.combinedToggleBtn, deliverCombined && styles.combinedToggleBtnActive]}
-                  onPress={() => setDeliverCombined(!deliverCombined)}
+                  style={[
+                    styles.combinedToggleBtn,
+                    deliverCombined && styles.combinedToggleBtnActive,
+                    !allSiblingsCompleted && styles.combinedToggleBtnDisabled,
+                  ]}
+                  onPress={handleToggleCombined}
                   activeOpacity={0.8}
                 >
                   <MaterialCommunityIcons
-                    name={deliverCombined ? "checkbox-marked" : "checkbox-blank-outline"}
-                    size={16}
-                    color={deliverCombined ? "#fff" : colors.textMuted}
+                    name={!allSiblingsCompleted ? "lock" : (deliverCombined ? "checkbox-marked" : "checkbox-blank-outline")}
+                    size={15}
+                    color={!allSiblingsCompleted ? colors.textMuted : (deliverCombined ? "#fff" : colors.textMuted)}
                   />
-                  <Text style={[styles.combinedToggleText, deliverCombined && { color: "#fff" }]}>
-                    Deliver Combined
+                  <Text
+                    style={[
+                      styles.combinedToggleText,
+                      deliverCombined && { color: "#fff" },
+                      !allSiblingsCompleted && { color: colors.textMuted },
+                    ]}
+                  >
+                    {!allSiblingsCompleted ? "Combined (Locked)" : "Deliver Combined"}
                   </Text>
                 </TouchableOpacity>
               </View>
 
               <Text style={styles.combinedNotice}>
-                {deliverCombined
+                {deliverCombined && allSiblingsCompleted
                   ? `Delivering combined: All ${siblingBatches.length} split lots will be delivered together under ONE consolidated bill & ONE WhatsApp message.`
-                  : "Delivering only this specific split lot individually."}
+                  : !allSiblingsCompleted
+                    ? `Individual delivery active for Lot ${batch.batch_no}. Combined delivery will unlock once all dryers finish drying.`
+                    : "Delivering only this specific split lot individually."}
               </Text>
 
               <View style={styles.siblingList}>
@@ -202,14 +259,26 @@ export default function DeliveryScreen() {
                       </Text>
                     </View>
                     <View style={{ alignItems: "flex-end" }}>
-                      <Text
-                        style={[
-                          styles.siblingStatusText,
-                          { color: sb.status === "Completed" ? "#2E7D32" : sb.status === "Delivered" ? "#7B1FA2" : colors.warning },
-                        ]}
-                      >
-                        {sb.status}
-                      </Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        {sb.status === "Drying" && (
+                          <MaterialCommunityIcons name="fire" size={13} color="#D97706" />
+                        )}
+                        <Text
+                          style={[
+                            styles.siblingStatusText,
+                            {
+                              color:
+                                sb.status === "Completed"
+                                  ? "#2E7D32"
+                                  : sb.status === "Delivered"
+                                  ? "#7B1FA2"
+                                  : colors.warning,
+                            },
+                          ]}
+                        >
+                          {sb.status}
+                        </Text>
+                      </View>
                       {sb.actual_dry_weight ? (
                         <Text style={styles.siblingDryText}>{sb.actual_dry_weight} kg dry</Text>
                       ) : null}
@@ -225,21 +294,35 @@ export default function DeliveryScreen() {
             <View style={styles.sumHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.batchNo}>
-                  {isSplit && deliverCombined ? `${batch.batch_no.split("-")[0]} (Combined Arrival)` : batch.batch_no}
+                  {isSplit && deliverCombined && allSiblingsCompleted
+                    ? `${batch.batch_no.split("-")[0]} (Combined Arrival)`
+                    : isSplit
+                    ? `${batch.batch_no} (Partial Delivery)`
+                    : batch.batch_no}
                 </Text>
                 <Text style={styles.customer}>{batch.customer?.name} · {batch.customer?.mobile}</Text>
               </View>
               <View style={styles.productChip}>
-                <Text style={styles.productChipText}>{batch.product?.name}</Text>
+                <Text style={styles.productChipText}>{batch.product?.name || "Cardamom"}</Text>
               </View>
             </View>
             <View style={styles.sumRow}>
-              <SumStat label={isSplit && deliverCombined ? "Total Arrival Weight" : "Arrival Weight"} value={`${arrivalWeight} kg`} />
+              <SumStat
+                label={isSplit && deliverCombined && allSiblingsCompleted ? "Total Arrival Weight" : "Lot Raw Weight"}
+                value={`${arrivalWeight} kg`}
+              />
               <SumStat label="Bags at arrival" value={String(batch.bags || 0)} />
               {batch.padi_weight != null && Number(batch.padi_weight) > 0 ? (
                 <SumStat label="Padi Weight" value={`${batch.padi_weight} kg`} />
               ) : (
-                <SumStat label="Machine" value={isSplit && deliverCombined ? `${siblingBatches.length} Dryers` : (batch.machine?.name || "-")} />
+                <SumStat
+                  label="Machine"
+                  value={
+                    isSplit && deliverCombined && allSiblingsCompleted
+                      ? `${siblingBatches.length} Dryers`
+                      : (batch.machine?.name || "-")
+                  }
+                />
               )}
             </View>
           </View>
@@ -248,24 +331,46 @@ export default function DeliveryScreen() {
 
           <View style={{ flexDirection: "row", gap: spacing.md }}>
             <View style={{ flex: 1 }}>
-              <Input testID="delivery-dry-weight" label={isSplit && deliverCombined ? "Combined Dry Weight (kg) *" : "Processed Weight (kg) *"} keyboardType="decimal-pad" value={dryWeight} onChangeText={setDryWeight} placeholder="e.g. 160" />
+              <Input
+                testID="delivery-dry-weight"
+                label={isSplit && deliverCombined && allSiblingsCompleted ? "Combined Dry Weight (kg) *" : "Processed Weight (kg) *"}
+                keyboardType="decimal-pad"
+                value={dryWeight}
+                onChangeText={setDryWeight}
+                placeholder="e.g. 112"
+              />
             </View>
             <View style={{ flex: 1 }}>
-              <Input testID="delivery-processed-bags" label="No. of Bags" keyboardType="number-pad" value={processedBags} onChangeText={setProcessedBags} />
+              <Input
+                testID="delivery-processed-bags"
+                label="No. of Bags"
+                keyboardType="number-pad"
+                value={processedBags}
+                onChangeText={setProcessedBags}
+              />
             </View>
           </View>
 
           {dryNum > 0 && (
             <View style={styles.lossPill}>
               <MaterialCommunityIcons name="scale-balance" size={14} color={colors.warning} />
-              <Text style={styles.lossText}>Weight loss: {weightLoss.toFixed(2)} kg ({arrivalWeight > 0 ? ((weightLoss / arrivalWeight) * 100).toFixed(1) : "0"}%)</Text>
+              <Text style={styles.lossText}>
+                Weight loss: {weightLoss.toFixed(2)} kg ({lossPct}%) • Yield: {yieldPct}%
+              </Text>
             </View>
           )}
 
           <Input testID="delivery-rate" label="Rate per kg (₹)" keyboardType="decimal-pad" value={rate} onChangeText={setRate} />
 
           <View style={styles.billCard}>
-            <Row label={isSplit && deliverCombined ? "Total Arrival (Combined) × Rate" : "Arrival × Rate"} value={`${arrivalWeight || 0} kg × ₹${rateNum || 0}`} />
+            <Row
+              label={
+                isSplit && deliverCombined && allSiblingsCompleted
+                  ? "Total Arrival (Combined) × Rate"
+                  : `Lot ${batch.batch_no} Raw Weight × Rate`
+              }
+              value={`${arrivalWeight || 0} kg × ₹${rateNum || 0}`}
+            />
             <Row label="Total Amount" value={`₹${totalAmount.toFixed(2)}`} bold />
             <Row label="Already Paid (advance)" value={`₹${alreadyPaid.toFixed(2)}`} />
             <View style={styles.hr} />
@@ -302,7 +407,13 @@ export default function DeliveryScreen() {
           <View style={{ height: spacing.md }} />
           <Button
             testID="delivery-submit"
-            title={isSplit && deliverCombined ? `Confirm Combined Delivery (${arrivalWeight} kg)` : "Confirm Delivery"}
+            title={
+              isSplit && deliverCombined && allSiblingsCompleted
+                ? `Confirm Combined Delivery (${arrivalWeight} kg • ₹${totalAmount.toFixed(0)})`
+                : isSplit
+                ? `Deliver Lot ${batch.batch_no} (${arrivalWeight} kg • ₹${totalAmount.toFixed(0)})`
+                : "Confirm Delivery"
+            }
             onPress={submit}
             loading={saving}
           />
@@ -350,6 +461,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#92400E",
+    lineHeight: 16,
+  },
+  dryerProtectedBanner: {
+    backgroundColor: "#ECFDF5",
+    padding: 12,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
+    marginBottom: spacing.md,
+  },
+  dryerProtectedTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#065F46",
+  },
+  dryerProtectedText: {
+    fontSize: 12,
+    color: "#047857",
     lineHeight: 16,
   },
   summary: { backgroundColor: colors.primary50, borderRadius: radius.xl, padding: spacing.lg, marginBottom: spacing.lg },
@@ -414,6 +543,10 @@ const styles = StyleSheet.create({
   combinedToggleBtnActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+  },
+  combinedToggleBtnDisabled: {
+    backgroundColor: "#F3F4F6",
+    borderColor: "#E5E7EB",
   },
   combinedToggleText: {
     fontSize: 11,

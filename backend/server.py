@@ -2436,14 +2436,14 @@ async def list_batches(user: dict = Depends(get_current_user),
     if branch_id:
         if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != branch_id:
             raise HTTPException(status_code=403, detail="Forbidden")
-        where_clauses.append("b.branch_id = %s")
+        where_clauses.append("b.branch_id = %s::uuid")
         params.append(branch_id)
     else:
         # branch scoping from user
         role = user.get("role")
         bid = user.get("branch_id")
         if role != "Admin" and bid:
-            where_clauses.append("b.branch_id = %s")
+            where_clauses.append("b.branch_id = %s::uuid")
             params.append(bid)
             
     if customer_id:
@@ -3028,8 +3028,18 @@ async def deliver_batch(bid: str, body: DeliveryIn,
         """
         siblings = await db.query(sibling_sql, [parent_id, parent_id, b["customer_id"], f"{base_bno}%", bid])
         if siblings:
+            # SAFETY PROTECTION: Active drying machines must NEVER be closed prematurely!
+            incomplete = [s["batch_no"] for s in siblings if s.get("status") not in ("Completed", "Delivered")]
+            if incomplete:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot deliver combined: Split lot(s) {', '.join(incomplete)} are still drying in machines or pending. Active drying lots cannot be closed automatically. Please wait until all dryers complete drying, or deliver this lot individually."
+                )
+
             combined_batch_no = f"{base_bno} ({len(siblings) + 1} Lots)"
             for sb in siblings:
+                if sb.get("status") != "Completed":
+                    continue
                 sb_id = sb["id"]
                 sb_dry = float(sb.get("actual_dry_weight") or 0)
                 combined_delivered_weight += sb_dry

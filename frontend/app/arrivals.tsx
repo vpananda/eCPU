@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Modal, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Modal, Alert, RefreshControl } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
@@ -9,6 +9,7 @@ import { openWhatsApp, buildArrivalMessage } from "@/src/utils/notifications";
 import Calendar from "@/src/components/Calendar";
 import { storage } from "@/src/utils/storage";
 import { useSyncRefresh } from "@/src/sync";
+import Loader from "@/src/components/Loader";
 
 type SubBatch = {
   batch_id: string;
@@ -38,6 +39,8 @@ type Row = {
   total_paid?: number;
   balance_amount?: number;
   actual_dry_weight: number | null;
+  padi_weight?: number;
+  processed_bags?: number;
   delivery_date: string | null;
   status: string;
   is_split?: boolean;
@@ -64,10 +67,13 @@ type Payload = {
     out_count: number;
     processing_count: number;
     processing_machine_count?: number;
+    completed_count?: number;
+    completed_weight?: number;
   };
   in: Row[];
   out: Row[];
   processing: Row[];
+  completed?: Row[];
   processing_machines?: ProcessingMachine[];
 };
 
@@ -113,8 +119,10 @@ export default function ArrivalsScreen() {
   const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string; q?: string }>();
   const [data, setData] = useState<Payload | null>(cachedMemoryArrivals);
   const [loading, setLoading] = useState(!cachedMemoryArrivals);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState(params.q || "");
   const [tab, setTab] = useState<"in" | "processing" | "out">((params.tab as any) || "in");
+  const [procSubTab, setProcSubTab] = useState<"active" | "completed">("active");
 
   const [start, setStart] = useState<string>(params.start || "");
   const [end, setEnd] = useState<string>(params.end || "");
@@ -132,10 +140,41 @@ export default function ArrivalsScreen() {
 
   const openCompleteModal = (r: Row) => {
     setCompleteBatch(r);
-    setCompDryWeight("");
-    setCompPadiWeight("");
-    setCompBags("");
+    setCompDryWeight(r.actual_dry_weight ? String(r.actual_dry_weight) : "");
+    setCompPadiWeight(r.padi_weight ? String(r.padi_weight) : "");
+    setCompBags(r.processed_bags ? String(r.processed_bags) : "");
   };
+
+  const load = useCallback(async (silent = false, forceRefresh = false) => {
+    if (!silent && (!cachedMemoryArrivals || forceRefresh)) setLoading(true);
+    try {
+      const qs = new URLSearchParams();
+      if (start) qs.set("start", start);
+      if (end) qs.set("end", end);
+      if (selectedBranchId) qs.set("branch_id", selectedBranchId);
+      if (search.trim()) qs.set("q", search.trim());
+      if (forceRefresh) qs.set("no_cache", "true");
+      const d = await api<Payload>(`/dashboard/arrivals?${qs.toString()}`);
+      setData(d);
+      cachedMemoryArrivals = d;
+      await storage.setItem("cached_arrivals_dashboard", d);
+    } catch (err: any) {
+      console.warn("Failed to load arrivals dashboard:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [start, end, selectedBranchId, search]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      cachedMemoryArrivals = null;
+      await storage.removeItem("cached_arrivals_dashboard");
+      await load(true, true);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
 
   const handleCompleteSubmit = async () => {
     if (!completeBatch) return;
@@ -146,6 +185,8 @@ export default function ArrivalsScreen() {
     }
     const padi = parseFloat(compPadiWeight || "0");
     const bagsNum = parseInt(compBags || "0", 10);
+    const targetBatchNo = completeBatch.batch_no;
+    const targetCustomerName = completeBatch.customer_name;
     setCompleting(true);
     try {
       await api(`/batches/${completeBatch.batch_id}/status`, {
@@ -157,13 +198,24 @@ export default function ArrivalsScreen() {
           processed_bags: isNaN(bagsNum) ? 0 : bagsNum,
         },
       });
-      Alert.alert("Success", `Batch ${completeBatch.batch_no} marked Completed & WhatsApp alert sent to ${completeBatch.customer_name}!`);
+
+      // Clear cached data so UI is forced fresh
+      cachedMemoryArrivals = null;
+      await storage.removeItem("cached_arrivals_dashboard");
+
       setCompleteBatch(null);
-      await load();
+
+      // Trigger full refresh showing loader image & switch to completed tab
+      setLoading(true);
+      setProcSubTab("completed");
+      await load(false, true);
+
+      Alert.alert("Processing Completed", `Batch ${targetBatchNo} marked Completed & WhatsApp alert sent to ${targetCustomerName}!`);
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to complete processing");
     } finally {
       setCompleting(false);
+      setLoading(false);
     }
   };
 
@@ -198,25 +250,10 @@ export default function ArrivalsScreen() {
     loadFromCache();
   }, []);
 
-  const load = useCallback(async (silent = false) => {
-    if (!silent && !cachedMemoryArrivals && !data) setLoading(true);
-    try {
-      const qs = new URLSearchParams();
-      if (start) qs.set("start", start);
-      if (end) qs.set("end", end);
-      if (selectedBranchId) qs.set("branch_id", selectedBranchId);
-      if (search.trim()) qs.set("q", search.trim());
-      const d = await api<Payload>(`/dashboard/arrivals?${qs.toString()}`);
-      setData(d);
-      cachedMemoryArrivals = d;
-      storage.setItem("cached_arrivals_dashboard", d);
-    } finally { setLoading(false); }
-  }, [start, end, selectedBranchId, search, data]);
-
   useFocusEffect(useCallback(() => { load(!!data); }, [load, !!data]));
 
   useSyncRefresh(useCallback(async () => {
-    await load(false);
+    await load(false, true);
   }, [load]));
 
     const shareArrivalWhatsApp = async (r: Row) => {
@@ -233,13 +270,21 @@ export default function ArrivalsScreen() {
     await openWhatsApp(r.customer_mobile || "", msg);
   };
 
-  const rows: Row[] = tab === "in" ? data?.in || [] : tab === "out" ? data?.out || [] : data?.processing || [];
+  const rows: Row[] =
+    tab === "in"
+      ? data?.in || []
+      : tab === "out"
+      ? data?.out || []
+      : procSubTab === "completed"
+      ? data?.completed || []
+      : data?.processing || [];
 
   const renderBatchCard = (r: Row, isInsideMachineGroup = false) => {
-    const dateStr = tab === "out" ? r.delivery_date : r.arrival_date;
-    const weightVal = tab === "out" ? (r.actual_dry_weight || 0) : r.raw_weight;
-    const weightLabel = tab === "out" ? "dried" : "wet / raw";
-    const accent = tab === "in" ? colors.primary : tab === "out" ? colors.purple : colors.warning;
+    const isCompletedRow = r.status === "Completed";
+    const dateStr = (tab === "out" || isCompletedRow) ? (r.delivery_date || r.arrival_date) : r.arrival_date;
+    const weightVal = (tab === "out" || isCompletedRow) ? (r.actual_dry_weight || 0) : r.raw_weight;
+    const weightLabel = (tab === "out" || isCompletedRow) ? "dried" : "wet / raw";
+    const accent = tab === "in" ? colors.primary : tab === "out" ? colors.purple : isCompletedRow ? "#2E7D32" : colors.warning;
     const isProcessingTab = tab === "processing";
     const hasSplitLots = tab === "in" && r.is_split && r.sub_batches && r.sub_batches.length > 1;
 
@@ -344,16 +389,56 @@ export default function ArrivalsScreen() {
           ) : null}
         </View>
 
-        {isProcessingTab && (
+        {isCompletedRow ? (
+          <View style={styles.cardCompletedBox}>
+            <View style={styles.completedBadge}>
+              <MaterialCommunityIcons name="check-decagram" size={18} color="#2E7D32" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completedBadgeTitle}>Processing Completed ✓</Text>
+                <Text style={styles.completedBadgeSub}>
+                  Dry: {r.actual_dry_weight} kg • Wet: {r.raw_weight} kg
+                  {r.raw_weight && r.actual_dry_weight ? ` (Yield: ${((Number(r.actual_dry_weight) / Number(r.raw_weight)) * 100).toFixed(1)}%)` : ""}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.completedActionRow}>
+              <TouchableOpacity
+                style={styles.cardDeliverBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  router.push(`/delivery/${r.batch_id}`);
+                }}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="truck-delivery-outline" size={13} color="#fff" />
+                <Text style={styles.cardDeliverBtnText}>Deliver Stock</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cardEditCompleteBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  openCompleteModal(r);
+                }}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="pencil-outline" size={13} color={colors.primary} />
+                <Text style={styles.cardEditCompleteBtnText}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : isProcessingTab ? (
           <TouchableOpacity
             style={styles.cardCompleteBtn}
-            onPress={() => openCompleteModal(r)}
+            onPress={(e) => {
+              e.stopPropagation();
+              openCompleteModal(r);
+            }}
             activeOpacity={0.8}
           >
             <MaterialCommunityIcons name="check-circle" size={14} color="#fff" />
             <Text style={styles.cardCompleteBtnText}>Complete Processing</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
       </TouchableOpacity>
     );
   };
@@ -491,17 +576,67 @@ export default function ArrivalsScreen() {
       </View>
 
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        <View style={styles.loaderWrap}>
+          <Loader size={76} />
+          <Text style={styles.loaderTitle}>Processing & Syncing Dryers...</Text>
+          <Text style={styles.loaderSubtitle}>Fetching live machine loads and completed lots</Text>
+        </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 100, gap: spacing.sm }}>
-          {rows.length === 0 && (
-            <View style={styles.empty}>
-              <MaterialCommunityIcons name="inbox-outline" size={48} color={colors.textLight} />
-              <Text style={styles.emptyText}>No {tab === "in" ? "arrivals" : tab === "out" ? "deliveries" : "batches in processing"}</Text>
+        <ScrollView
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={[colors.primary, colors.warning]}
+              tintColor={colors.primary}
+            />
+          }
+          contentContainerStyle={{ padding: spacing.xl, paddingBottom: 100, gap: spacing.sm }}
+        >
+          {tab === "processing" && (
+            <View style={styles.subTabRow}>
+              <TouchableOpacity
+                style={[styles.subTabBtn, procSubTab === "active" && styles.subTabBtnActive]}
+                onPress={() => setProcSubTab("active")}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons
+                  name="generator-portable"
+                  size={16}
+                  color={procSubTab === "active" ? "#fff" : colors.warning}
+                />
+                <Text style={[styles.subTabBtnText, procSubTab === "active" && styles.subTabBtnTextActive]}>
+                  In Dryers ({data?.totals?.processing_count || 0})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.subTabBtn, procSubTab === "completed" && styles.subTabBtnActiveGreen]}
+                onPress={() => setProcSubTab("completed")}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons
+                  name="check-decagram"
+                  size={16}
+                  color={procSubTab === "completed" ? "#fff" : "#2E7D32"}
+                />
+                <Text style={[styles.subTabBtnText, procSubTab === "completed" && styles.subTabBtnTextActive]}>
+                  Ready for Delivery ({data?.totals?.completed_count || 0})
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
-          {tab === "processing" && (data?.processing_machines && data.processing_machines.length > 0) ? (
+          {rows.length === 0 && (
+            <View style={styles.empty}>
+              <MaterialCommunityIcons name="inbox-outline" size={48} color={colors.textLight} />
+              <Text style={styles.emptyText}>
+                No {tab === "in" ? "arrivals" : tab === "out" ? "deliveries" : procSubTab === "completed" ? "completed batches awaiting delivery" : "batches currently in dryers"}
+              </Text>
+            </View>
+          )}
+
+          {tab === "processing" && procSubTab === "active" && (data?.processing_machines && data.processing_machines.length > 0) ? (
             data.processing_machines.map(pm => (
               <View key={pm.machine_id} style={styles.machineGroupSection}>
                 <View style={styles.machineGroupHeader}>
@@ -998,5 +1133,133 @@ const styles = StyleSheet.create({
   rowCardIndented: {
     borderLeftWidth: 3,
     borderLeftColor: "#F57C00",
+  },
+  subTabRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  subTabBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: radius.md,
+    backgroundColor: "#fff",
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    ...shadow.sm,
+  },
+  subTabBtnActive: {
+    backgroundColor: "#E65100",
+    borderColor: "#E65100",
+  },
+  subTabBtnActiveGreen: {
+    backgroundColor: "#2E7D32",
+    borderColor: "#2E7D32",
+  },
+  subTabBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  subTabBtnTextActive: {
+    color: "#fff",
+  },
+  subTabBadge: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: colors.textMuted,
+  },
+  subTabBadgeActive: {
+    color: "#FFE082",
+  },
+  subTabBadgeActiveGreen: {
+    color: "#C8E6C9",
+  },
+  cardCompletedBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+    gap: 10,
+  },
+  completedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  completedBadgeTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#2E7D32",
+  },
+  completedBadgeSub: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#388E3C",
+    marginTop: 1,
+  },
+  completedActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  cardDeliverBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#2E7D32",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+  },
+  cardDeliverBtnText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  cardEditCompleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.primary + "60",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radius.sm,
+  },
+  cardEditCompleteBtnText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  loaderWrap: {
+    paddingTop: 80,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loaderTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.text,
+    marginTop: 12,
+  },
+  loaderSubtitle: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: colors.textMuted,
+    marginTop: 4,
   },
 });

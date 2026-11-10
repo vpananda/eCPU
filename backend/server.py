@@ -340,6 +340,7 @@ class PostgresCollection:
             
         query = f"UPDATE {self.table_name} SET {', '.join(set_clause)} WHERE {where_clause}"
         await self.db.execute(query, set_params + params)
+        fast_cache.clear()
         return None
 
     async def find_one_and_update(self, filter_dict, update_dict, upsert=False, return_document=False):
@@ -400,6 +401,7 @@ class PostgresCollection:
             
         query = f"UPDATE {self.table_name} SET {', '.join(set_clause)} WHERE {where_clause} RETURNING *"
         res = await self.db.query(query, set_params + params, self.table_name)
+        fast_cache.clear()
         
         if return_document:
             return res[0] if res else None
@@ -411,6 +413,7 @@ class PostgresCollection:
         where_clause, params = build_where_clause(filter_dict, self.table_name)
         query = f"DELETE FROM {self.table_name} WHERE {self.pk_col} IN (SELECT {self.pk_col} FROM {self.table_name} WHERE {where_clause} LIMIT 1)"
         await self.db.execute(query, params)
+        fast_cache.clear()
         return None
 
     async def delete_many(self, filter_dict):
@@ -419,6 +422,7 @@ class PostgresCollection:
         where_clause, params = build_where_clause(filter_dict, self.table_name)
         query = f"DELETE FROM {self.table_name} WHERE {where_clause}"
         await self.db.execute(query, params)
+        fast_cache.clear()
         return None
 
     def find(self, filter_dict=None, projection=None):
@@ -4174,7 +4178,9 @@ async def dashboard_arrivals(
     """List arrivals + processing + deliveries with customer + branch + weights."""
     target_bid = branch_id or user.get("branch_id")
     cache_key = f"dash_arr:{target_bid or 'all'}:{start or ''}:{end or ''}:{limit}"
-    if not no_cache and not q:
+    if no_cache:
+        fast_cache.clear()
+    elif not q:
         cached = fast_cache.get(cache_key)
         if cached:
             return cached
@@ -4279,7 +4285,7 @@ async def dashboard_arrivals(
         LIMIT %s
     """
     
-    # 3. Fetch active processing batches
+    # 3. Fetch active processing batches (actively in dryers: Loaded or Drying)
     proc_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
@@ -4296,16 +4302,39 @@ async def dashboard_arrivals(
         LEFT JOIN public.products p ON b.product_id = p.id
         LEFT JOIN public.machines m ON b.machine_id = m.id
         LEFT JOIN public.branches br ON b.branch_id = br.id
-        WHERE {where_str} AND b.status IN ('Loaded', 'Drying', 'Completed')
+        WHERE {where_str} AND b.status IN ('Loaded', 'Drying')
         ORDER BY COALESCE(b.arrival_date, b.created_at) DESC, b.created_at DESC
         LIMIT %s
     """
     
-    # Fetch in_rows, out_rows, and proc_rows concurrently
-    in_rows, out_rows, proc_rows = await asyncio.gather(
+    # 4. Fetch completed batches (processing finished, ready for delivery)
+    comp_sql = f"""
+        SELECT 
+            b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
+            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
+            b.delivered_at as delivery_date,
+            b.is_split, b.parent_batch_id::text as parent_batch_id,
+            c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
+            p.name as product_name,
+            m.id::text as machine_id,
+            m.name as machine_name,
+            br.name as branch_name
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.machines m ON b.machine_id = m.id
+        LEFT JOIN public.branches br ON b.branch_id = br.id
+        WHERE {where_str} AND b.status = 'Completed'
+        ORDER BY b.updated_at DESC, COALESCE(b.arrival_date, b.created_at) DESC
+        LIMIT %s
+    """
+
+    # Fetch in_rows, out_rows, proc_rows, comp_rows concurrently
+    in_rows, out_rows, proc_rows, comp_rows = await asyncio.gather(
         db.query(in_sql, in_params + [limit]),
         db.query(out_sql, out_params + [limit]),
         db.query(proc_sql, list(params) + [limit]),
+        db.query(comp_sql, list(params) + [limit]),
     )
     
     def format_row(r):
@@ -4417,8 +4446,9 @@ async def dashboard_arrivals(
 
     out_list = [format_row(r) for r in out_rows]
     proc_list = [format_row(r) for r in proc_rows]
+    comp_list = [format_row(r) for r in comp_rows]
     
-    # Group processing batches by machine
+    # Group active processing batches by machine
     machines_map = {}
     for row in proc_list:
         mid = row.get("machine_id") or "unassigned"
@@ -4447,6 +4477,7 @@ async def dashboard_arrivals(
     total_in = round(sum(r["raw_weight"] for r in in_list), 2)
     total_out = round(sum((r["actual_dry_weight"] or 0) for r in out_list), 2)
     total_proc = round(sum(r["raw_weight"] for r in proc_list), 2)
+    total_comp = round(sum((r["actual_dry_weight"] or 0) for r in comp_list), 2)
     
     range_start = start if start else "All"
     range_end = (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10] if (start and end) else (end if end else "Time")
@@ -4456,11 +4487,13 @@ async def dashboard_arrivals(
         "totals": {
             "in_weight": total_in, "out_weight": total_out, "processing_weight": total_proc,
             "in_count": len(in_list), "out_count": len(out_list), "processing_count": len(proc_list),
+            "completed_count": len(comp_list), "completed_weight": total_comp,
             "processing_machine_count": active_machines_count,
         },
         "in": in_list,
         "out": out_list,
         "processing": proc_list,
+        "completed": comp_list,
         "processing_machines": proc_machines,
     }
     if not q:

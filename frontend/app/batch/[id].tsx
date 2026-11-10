@@ -10,6 +10,8 @@ import { useToast } from "@/src/components/Toast";
 import { Button } from "@/src/components/Button";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
+import { storage } from "@/src/utils/storage";
+import Loader from "@/src/components/Loader";
 
 const FLOW = ["Received", "Loaded", "Drying", "Completed", "Delivered"];
 
@@ -64,13 +66,17 @@ export default function BatchDetail() {
           processed_bags: isNaN(bagsNum) ? 0 : bagsNum,
         },
       });
+      // Invalidate arrivals dashboard cache
+      await storage.removeItem("cached_arrivals_dashboard");
       toast.show("Processing completed & customer notified!");
       setCompleteOpen(false);
+      setLoading(true);
       await load();
     } catch (e: any) {
       toast.show(e.message || "Failed to complete processing", "error");
     } finally {
       setUpdating(false);
+      setLoading(false);
     }
   };
 
@@ -203,7 +209,14 @@ export default function BatchDetail() {
   };
 
   if (loading) {
-    return <SafeAreaView style={styles.safe}><ActivityIndicator style={{ marginTop: 60 }} color={colors.primary} /></SafeAreaView>;
+    return (
+      <SafeAreaView style={[styles.safe, { justifyContent: "center", alignItems: "center" }]}>
+        <Loader size={76} />
+        <Text style={{ fontSize: 15, fontWeight: "700", color: colors.text, marginTop: 12 }}>
+          Loading Batch Details...
+        </Text>
+      </SafeAreaView>
+    );
   }
 
   if (!data) {

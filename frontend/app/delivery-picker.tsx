@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, RefreshControl } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -7,9 +7,17 @@ import { api } from "@/src/api";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { useToast } from "@/src/components/Toast";
 import { StatusPill } from "@/src/components/ui";
+import { useAuth } from "@/src/auth";
+import Loader from "@/src/components/Loader";
 
 type Batch = {
-  id: string; batch_no: string; status: string; raw_weight: number;
+  id: string;
+  batch_no: string;
+  status: string;
+  raw_weight: number;
+  actual_dry_weight?: number;
+  branch_id?: string;
+  branch_name?: string;
   customer?: { id: string; name: string; code: string; mobile: string };
   product?: { name: string };
   balance_amount?: number;
@@ -18,22 +26,40 @@ type Batch = {
 export default function DeliveryPicker() {
   const router = useRouter();
   const toast = useToast();
+  const { selectedBranchId, branches } = useAuth();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [q, setQ] = useState("");
 
+  const activeBranchName = selectedBranchId
+    ? branches.find(b => b.id === selectedBranchId)?.name || "Selected Branch"
+    : "All Branches";
+
   const load = useCallback(async () => {
-    setLoading(true);
     try {
-      // Deliver screen should have only processed (Completed) batches
-      const all = await api<Batch[]>("/batches");
-      setBatches(all.filter(b => b.status === "Completed"));
+      const qs = new URLSearchParams({ status: "Completed" });
+      if (selectedBranchId) {
+        qs.set("branch_id", selectedBranchId);
+      }
+      const all = await api<Batch[]>(`/batches?${qs.toString()}`);
+      // Safety filter: ensure branch matches if selected
+      const filteredBranch = selectedBranchId
+        ? all.filter(b => b.branch_id === selectedBranchId)
+        : all;
+      setBatches(filteredBranch);
     } catch (e: any) {
       toast.show(e.message || "Failed to load batches", "error");
-    } finally { setLoading(false); }
-  }, []);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [selectedBranchId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    load();
+  }, [load]));
 
   const filtered = useMemo(() => {
     if (!q.trim()) return batches;
@@ -41,6 +67,7 @@ export default function DeliveryPicker() {
     return batches.filter(b =>
       b.customer?.name?.toLowerCase().includes(term) ||
       b.customer?.mobile?.includes(term) ||
+      b.customer?.code?.toLowerCase().includes(term) ||
       b.batch_no?.toLowerCase().includes(term)
     );
   }, [batches, q]);
@@ -51,7 +78,15 @@ export default function DeliveryPicker() {
         <TouchableOpacity onPress={() => router.back()} testID="delivery-picker-back">
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Select for Delivery</Text>
+        <View style={{ flex: 1, alignItems: "center" }}>
+          <Text style={styles.title}>Select for Delivery</Text>
+          {selectedBranchId ? (
+            <View style={styles.branchPill}>
+              <MaterialCommunityIcons name="office-building" size={12} color={colors.primary} />
+              <Text style={styles.branchPillText}>{activeBranchName}</Text>
+            </View>
+          ) : null}
+        </View>
         <View style={{ width: 22 }} />
       </View>
 
@@ -60,23 +95,42 @@ export default function DeliveryPicker() {
         <TextInput
           testID="delivery-picker-search"
           style={styles.search}
-          placeholder="Search customer or batch..."
+          placeholder="Search customer, code, mobile or batch..."
           placeholderTextColor={colors.textLight}
           value={q}
           onChangeText={setQ}
         />
+        {q ? (
+          <TouchableOpacity onPress={() => setQ("")}>
+            <MaterialCommunityIcons name="close-circle" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
+        <View style={styles.loaderWrap}>
+          <Loader size={76} />
+          <Text style={styles.loaderTitle}>Loading Completed Batches...</Text>
+          <Text style={styles.loaderSub}>Filtering by {activeBranchName}</Text>
+        </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: spacing.xl, gap: spacing.sm, paddingBottom: 100 }}>
+        <ScrollView
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(); }}
+              colors={[colors.primary]}
+              tintColor={colors.primary}
+            />
+          }
+          contentContainerStyle={{ padding: spacing.xl, gap: spacing.sm, paddingBottom: 100 }}
+        >
           {filtered.length === 0 && (
             <View style={styles.empty}>
               <MaterialCommunityIcons name="check-circle-outline" size={44} color={colors.textLight} />
-              <Text style={styles.emptyText}>No processed batches ready for delivery</Text>
+              <Text style={styles.emptyText}>No completed batches in {activeBranchName}</Text>
               <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: "center", marginTop: 4 }}>
-                Batches must have drying marked as "Completed" before they can be delivered.
+                Batches must have drying marked as "Completed" before they appear for delivery.
               </Text>
             </View>
           )}
@@ -96,8 +150,16 @@ export default function DeliveryPicker() {
                   <Text style={styles.name}>{b.customer?.name}</Text>
                   <StatusPill status={b.status} />
                 </View>
-                <Text style={styles.meta}>{b.batch_no} · {b.product?.name} · {b.raw_weight}kg</Text>
-                <Text style={styles.phone}>{b.customer?.mobile}</Text>
+                <Text style={styles.meta}>
+                  {b.batch_no} · {b.product?.name || "Cardamom"} · {b.raw_weight}kg wet
+                  {b.actual_dry_weight ? ` · ${b.actual_dry_weight}kg dry` : ""}
+                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 }}>
+                  <Text style={styles.phone}>{b.customer?.mobile}</Text>
+                  {b.branch_name ? (
+                    <Text style={styles.branchTag}>• {b.branch_name}</Text>
+                  ) : null}
+                </View>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={20} color={colors.textLight} />
             </TouchableOpacity>
@@ -110,8 +172,10 @@ export default function DeliveryPicker() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md },
-  title: { fontSize: 20, fontWeight: "800", color: colors.text },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  title: { fontSize: 18, fontWeight: "800", color: colors.text },
+  branchPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.primary50, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, marginTop: 2 },
+  branchPillText: { fontSize: 11, fontWeight: "700", color: colors.primary },
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: spacing.xl, backgroundColor: colors.card, borderRadius: radius.lg, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.border },
   search: { flex: 1, paddingVertical: 12, fontSize: 14, color: colors.text },
   item: { flexDirection: "row", alignItems: "center", backgroundColor: colors.card, padding: spacing.md, borderRadius: radius.xl, gap: spacing.md, ...shadow.card },
@@ -121,6 +185,10 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: "800", color: colors.text, flexShrink: 1 },
   meta: { fontSize: 12, color: colors.textMuted, marginTop: 3 },
   phone: { fontSize: 11, color: colors.textLight, marginTop: 2 },
+  branchTag: { fontSize: 11, color: colors.primary, fontWeight: "600" },
   empty: { alignItems: "center", paddingVertical: 60, gap: 6 },
   emptyText: { fontSize: 14, color: colors.textMuted, fontWeight: "600", marginTop: 8, textAlign: "center" },
+  loaderWrap: { paddingTop: 80, alignItems: "center", justifyContent: "center" },
+  loaderTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 12 },
+  loaderSub: { fontSize: 12, color: colors.textMuted, marginTop: 4 },
 });

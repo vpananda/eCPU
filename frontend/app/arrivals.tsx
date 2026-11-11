@@ -308,11 +308,12 @@ export default function ArrivalsScreen() {
         testID={`arrival-${r.batch_id}`}
         style={[styles.rowCard, isInsideMachineGroup && styles.rowCardIndented]}
         onPress={() => router.push(`/batch/${r.batch_id}`)}
-        activeOpacity={0.85}
+        activeOpacity={0.88}
       >
+        {/* Top Header: Avatar + Customer ID | Customer Info | Weight Badge */}
         <View style={styles.cardTopRow}>
           <View style={styles.avatarCol}>
-            <View style={[styles.avatar, { backgroundColor: accent + "18" }]}>
+            <View style={[styles.avatar, { backgroundColor: accent + "15" }]}>
               <Text style={[styles.avatarText, { color: accent }]}>{r.customer_name.slice(0, 1).toUpperCase()}</Text>
             </View>
             {r.customer_code ? (
@@ -322,57 +323,67 @@ export default function ArrivalsScreen() {
             ) : null}
           </View>
 
-          <View style={{ flex: 1 }}>
-            <View style={styles.nameRow}>
-              <Text style={styles.name} numberOfLines={1}>{r.customer_name}</Text>
-            </View>
-            
-            {/* Highlighted Arrival Date & Lifecycle Timeline */}
-            <View style={styles.dateBadgesContainer}>
-              <View style={styles.arrivalDatePill}>
-                <MaterialCommunityIcons name="calendar-month-outline" size={13} color="#166534" />
-                <Text style={styles.arrivalDateValue}>{fmtDate(r.arrival_date)}</Text>
+          <View style={{ flex: 1, justifyContent: "center" }}>
+            <Text style={styles.name} numberOfLines={1}>{r.customer_name}</Text>
+            <View style={styles.metaRow}>
+              <View style={styles.spiceTag}>
+                <Text style={styles.spiceTagText}>{r.product || "Cardamom"}</Text>
               </View>
-
-              {tab === "processing" && !isCompletedRow && r.processing_started_at ? (
-                <View style={styles.processTimePill}>
-                  <MaterialCommunityIcons name="fire" size={11} color="#D97706" />
-                  <Text style={styles.processTimeLabel}>Started:</Text>
-                  <Text style={styles.processTimeValue}>{fmtDateTime(r.processing_started_at)}</Text>
+              <Text style={styles.batchTag}>#{r.batch_no}</Text>
+              {r.customer_mobile ? (
+                <View style={styles.phoneWrap}>
+                  <MaterialCommunityIcons name="phone" size={10} color={colors.textLight} />
+                  <Text style={styles.phoneText}>{r.customer_mobile}</Text>
                 </View>
               ) : null}
-
-              {isCompletedRow && (
-                <View style={styles.processCompletedPill}>
-                  <MaterialCommunityIcons name="check-circle" size={11} color="#2E7D32" />
-                  <Text style={styles.processCompletedLabel}>Dried:</Text>
-                  <Text style={styles.processCompletedValue}>{fmtDateTime(r.processing_ended_at || r.delivery_date)}</Text>
-                </View>
-              )}
-
-              {tab === "out" && r.delivery_date && (
-                <View style={styles.deliveryPill}>
-                  <MaterialCommunityIcons name="truck-delivery" size={11} color="#7B1FA2" />
-                  <Text style={styles.deliveryPillLabel}>Delivered:</Text>
-                  <Text style={styles.deliveryPillValue}>{fmtDateTime(r.delivery_date)}</Text>
-                </View>
-              )}
-            </View>
-
-            <View style={styles.metaRow}>
-              <Text style={styles.meta}>{r.product}</Text>
-              <Text style={styles.metaDot}>·</Text>
-              <MaterialCommunityIcons name="phone" size={11} color={colors.textMuted} />
-              <Text style={styles.meta}>{r.customer_mobile}</Text>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={styles.batchNo}>{r.batch_no}</Text>
             </View>
           </View>
 
-          <View style={{ alignItems: "flex-end" }}>
-            <Text style={[styles.weight, { color: accent }]}>{weightVal} kg</Text>
-            <Text style={styles.weightLabel}>{weightLabel}</Text>
+          <View style={styles.weightBox}>
+            <View style={{ flexDirection: "row", alignItems: "baseline" }}>
+              <Text style={[styles.weightNum, { color: accent }]}>{weightVal}</Text>
+              <Text style={[styles.weightUnit, { color: accent }]}> kg</Text>
+            </View>
+            <Text style={styles.weightLabelText}>{weightLabel}</Text>
           </View>
+        </View>
+
+        {/* Sleek Lifecycle Timeline Strip */}
+        <View style={styles.lifecycleStrip}>
+          <View style={styles.timelineItem}>
+            <MaterialCommunityIcons name="calendar-month-outline" size={13} color="#15803D" />
+            <Text style={styles.timelineDateText}>{fmtDate(r.arrival_date)}</Text>
+          </View>
+
+          {tab === "processing" && !isCompletedRow && r.processing_started_at ? (
+            <>
+              <View style={styles.timelineDot} />
+              <View style={styles.timelineItem}>
+                <MaterialCommunityIcons name="fire" size={13} color="#D97706" />
+                <Text style={styles.timelineStartedText}>Started {fmtDateTime(r.processing_started_at)}</Text>
+              </View>
+            </>
+          ) : null}
+
+          {isCompletedRow && (
+            <>
+              <View style={styles.timelineDot} />
+              <View style={styles.timelineItem}>
+                <MaterialCommunityIcons name="check-circle" size={13} color="#15803D" />
+                <Text style={styles.timelineCompletedText}>Dried {fmtDateTime(r.processing_ended_at || r.delivery_date)}</Text>
+              </View>
+            </>
+          )}
+
+          {tab === "out" && r.delivery_date && (
+            <>
+              <View style={styles.timelineDot} />
+              <View style={styles.timelineItem}>
+                <MaterialCommunityIcons name="truck-delivery" size={13} color="#7E22CE" />
+                <Text style={styles.timelineDeliveredText}>Delivered {fmtDateTime(r.delivery_date)}</Text>
+              </View>
+            </>
+          )}
         </View>
 
         {/* Multi-lot split badges if loaded across different dryers */}
@@ -406,20 +417,30 @@ export default function ArrivalsScreen() {
           </View>
         )}
 
-        {/* Ledger Financials if available */}
+        {/* Modern 3-Column Financial Ledger Strip */}
         {(r.bill_amount !== undefined && r.bill_amount > 0) ? (
-          <View style={styles.ledgerRow}>
-            <Text style={styles.ledgerBill}>Billed: ₹{r.bill_amount.toLocaleString()}{r.rate_per_kg ? ` (@ ₹${r.rate_per_kg}/kg)` : ""}</Text>
-            <Text style={styles.ledgerPaid}>• Recv: ₹{(r.total_paid || 0).toLocaleString()}</Text>
-            {(r.balance_amount || 0) > 0 ? (
-              <Text style={styles.ledgerBal}>• Bal ₹{(r.balance_amount || 0).toLocaleString()}</Text>
-            ) : (
-              <Text style={styles.ledgerPaidOk}>• Paid ✓</Text>
-            )}
+          <View style={styles.ledgerBar}>
+            <View style={styles.ledgerItem}>
+              <Text style={styles.ledgerItemLabel}>BILLED</Text>
+              <Text style={styles.ledgerItemVal}>₹{r.bill_amount.toLocaleString()}</Text>
+              {r.rate_per_kg ? <Text style={styles.ledgerItemRate}>@ ₹{r.rate_per_kg}/kg</Text> : null}
+            </View>
+            <View style={styles.ledgerDivider} />
+            <View style={styles.ledgerItem}>
+              <Text style={styles.ledgerItemLabel}>RECEIVED</Text>
+              <Text style={[styles.ledgerItemVal, { color: "#16A34A" }]}>₹{(r.total_paid || 0).toLocaleString()}</Text>
+            </View>
+            <View style={styles.ledgerDivider} />
+            <View style={styles.ledgerItem}>
+              <Text style={styles.ledgerItemLabel}>BALANCE</Text>
+              <Text style={[styles.ledgerItemVal, { color: (r.balance_amount || 0) > 0 ? "#EA580C" : "#16A34A" }]}>
+                {(r.balance_amount || 0) > 0 ? `₹${(r.balance_amount || 0).toLocaleString()}` : "Paid ✓"}
+              </Text>
+            </View>
           </View>
         ) : null}
 
-        {/* Last Line: Branch Name on Left, Machine Name on Right */}
+        {/* Branch on Left, Machine on Right */}
         <View style={styles.cardBottomRow}>
           <View style={styles.bottomMetaItem}>
             <MaterialCommunityIcons name="office-building" size={12} color={colors.primary} />
@@ -428,7 +449,7 @@ export default function ArrivalsScreen() {
 
           {r.machine_name && !isInsideMachineGroup ? (
             <View style={styles.machineBadgeRight}>
-              <MaterialCommunityIcons name="generator-portable" size={12} color={colors.warning} />
+              <MaterialCommunityIcons name="generator-portable" size={12} color="#D97706" />
               <Text style={styles.machineTextRight} numberOfLines={1}>{r.machine_name}</Text>
             </View>
           ) : null}
@@ -478,9 +499,9 @@ export default function ArrivalsScreen() {
               e.stopPropagation();
               openCompleteModal(r);
             }}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
           >
-            <MaterialCommunityIcons name="check-circle" size={14} color="#fff" />
+            <MaterialCommunityIcons name="check-circle" size={15} color="#fff" />
             <Text style={styles.cardCompleteBtnText}>Complete Processing</Text>
           </TouchableOpacity>
         ) : null}
@@ -895,183 +916,264 @@ const styles = StyleSheet.create({
   tabLabel: { fontSize: 13, fontWeight: "800", color: colors.text },
   tabMeta: { fontSize: 10, fontWeight: "700", color: colors.textMuted, marginTop: 1 },
 
-  rowCard: { backgroundColor: colors.card, padding: spacing.md, borderRadius: radius.xl, gap: spacing.xs, ...shadow.card },
-  cardTopRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
+  rowCard: {
+    backgroundColor: "#ffffff",
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+    gap: 10,
+  },
+  rowCardIndented: {
+    borderLeftWidth: 4,
+    borderLeftColor: "#F97316",
+  },
+  cardTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  avatarCol: {
+    alignItems: "center",
+    justifyContent: "flex-start",
+    minWidth: 42,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  codeChipBelow: {
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    backgroundColor: "#FEF3C7",
+    borderRadius: 4,
+    marginTop: 3,
+    alignItems: "center",
+    borderWidth: 0.5,
+    borderColor: "#FDE68A",
+  },
+  codeChipBelowText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: "#B45309",
+    letterSpacing: 0.3,
+  },
+  name: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 3,
+  },
+  spiceTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    backgroundColor: "#F1F5F9",
+    borderRadius: 4,
+  },
+  spiceTagText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  batchTag: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+    letterSpacing: 0.2,
+  },
+  phoneWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  phoneText: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "500",
+  },
+  weightBox: {
+    alignItems: "flex-end",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  weightNum: {
+    fontSize: 17,
+    fontWeight: "900",
+    letterSpacing: -0.5,
+  },
+  weightUnit: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  weightLabelText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    marginTop: 1,
+  },
+  lifecycleStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    gap: 6,
+  },
+  timelineItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  timelineDateText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#15803D",
+  },
+  timelineDot: {
+    width: 3.5,
+    height: 3.5,
+    borderRadius: 2,
+    backgroundColor: "#CBD5E1",
+    marginHorizontal: 2,
+  },
+  timelineStartedText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#B45309",
+  },
+  timelineCompletedText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#15803D",
+  },
+  timelineDeliveredText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#7E22CE",
+  },
+  ledgerBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FAFAFA",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  ledgerItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  ledgerItemLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#94A3B8",
+    letterSpacing: 0.4,
+  },
+  ledgerItemVal: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#0F172A",
+    marginTop: 1,
+  },
+  ledgerItemRate: {
+    fontSize: 9,
+    fontWeight: "600",
+    color: "#94A3B8",
+  },
+  ledgerDivider: {
+    width: 1,
+    height: 18,
+    backgroundColor: "#E2E8F0",
+  },
   cardBottomRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 8,
-    marginTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: colors.border + "60",
+    paddingTop: 4,
   },
   bottomMetaItem: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
   },
-  avatarCol: {
-    alignItems: "center",
-    justifyContent: "flex-start",
-    minWidth: 44,
-  },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
-  avatarText: { fontSize: 17, fontWeight: "800" },
-  codeChipBelow: {
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    backgroundColor: colors.accent + "20",
-    borderRadius: 4,
-    marginTop: 3,
-    alignItems: "center",
-  },
-  codeChipBelowText: {
-    fontSize: 9.5,
-    fontWeight: "800",
-    color: colors.accent,
-    letterSpacing: 0.3,
-  },
-  nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  name: { fontSize: 14, fontWeight: "800", color: colors.text, flexShrink: 1 },
-  codeChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.accent + "20", borderRadius: 5 },
-  codeChipText: { fontSize: 10, fontWeight: "800", color: colors.accent },
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 3 },
-  dateBadgesContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 4,
-    marginBottom: 2,
-  },
-  arrivalDatePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#ECFDF5",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: "#A7F3D0",
-  },
-  arrivalDateLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#065F46",
-  },
-  arrivalDateValue: {
+  branchText: {
     fontSize: 11,
-    fontWeight: "800",
-    color: "#166534",
+    color: colors.primary,
+    fontWeight: "700",
   },
-  processTimePill: {
+  machineBadgeRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     backgroundColor: "#FFFBEB",
     paddingHorizontal: 7,
     paddingVertical: 2.5,
-    borderRadius: radius.pill,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: "#FDE68A",
   },
-  processTimeLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#92400E",
-  },
-  processTimeValue: {
-    fontSize: 11,
+  machineTextRight: {
+    fontSize: 10.5,
     fontWeight: "800",
     color: "#B45309",
   },
-  processCompletedPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#F0FDF4",
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: "#BBF7D0",
-  },
-  processCompletedLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#166534",
-  },
-  processCompletedValue: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#2E7D32",
-  },
-  deliveryPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#FAF5FF",
-    paddingHorizontal: 7,
-    paddingVertical: 2.5,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: "#E9D5FF",
-  },
-  deliveryPillLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#6B21A8",
-  },
-  deliveryPillValue: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#7B1FA2",
-  },
-  branchText: { fontSize: 11, color: colors.primary, fontWeight: "700" },
-  machineText: { fontSize: 11, color: colors.warning, fontWeight: "800" },
-  metaDot: { fontSize: 11, color: colors.textLight, marginHorizontal: 2 },
-  meta: { fontSize: 11, color: colors.textMuted, fontWeight: "500" },
-  batchNo: { fontSize: 10, color: colors.textLight, marginTop: 2, fontWeight: "700", letterSpacing: 0.3 },
-  weight: { fontSize: 16, fontWeight: "800" },
-  weightLabel: { fontSize: 10, color: colors.textLight, marginTop: 1, letterSpacing: 0.3, textTransform: "uppercase" },
-  machineBadgeRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: colors.warning + "18",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  machineTextRight: {
-    fontSize: 10,
-    fontWeight: "800",
-    color: colors.warning,
-  },
-
-  empty: { alignItems: "center", paddingVertical: 60, gap: 6 },
-  emptyText: { fontSize: 14, color: colors.textMuted, fontWeight: "600", marginTop: 12, textAlign: "center" },
-  waArrivalBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center" },
-
   cardCompleteBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: "#F57C00",
-    paddingVertical: 9,
-    borderRadius: radius.md,
-    marginTop: 10,
-    ...shadow.sm,
+    backgroundColor: "#EA580C",
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginTop: 4,
+    shadowColor: "#EA580C",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
   cardCompleteBtnText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: "800",
     letterSpacing: 0.3,
   },
+  empty: { alignItems: "center", paddingVertical: 60, gap: 6 },
+  emptyText: { fontSize: 14, color: colors.textMuted, fontWeight: "600", marginTop: 12, textAlign: "center" },
+  waArrivalBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#25D366", alignItems: "center", justifyContent: "center" },
   modalBg: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -1300,10 +1402,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#B78103",
     textTransform: "uppercase",
-  },
-  rowCardIndented: {
-    borderLeftWidth: 3,
-    borderLeftColor: "#F57C00",
   },
   subTabRow: {
     flexDirection: "row",

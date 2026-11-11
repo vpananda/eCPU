@@ -403,41 +403,62 @@ export default function Dashboard() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* 1. Header Layout */}
+      {/* 1. Friendly, Professional, Elegant Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.greeting}>{getGreeting()},</Text>
-          <Text style={styles.userName} numberOfLines={1}>{user?.name || "User"}</Text>
-          
-          <View style={styles.roleBranchRow}>
-            <View style={styles.roleBadge}>
-              <Text style={styles.roleText}>{role}</Text>
+        <View style={styles.headerProfileSection}>
+          {/* Avatar with Live Online Status Ring */}
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatarWrap}>
+              {user?.picture ? (
+                <Image source={{ uri: user.picture }} style={styles.avatarImg} />
+              ) : (
+                <Text style={styles.avatarInitials}>
+                  {(user?.name || "AD").slice(0, 2).toUpperCase()}
+                </Text>
+              )}
             </View>
-            
-            {role === "Admin" ? (
-              <TouchableOpacity
-                onPress={() => setBranchModalOpen(true)}
-                style={styles.branchSelectTrigger}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons name="map-marker" size={13} color={colors.primary} />
-                <Text style={styles.branchSelectText} numberOfLines={1}>{activeBranchName}</Text>
-                <MaterialCommunityIcons name="chevron-down" size={13} color={colors.primary} />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.branchStaticBadge}>
-                <MaterialCommunityIcons name="map-marker" size={12} color={colors.textMuted} />
-                <Text style={styles.branchStaticText} numberOfLines={1}>{userBranchName}</Text>
+            <View style={styles.onlineStatusRing}>
+              <View style={styles.onlineStatusCore} />
+            </View>
+          </View>
+
+          {/* User Greeting & Branch/Role pills */}
+          <View style={styles.headerProfileText}>
+            <Text style={styles.greetingSubtitle}>{getGreeting()} 👋</Text>
+            <Text style={styles.userNameText} numberOfLines={1}>
+              {user?.name || "Admin User"}
+            </Text>
+
+            <View style={styles.metaBadgesRow}>
+              {role === "Admin" ? (
+                <TouchableOpacity
+                  onPress={() => setBranchModalOpen(true)}
+                  style={styles.branchSelectorPill}
+                  activeOpacity={0.75}
+                  accessibilityLabel="Switch Branch"
+                >
+                  <MaterialCommunityIcons name="office-building" size={12} color="#166534" />
+                  <Text style={styles.branchSelectorText} numberOfLines={1}>{activeBranchName}</Text>
+                  <MaterialCommunityIcons name="chevron-down" size={12} color="#166534" />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.branchStaticPill}>
+                  <MaterialCommunityIcons name="office-building" size={12} color={colors.textMuted} />
+                  <Text style={styles.branchStaticText} numberOfLines={1}>{userBranchName}</Text>
+                </View>
+              )}
+
+              <View style={styles.rolePill}>
+                <Text style={styles.rolePillText}>{role}</Text>
               </View>
-            )}
+            </View>
           </View>
         </View>
 
-        <View style={styles.headerRight}>
-          <ConnectionBadge style={{ marginRight: 4 }} />
-
+        {/* Right Action Icons (Sync, Alerts, Connection) */}
+        <View style={styles.headerActionsCluster}>
           <TouchableOpacity
-            style={styles.syncBtn}
+            style={styles.actionRoundBtn}
             onPress={triggerSync}
             disabled={isSyncing}
             activeOpacity={0.7}
@@ -446,35 +467,28 @@ export default function Dashboard() {
             <Animated.View style={{ transform: [{ rotate: spin }] }}>
               <MaterialCommunityIcons
                 name="sync"
-                size={20}
+                size={18}
                 color={isSyncing ? colors.primary : colors.text}
               />
             </Animated.View>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.notificationBtn}
+            style={styles.actionRoundBtn}
             activeOpacity={0.7}
             onPress={() => setAlertsModalOpen(true)}
             accessibilityLabel="System Alerts"
           >
-            <MaterialCommunityIcons name="bell-outline" size={24} color={colors.text} />
+            <MaterialCommunityIcons name="bell-outline" size={19} color={colors.text} />
             {alertItems.length > 0 && (
-              <View style={styles.unreadDotBadge}>
-                <Text style={styles.unreadDotBadgeText}>{alertItems.length}</Text>
+              <View style={styles.alertCounterBadge}>
+                <Text style={styles.alertCounterText}>{alertItems.length}</Text>
               </View>
             )}
           </TouchableOpacity>
 
-          <View style={styles.avatarWrap}>
-            {user?.picture ? (
-              <Image source={{ uri: user.picture }} style={styles.avatarImg} />
-            ) : (
-              <Text style={styles.avatarInitials}>
-                {(user?.name || "U").slice(0, 2).toUpperCase()}
-              </Text>
-            )}
-          </View>
+          {/* Clean minimal Connection Indicator (hides raw ms debug text) */}
+          <ConnectionBadge compact style={styles.connectionCompactPill} />
         </View>
       </View>
 
@@ -483,21 +497,24 @@ export default function Dashboard() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* 2. Date Filter Presets */}
+        {/* 2. Sleek Segmented Date Filter Bar */}
         <View style={styles.dateFilterContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateScroll}>
-            {DATE_PRESETS.map(p => (
-              <TouchableOpacity
-                key={p.key}
-                onPress={() => applyPreset(p.key)}
-                style={[styles.datePill, activePreset === p.key && styles.datePillActive]}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.datePillText, activePreset === p.key && styles.datePillTextActive]}>
-                  {p.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {DATE_PRESETS.map(p => {
+              const active = activePreset === p.key;
+              return (
+                <TouchableOpacity
+                  key={p.key}
+                  onPress={() => applyPreset(p.key)}
+                  style={[styles.datePill, active && styles.datePillActive]}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.datePillText, active && styles.datePillTextActive]}>
+                    {p.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
             <TouchableOpacity
               onPress={() => {
                 setActivePreset("custom");
@@ -506,9 +523,14 @@ export default function Dashboard() {
                 setPickerOpen(true);
               }}
               style={[styles.datePill, activePreset === "custom" && styles.datePillActive]}
-              activeOpacity={0.8}
+              activeOpacity={0.75}
             >
-              <MaterialCommunityIcons name="calendar-range" size={14} color={activePreset === "custom" ? "#fff" : colors.textMuted} style={{ marginRight: 4 }} />
+              <MaterialCommunityIcons
+                name="calendar-range"
+                size={13}
+                color={activePreset === "custom" ? "#ffffff" : colors.textMuted}
+                style={{ marginRight: 5 }}
+              />
               <Text style={[styles.datePillText, activePreset === "custom" && styles.datePillTextActive]}>
                 Custom Range
               </Text>
@@ -1307,77 +1329,173 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 16,
     backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: "#F1F5F9",
   },
-  headerLeft: {
+  headerProfileSection: {
+    flexDirection: "row",
+    alignItems: "center",
     flex: 1,
-    paddingRight: spacing.sm,
+    paddingRight: 10,
   },
-  greeting: {
-    fontSize: 13,
-    color: colors.textMuted,
+  avatarContainer: {
+    position: "relative",
+    marginRight: 12,
+  },
+  avatarWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#166534",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#ECFDF5",
+  },
+  avatarImg: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  },
+  avatarInitials: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#ffffff",
+    letterSpacing: 0.5,
+  },
+  onlineStatusRing: {
+    position: "absolute",
+    bottom: -1,
+    right: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#ffffff",
+  },
+  onlineStatusCore: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: "#10B981",
+  },
+  headerProfileText: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  greetingSubtitle: {
+    fontSize: 12,
     fontWeight: "600",
+    color: "#64748B",
+    letterSpacing: 0.2,
   },
-  userName: {
-    fontSize: 20,
+  userNameText: {
+    fontSize: 18,
     fontWeight: "800",
-    color: colors.text,
-    marginTop: 2,
-    letterSpacing: -0.3,
+    color: "#0F172A",
+    letterSpacing: -0.4,
+    marginTop: 1,
   },
-  roleBranchRow: {
+  metaBadgesRow: {
     flexDirection: "row",
     alignItems: "center",
     marginTop: 6,
-    gap: spacing.sm,
+    gap: 6,
   },
-  roleBadge: {
-    backgroundColor: colors.primary50,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-  },
-  roleText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: colors.primary,
-  },
-  branchSelectTrigger: {
+  branchSelectorPill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8F5E9",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-    gap: 3,
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 9,
+    paddingVertical: 3.5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    gap: 4,
   },
-  branchSelectText: {
+  branchSelectorText: {
     fontSize: 11,
     fontWeight: "700",
-    color: colors.primary,
-    maxWidth: 120,
+    color: "#166534",
+    maxWidth: 130,
   },
-  branchStaticBadge: {
+  branchStaticPill: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.bg,
+    backgroundColor: "#F8FAFC",
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: radius.sm,
+    borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.border,
-    gap: 3,
+    borderColor: "#E2E8F0",
+    gap: 4,
   },
   branchStaticText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "600",
-    color: colors.textMuted,
+    color: "#64748B",
     maxWidth: 120,
+  },
+  rolePill: {
+    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+  rolePillText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#2563EB",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  headerActionsCluster: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  actionRoundBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    position: "relative",
+  },
+  alertCounterBadge: {
+    position: "absolute",
+    top: -3,
+    right: -3,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 8.5,
+    backgroundColor: "#EF4444",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  alertCounterText: {
+    color: "#ffffff",
+    fontSize: 9,
+    fontWeight: "900",
+  },
+  connectionCompactPill: {
+    padding: 0,
+    margin: 0,
   },
   headerRight: {
     flexDirection: "row",
@@ -1627,52 +1745,40 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 15,
   },
-  avatarWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  avatarImg: {
-    width: "100%",
-    height: "100%",
-  },
-  avatarInitials: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#ffffff",
-  },
   dateFilterContainer: {
-    paddingVertical: spacing.md,
+    paddingVertical: 10,
     backgroundColor: "#ffffff",
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: "#F1F5F9",
   },
   dateScroll: {
-    paddingHorizontal: spacing.xl,
-    gap: spacing.sm,
+    paddingHorizontal: 18,
+    gap: 8,
+    alignItems: "center",
   },
   datePill: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 7,
     borderRadius: radius.pill,
-    backgroundColor: colors.bg,
+    backgroundColor: "#F8FAFC",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#E2E8F0",
     flexDirection: "row",
     alignItems: "center",
   },
   datePillActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: "#166534",
+    borderColor: "#166534",
+    shadowColor: "#166534",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 2,
   },
   datePillText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: "600",
-    color: colors.textMuted,
+    color: "#475569",
   },
   datePillTextActive: {
     color: "#ffffff",

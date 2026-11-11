@@ -4452,6 +4452,9 @@ async def dashboard_arrivals(
             "status": d["status"],
             "is_split": bool(d.get("is_split")),
             "parent_batch_id": d.get("parent_batch_id"),
+            "total_arrival_weight": float(d.get("raw_weight") or 0),
+            "split_count": 1,
+            "other_lots_summary": "",
         }
         
     # Consolidate arrivals: group split batches under their physical parent arrival
@@ -4542,6 +4545,60 @@ async def dashboard_arrivals(
     out_list = [format_row(r) for r in out_rows]
     proc_list = [format_row(r) for r in proc_rows]
     comp_list = [format_row(r) for r in comp_rows]
+
+    # Enrich processing & completed lots with total arrival weight & sibling lots
+    all_proc_comp = proc_list + comp_list
+    split_candidates = [
+        r for r in all_proc_comp
+        if r.get("is_split") or ("-" in (r.get("batch_no") or "")) or r.get("parent_batch_id")
+    ]
+    if split_candidates:
+        parent_ids = list({r["parent_batch_id"] for r in split_candidates if r.get("parent_batch_id")})
+        base_bnos = list({(r["batch_no"].split("-")[0] + "%") for r in split_candidates if r.get("batch_no")})
+        where_parts = []
+        q_params = []
+        if parent_ids:
+            where_parts.append("b.parent_batch_id::text = ANY(%s) OR b.id::text = ANY(%s)")
+            q_params.extend([parent_ids, parent_ids])
+        if base_bnos:
+            where_parts.append("b.batch_no LIKE ANY(%s)")
+            q_params.append(base_bnos)
+        if where_parts:
+            siblings_sql = f"""
+                SELECT b.id::text, b.batch_no, b.raw_weight, b.machine_id::text, m.name as machine_name,
+                       b.status, b.parent_batch_id::text, b.customer_id::text
+                FROM public.batches b
+                LEFT JOIN public.machines m ON b.machine_id = m.id
+                WHERE {" OR ".join(where_parts)}
+            """
+            s_rows = await db.query(siblings_sql, q_params)
+            by_group = {}
+            for sr in s_rows:
+                bno = sr.get("batch_no") or ""
+                base_bno = bno.split("-")[0] if "-" in bno else bno
+                key = sr.get("parent_batch_id") or base_bno
+                if key not in by_group:
+                    by_group[key] = []
+                by_group[key].append(sr)
+
+            for row in all_proc_comp:
+                bno = row.get("batch_no") or ""
+                base_bno = bno.split("-")[0] if "-" in bno else bno
+                key = row.get("parent_batch_id") or base_bno
+                sibs = by_group.get(key) or by_group.get(base_bno) or []
+                if len(sibs) > 1:
+                    row["is_split"] = True
+                    tot_w = round(sum(float(s.get("raw_weight") or 0) for s in sibs), 2)
+                    row["total_arrival_weight"] = tot_w
+                    row["split_count"] = len(sibs)
+                    other_sibs = [s for s in sibs if s.get("id") != row.get("batch_id") and s.get("batch_no") != row.get("batch_no")]
+                    other_machines = [f"{s.get('raw_weight')} kg in {s.get('machine_name') or 'Dryer'}" for s in other_sibs]
+                    row["other_lots_summary"] = "Bal: " + ", ".join(other_machines) if other_machines else f"Bal: {round(tot_w - row['raw_weight'], 2)} kg in other dryers"
+                else:
+                    row["is_split"] = False
+                    row["total_arrival_weight"] = row["raw_weight"]
+                    row["split_count"] = 1
+                    row["other_lots_summary"] = ""
     
     # Group active processing batches by machine
     machines_map = {}

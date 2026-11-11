@@ -51,6 +51,9 @@ type Row = {
   status: string;
   is_split?: boolean;
   sub_batches?: SubBatch[];
+  total_arrival_weight?: number;
+  split_count?: number;
+  other_lots_summary?: string;
   machine_total_weight?: number;
   machine_batch_count?: number;
 };
@@ -417,28 +420,53 @@ export default function ArrivalsScreen() {
           </View>
         )}
 
-        {/* Modern 3-Column Financial Ledger Strip */}
-        {(r.bill_amount !== undefined && r.bill_amount > 0) ? (
-          <View style={styles.ledgerBar}>
-            <View style={styles.ledgerItem}>
-              <Text style={styles.ledgerItemLabel}>BILLED</Text>
-              <Text style={styles.ledgerItemVal}>₹{r.bill_amount.toLocaleString()}</Text>
-              {r.rate_per_kg ? <Text style={styles.ledgerItemRate}>@ ₹{r.rate_per_kg}/kg</Text> : null}
+        {/* Option 1: 3-Column Operational Strip (Total Arrival / In This Dryer / Batch Type) */}
+        <View style={styles.opsBar}>
+          {/* Column 1: Total Arrival Weight */}
+          <View style={styles.opsItem}>
+            <Text style={styles.opsLabel}>TOTAL ARRIVAL</Text>
+            <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 2 }}>
+              <Text style={styles.opsVal}>{r.total_arrival_weight || r.raw_weight}</Text>
+              <Text style={styles.opsUnit}> KG</Text>
             </View>
-            <View style={styles.ledgerDivider} />
-            <View style={styles.ledgerItem}>
-              <Text style={styles.ledgerItemLabel}>RECEIVED</Text>
-              <Text style={[styles.ledgerItemVal, { color: "#16A34A" }]}>₹{(r.total_paid || 0).toLocaleString()}</Text>
+            <Text style={styles.opsSub}>Customer Total</Text>
+          </View>
+
+          <View style={styles.opsDivider} />
+
+          {/* Column 2: In This Dryer / Processing KG */}
+          <View style={styles.opsItem}>
+            <Text style={styles.opsLabel}>IN THIS DRYER</Text>
+            <View style={{ flexDirection: "row", alignItems: "baseline", marginTop: 2 }}>
+              <Text style={[styles.opsVal, { color: accent }]}>{r.raw_weight}</Text>
+              <Text style={[styles.opsUnit, { color: accent }]}> KG</Text>
             </View>
-            <View style={styles.ledgerDivider} />
-            <View style={styles.ledgerItem}>
-              <Text style={styles.ledgerItemLabel}>BALANCE</Text>
-              <Text style={[styles.ledgerItemVal, { color: (r.balance_amount || 0) > 0 ? "#EA580C" : "#16A34A" }]}>
-                {(r.balance_amount || 0) > 0 ? `₹${(r.balance_amount || 0).toLocaleString()}` : "Paid ✓"}
+            <Text style={styles.opsSub}>{r.batch_no}</Text>
+          </View>
+
+          <View style={styles.opsDivider} />
+
+          {/* Column 3: Split vs Single Batch info */}
+          <View style={styles.opsItem}>
+            <Text style={styles.opsLabel}>BATCH TYPE</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2 }}>
+              <MaterialCommunityIcons
+                name={r.is_split ? "call-split" : "check-circle"}
+                size={12}
+                color={r.is_split ? "#D97706" : "#15803D"}
+              />
+              <Text
+                style={[styles.opsValType, { color: r.is_split ? "#D97706" : "#15803D" }]}
+                numberOfLines={1}
+              >
+                {r.is_split ? `Split Lot (${r.split_count || 2} Lots)` : "Single Batch"}
               </Text>
             </View>
+            <Text style={styles.opsSub} numberOfLines={1}>
+              {r.is_split ? (r.other_lots_summary || "Multi-Dryer") : "Full Load (100%)"}
+            </Text>
           </View>
-        ) : null}
+        </View>
 
         {/* Branch on Left, Machine on Right */}
         <View style={styles.cardBottomRow}>
@@ -1082,40 +1110,49 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#7E22CE",
   },
-  ledgerBar: {
+  opsBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FAFAFA",
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: "#F1F5F9",
+    borderColor: "#E2E8F0",
   },
-  ledgerItem: {
+  opsItem: {
     flex: 1,
     alignItems: "center",
   },
-  ledgerItemLabel: {
+  opsLabel: {
     fontSize: 9,
-    fontWeight: "700",
-    color: "#94A3B8",
-    letterSpacing: 0.4,
-  },
-  ledgerItemVal: {
-    fontSize: 12,
     fontWeight: "800",
-    color: "#0F172A",
-    marginTop: 1,
+    color: "#64748B",
+    letterSpacing: 0.5,
   },
-  ledgerItemRate: {
-    fontSize: 9,
+  opsVal: {
+    fontSize: 13,
+    fontWeight: "900",
+    color: "#0F172A",
+  },
+  opsUnit: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  opsValType: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  opsSub: {
+    fontSize: 9.5,
     fontWeight: "600",
     color: "#94A3B8",
+    marginTop: 1,
   },
-  ledgerDivider: {
+  opsDivider: {
     width: 1,
-    height: 18,
+    height: 26,
     backgroundColor: "#E2E8F0",
   },
   cardBottomRow: {

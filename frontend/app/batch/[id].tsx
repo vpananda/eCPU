@@ -678,8 +678,8 @@ export default function BatchDetail() {
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
             <Text style={styles.sectionTitle}>Details</Text>
             <View style={styles.arrivalBadge}>
-              <MaterialCommunityIcons name="calendar-import" size={13} color="#166534" />
-              <Text style={styles.arrivalBadgeText}>Arrived: {fmtDate(data.arrival_date || data.created_at)}</Text>
+              <MaterialCommunityIcons name="calendar-month-outline" size={13} color="#166534" />
+              <Text style={styles.arrivalBadgeText}>{fmtDate(data.arrival_date || data.created_at)}</Text>
             </View>
           </View>
           <Row

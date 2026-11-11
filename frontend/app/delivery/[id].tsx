@@ -345,8 +345,7 @@ export default function DeliveryScreen() {
             {/* Prominently Highlighted Arrival Date & Lifecycle Timeline */}
             <View style={styles.lifecycleRow}>
               <View style={styles.arrivalHighlightChip}>
-                <MaterialCommunityIcons name="calendar-import" size={14} color="#166534" />
-                <Text style={styles.arrivalHighlightLabel}>Arrival Date:</Text>
+                <MaterialCommunityIcons name="calendar-month-outline" size={14} color="#166534" />
                 <Text style={styles.arrivalHighlightValue}>{fmtDate(batch.arrival_date || batch.created_at)}</Text>
               </View>
               {batch.processing_started_at ? (

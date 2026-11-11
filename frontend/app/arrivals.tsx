@@ -311,23 +311,26 @@ export default function ArrivalsScreen() {
         activeOpacity={0.85}
       >
         <View style={styles.cardTopRow}>
-          <View style={[styles.avatar, { backgroundColor: accent + "18" }]}>
-            <Text style={[styles.avatarText, { color: accent }]}>{r.customer_name.slice(0, 1).toUpperCase()}</Text>
+          <View style={styles.avatarCol}>
+            <View style={[styles.avatar, { backgroundColor: accent + "18" }]}>
+              <Text style={[styles.avatarText, { color: accent }]}>{r.customer_name.slice(0, 1).toUpperCase()}</Text>
+            </View>
+            {r.customer_code ? (
+              <View style={styles.codeChipBelow}>
+                <Text style={styles.codeChipBelowText}>{r.customer_code}</Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={{ flex: 1 }}>
             <View style={styles.nameRow}>
               <Text style={styles.name} numberOfLines={1}>{r.customer_name}</Text>
-              <View style={styles.codeChip}>
-                <Text style={styles.codeChipText}>{r.customer_code}</Text>
-              </View>
             </View>
             
             {/* Highlighted Arrival Date & Lifecycle Timeline */}
             <View style={styles.dateBadgesContainer}>
               <View style={styles.arrivalDatePill}>
-                <MaterialCommunityIcons name="calendar-import" size={12} color="#166534" />
-                <Text style={styles.arrivalDateLabel}>Arrived:</Text>
+                <MaterialCommunityIcons name="calendar-month-outline" size={13} color="#166534" />
                 <Text style={styles.arrivalDateValue}>{fmtDate(r.arrival_date)}</Text>
               </View>
 
@@ -908,8 +911,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
+  avatarCol: {
+    alignItems: "center",
+    justifyContent: "flex-start",
+    minWidth: 44,
+  },
   avatar: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center" },
   avatarText: { fontSize: 17, fontWeight: "800" },
+  codeChipBelow: {
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    backgroundColor: colors.accent + "20",
+    borderRadius: 4,
+    marginTop: 3,
+    alignItems: "center",
+  },
+  codeChipBelowText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: colors.accent,
+    letterSpacing: 0.3,
+  },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   name: { fontSize: 14, fontWeight: "800", color: colors.text, flexShrink: 1 },
   codeChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.accent + "20", borderRadius: 5 },
@@ -929,7 +951,7 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: "#ECFDF5",
     paddingHorizontal: 8,
-    paddingVertical: 2.5,
+    paddingVertical: 3,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: "#A7F3D0",

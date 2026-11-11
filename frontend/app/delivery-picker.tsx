@@ -152,8 +152,15 @@ export default function DeliveryPicker() {
               activeOpacity={0.85}
               onPress={() => router.push(`/delivery/${b.id}`)}
             >
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{(b.customer?.name || "?").slice(0, 1).toUpperCase()}</Text>
+              <View style={styles.avatarCol}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{(b.customer?.name || "?").slice(0, 1).toUpperCase()}</Text>
+                </View>
+                {b.customer?.code ? (
+                  <View style={styles.codeChipBelow}>
+                    <Text style={styles.codeChipBelowText}>{b.customer.code}</Text>
+                  </View>
+                ) : null}
               </View>
               <View style={{ flex: 1 }}>
                 <View style={styles.nameRow}>
@@ -163,15 +170,13 @@ export default function DeliveryPicker() {
 
                 {/* Highlighted Arrival Date */}
                 <View style={styles.arrivalBadge}>
-                  <MaterialCommunityIcons name="calendar-import" size={11} color="#166534" />
-                  <Text style={styles.arrivalBadgeLabel}>Arrived:</Text>
+                  <MaterialCommunityIcons name="calendar-month-outline" size={12} color="#166534" />
                   <Text style={styles.arrivalBadgeDate}>{fmtDate(b.arrival_date || b.created_at)}</Text>
                   {b.processing_ended_at ? (
                     <>
                       <Text style={{ color: "#BBF7D0", marginHorizontal: 3 }}>•</Text>
                       <MaterialCommunityIcons name="check-circle" size={11} color="#166534" />
-                      <Text style={styles.arrivalBadgeLabel}>Dried:</Text>
-                      <Text style={styles.arrivalBadgeDate}>{fmtDate(b.processing_ended_at)}</Text>
+                      <Text style={styles.arrivalBadgeDate}>Dried: {fmtDate(b.processing_ended_at)}</Text>
                     </>
                   ) : null}
                 </View>
@@ -205,8 +210,23 @@ const styles = StyleSheet.create({
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: spacing.xl, backgroundColor: colors.card, borderRadius: radius.lg, paddingHorizontal: spacing.md, borderWidth: 1, borderColor: colors.border },
   search: { flex: 1, paddingVertical: 12, fontSize: 14, color: colors.text },
   item: { flexDirection: "row", alignItems: "center", backgroundColor: colors.card, padding: spacing.md, borderRadius: radius.xl, gap: spacing.md, ...shadow.card },
+  avatarCol: { alignItems: "center", justifyContent: "flex-start", minWidth: 44 },
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary50, alignItems: "center", justifyContent: "center" },
   avatarText: { fontSize: 17, fontWeight: "800", color: colors.primary },
+  codeChipBelow: {
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    backgroundColor: colors.accent + "20",
+    borderRadius: 4,
+    marginTop: 3,
+    alignItems: "center",
+  },
+  codeChipBelowText: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: colors.accent,
+    letterSpacing: 0.3,
+  },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   arrivalBadge: {
     flexDirection: "row",

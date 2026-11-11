@@ -15,6 +15,20 @@ import Loader from "@/src/components/Loader";
 
 const FLOW = ["Received", "Loaded", "Drying", "Completed", "Delivered"];
 
+function fmtDate(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtDateTime(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  const dateStr = d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const timeStr = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return `${dateStr}, ${timeStr}`;
+}
+
 export default function BatchDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -661,7 +675,13 @@ export default function BatchDetail() {
 
         {/* Details */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Details</Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
+            <Text style={styles.sectionTitle}>Details</Text>
+            <View style={styles.arrivalBadge}>
+              <MaterialCommunityIcons name="calendar-import" size={13} color="#166534" />
+              <Text style={styles.arrivalBadgeText}>Arrived: {fmtDate(data.arrival_date || data.created_at)}</Text>
+            </View>
+          </View>
           <Row
             label="Customer"
             value={data.customer?.name || "-"}
@@ -671,8 +691,18 @@ export default function BatchDetail() {
           {data.received_from && data.received_from !== data.customer?.name ? (
             <Row label="Received From" value={data.received_from} />
           ) : null}
+          <Row label="Arrival Date" value={fmtDate(data.arrival_date || data.created_at)} bold />
           <Row label="Product" value={data.product?.name || "-"} />
           <Row label="Machine" value={data.machine?.name || "-"} />
+          {data.processing_started_at ? (
+            <Row label="Processing Started" value={fmtDateTime(data.processing_started_at)} />
+          ) : null}
+          {data.processing_ended_at ? (
+            <Row label="Processing Completed" value={fmtDateTime(data.processing_ended_at)} />
+          ) : null}
+          {(data.delivered_at || data.delivery?.delivery_date) ? (
+            <Row label="Delivered At" value={fmtDateTime(data.delivered_at || data.delivery?.delivery_date)} />
+          ) : null}
           <Row label="Raw Weight" value={`${data.raw_weight} kg`} />
           {data.actual_dry_weight ? (
             <>
@@ -1033,5 +1063,21 @@ const styles = StyleSheet.create({
   },
   pillOptionTextActive: {
     color: "#fff",
+  },
+  arrivalBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+  },
+  arrivalBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#166534",
   },
 });

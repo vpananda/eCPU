@@ -12,6 +12,20 @@ import { storage } from "@/src/utils/storage";
 
 const MODES = ["Cash", "UPI", "Bank", "Credit"];
 
+function fmtDate(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtDateTime(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  const dateStr = d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const timeStr = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return `${dateStr}, ${timeStr}`;
+}
+
 export default function DeliveryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -27,6 +41,7 @@ export default function DeliveryScreen() {
   const [paymentMode, setPaymentMode] = useState("Cash");
   const [receivedBy, setReceivedBy] = useState("");
   const [receivedPhone, setReceivedPhone] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [remarks, setRemarks] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -132,6 +147,7 @@ export default function DeliveryScreen() {
           payment_mode: paymentMode,
           remarks,
           deliver_siblings: isSplit && deliverCombined && allSiblingsCompleted,
+          delivery_date: deliveryDate ? `${deliveryDate}T${new Date().toISOString().slice(11, 19)}Z` : undefined,
         },
       });
       await storage.removeItem("cached_arrivals_dashboard");
@@ -325,6 +341,29 @@ export default function DeliveryScreen() {
                 />
               )}
             </View>
+
+            {/* Prominently Highlighted Arrival Date & Lifecycle Timeline */}
+            <View style={styles.lifecycleRow}>
+              <View style={styles.arrivalHighlightChip}>
+                <MaterialCommunityIcons name="calendar-import" size={14} color="#166534" />
+                <Text style={styles.arrivalHighlightLabel}>Arrival Date:</Text>
+                <Text style={styles.arrivalHighlightValue}>{fmtDate(batch.arrival_date || batch.created_at)}</Text>
+              </View>
+              {batch.processing_started_at ? (
+                <View style={styles.timelineChip}>
+                  <MaterialCommunityIcons name="fire" size={13} color="#D97706" />
+                  <Text style={styles.timelineChipLabel}>Drying Started:</Text>
+                  <Text style={styles.timelineChipValue}>{fmtDateTime(batch.processing_started_at)}</Text>
+                </View>
+              ) : null}
+              {batch.processing_ended_at ? (
+                <View style={styles.timelineChip}>
+                  <MaterialCommunityIcons name="check-circle" size={13} color="#2E7D32" />
+                  <Text style={styles.timelineChipLabel}>Drying Finished:</Text>
+                  <Text style={styles.timelineChipValue}>{fmtDateTime(batch.processing_ended_at)}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           <Text style={styles.section}>Processed Details</Text>
@@ -399,8 +438,15 @@ export default function DeliveryScreen() {
             </View>
           )}
 
-          <Text style={styles.section}>Handed Over To</Text>
-          <Input testID="delivery-received-by" label="Person Name *" value={receivedBy} onChangeText={setReceivedBy} placeholder="Full name" />
+          <Text style={styles.section}>Handed Over To & Delivery Date</Text>
+          <View style={{ flexDirection: "row", gap: spacing.md }}>
+            <View style={{ flex: 1.2 }}>
+              <Input testID="delivery-received-by" label="Person Name *" value={receivedBy} onChangeText={setReceivedBy} placeholder="Full name" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Input testID="delivery-date" label="Delivery Date *" value={deliveryDate} onChangeText={setDeliveryDate} placeholder="YYYY-MM-DD" />
+            </View>
+          </View>
           <Input testID="delivery-received-phone" label="Phone Number" value={receivedPhone} onChangeText={setReceivedPhone} keyboardType="phone-pad" placeholder="10-digit number" maxLength={15} />
           <Input testID="delivery-remarks" label="Remarks" value={remarks} onChangeText={setRemarks} multiline placeholder="Optional notes" />
 
@@ -491,6 +537,57 @@ const styles = StyleSheet.create({
   sumStat: { flex: 1 },
   sumLabel: { fontSize: 10, color: colors.textMuted, fontWeight: "700", letterSpacing: 0.3, textTransform: "uppercase" },
   sumValue: { fontSize: 14, color: colors.text, fontWeight: "800", marginTop: 3 },
+  lifecycleRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(0,0,0,0.06)",
+  },
+  arrivalHighlightChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+  },
+  arrivalHighlightLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  arrivalHighlightValue: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#14532D",
+  },
+  timelineChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#fff",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  timelineChipLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  timelineChipValue: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.text,
+  },
   section: { fontSize: 13, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.4, textTransform: "uppercase", marginTop: spacing.md, marginBottom: spacing.sm },
   lossPill: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.warning + "18", padding: 8, borderRadius: radius.pill, alignSelf: "flex-start", marginTop: -4, marginBottom: spacing.md },
   lossText: { fontSize: 12, fontWeight: "700", color: colors.warning },

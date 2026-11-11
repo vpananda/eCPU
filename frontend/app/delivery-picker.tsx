@@ -16,12 +16,22 @@ type Batch = {
   status: string;
   raw_weight: number;
   actual_dry_weight?: number;
+  arrival_date?: string;
+  created_at?: string;
+  processing_started_at?: string;
+  processing_ended_at?: string;
   branch_id?: string;
   branch_name?: string;
   customer?: { id: string; name: string; code: string; mobile: string };
   product?: { name: string };
   balance_amount?: number;
 };
+
+function fmtDate(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
 
 export default function DeliveryPicker() {
   const router = useRouter();
@@ -150,6 +160,22 @@ export default function DeliveryPicker() {
                   <Text style={styles.name}>{b.customer?.name}</Text>
                   <StatusPill status={b.status} />
                 </View>
+
+                {/* Highlighted Arrival Date */}
+                <View style={styles.arrivalBadge}>
+                  <MaterialCommunityIcons name="calendar-import" size={11} color="#166534" />
+                  <Text style={styles.arrivalBadgeLabel}>Arrived:</Text>
+                  <Text style={styles.arrivalBadgeDate}>{fmtDate(b.arrival_date || b.created_at)}</Text>
+                  {b.processing_ended_at ? (
+                    <>
+                      <Text style={{ color: "#BBF7D0", marginHorizontal: 3 }}>•</Text>
+                      <MaterialCommunityIcons name="check-circle" size={11} color="#166534" />
+                      <Text style={styles.arrivalBadgeLabel}>Dried:</Text>
+                      <Text style={styles.arrivalBadgeDate}>{fmtDate(b.processing_ended_at)}</Text>
+                    </>
+                  ) : null}
+                </View>
+
                 <Text style={styles.meta}>
                   {b.batch_no} · {b.product?.name || "Cardamom"} · {b.raw_weight}kg wet
                   {b.actual_dry_weight ? ` · ${b.actual_dry_weight}kg dry` : ""}
@@ -182,6 +208,29 @@ const styles = StyleSheet.create({
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary50, alignItems: "center", justifyContent: "center" },
   avatarText: { fontSize: 17, fontWeight: "800", color: colors.primary },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  arrivalBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    alignSelf: "flex-start",
+    marginTop: 3,
+  },
+  arrivalBadgeLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  arrivalBadgeDate: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    color: "#166534",
+  },
   name: { fontSize: 15, fontWeight: "800", color: colors.text, flexShrink: 1 },
   meta: { fontSize: 12, color: colors.textMuted, marginTop: 3 },
   phone: { fontSize: 11, color: colors.textLight, marginTop: 2 },

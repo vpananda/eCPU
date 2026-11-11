@@ -19,6 +19,10 @@ type SubBatch = {
   machine_name?: string;
   status: string;
   actual_dry_weight?: number | null;
+  arrival_date?: string;
+  processing_started_at?: string | null;
+  processing_ended_at?: string | null;
+  delivery_date?: string | null;
 };
 
 type Row = {
@@ -33,6 +37,8 @@ type Row = {
   branch_id?: string;
   branch_name?: string;
   arrival_date: string;
+  processing_started_at?: string | null;
+  processing_ended_at?: string | null;
   raw_weight: number;
   rate_per_kg?: number;
   bill_amount?: number;
@@ -81,6 +87,14 @@ function fmtDate(iso?: string | null) {
   if (!iso) return "-";
   const d = new Date(iso);
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
+
+function fmtDateTime(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  const dateStr = d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+  const timeStr = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+  return `${dateStr}, ${timeStr}`;
 }
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -309,14 +323,42 @@ export default function ArrivalsScreen() {
               </View>
             </View>
             
-            <View style={styles.metaRow}>
-              <Text style={styles.meta}>{r.product}</Text>
-              <Text style={styles.metaDot}>·</Text>
-              <MaterialCommunityIcons name="calendar" size={11} color={colors.textMuted} />
-              <Text style={styles.meta}>{fmtDate(dateStr)}</Text>
+            {/* Highlighted Arrival Date & Lifecycle Timeline */}
+            <View style={styles.dateBadgesContainer}>
+              <View style={styles.arrivalDatePill}>
+                <MaterialCommunityIcons name="calendar-import" size={12} color="#166534" />
+                <Text style={styles.arrivalDateLabel}>Arrived:</Text>
+                <Text style={styles.arrivalDateValue}>{fmtDate(r.arrival_date)}</Text>
+              </View>
+
+              {tab === "processing" && !isCompletedRow && r.processing_started_at ? (
+                <View style={styles.processTimePill}>
+                  <MaterialCommunityIcons name="fire" size={11} color="#D97706" />
+                  <Text style={styles.processTimeLabel}>Started:</Text>
+                  <Text style={styles.processTimeValue}>{fmtDateTime(r.processing_started_at)}</Text>
+                </View>
+              ) : null}
+
+              {isCompletedRow && (
+                <View style={styles.processCompletedPill}>
+                  <MaterialCommunityIcons name="check-circle" size={11} color="#2E7D32" />
+                  <Text style={styles.processCompletedLabel}>Dried:</Text>
+                  <Text style={styles.processCompletedValue}>{fmtDateTime(r.processing_ended_at || r.delivery_date)}</Text>
+                </View>
+              )}
+
+              {tab === "out" && r.delivery_date && (
+                <View style={styles.deliveryPill}>
+                  <MaterialCommunityIcons name="truck-delivery" size={11} color="#7B1FA2" />
+                  <Text style={styles.deliveryPillLabel}>Delivered:</Text>
+                  <Text style={styles.deliveryPillValue}>{fmtDateTime(r.delivery_date)}</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.metaRow}>
+              <Text style={styles.meta}>{r.product}</Text>
+              <Text style={styles.metaDot}>·</Text>
               <MaterialCommunityIcons name="phone" size={11} color={colors.textMuted} />
               <Text style={styles.meta}>{r.customer_mobile}</Text>
               <Text style={styles.metaDot}>·</Text>
@@ -873,6 +915,98 @@ const styles = StyleSheet.create({
   codeChip: { paddingHorizontal: 6, paddingVertical: 2, backgroundColor: colors.accent + "20", borderRadius: 5 },
   codeChipText: { fontSize: 10, fontWeight: "800", color: colors.accent },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 3 },
+  dateBadgesContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  arrivalDatePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  arrivalDateLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  arrivalDateValue: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#166534",
+  },
+  processTimePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FFFBEB",
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  processTimeLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#92400E",
+  },
+  processTimeValue: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#B45309",
+  },
+  processCompletedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+  },
+  processCompletedLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  processCompletedValue: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#2E7D32",
+  },
+  deliveryPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FAF5FF",
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#E9D5FF",
+  },
+  deliveryPillLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#6B21A8",
+  },
+  deliveryPillValue: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#7B1FA2",
+  },
   branchText: { fontSize: 11, color: colors.primary, fontWeight: "700" },
   machineText: { fontSize: 11, color: colors.warning, fontWeight: "800" },
   metaDot: { fontSize: 11, color: colors.textLight, marginHorizontal: 2 },

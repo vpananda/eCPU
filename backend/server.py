@@ -1064,6 +1064,9 @@ class BatchIn(BaseModel):
 
 class BatchUpdate(BaseModel):
     arrival_date: Optional[str] = None
+    processing_started_at: Optional[str] = None
+    processing_ended_at: Optional[str] = None
+    delivered_at: Optional[str] = None
     raw_weight: Optional[float] = None
     rate_per_kg: Optional[float] = None
     bags: Optional[int] = None
@@ -1094,6 +1097,8 @@ class BatchStatusUpdate(BaseModel):
     actual_dry_weight: Optional[float] = None
     padi_weight: Optional[float] = None
     processed_bags: Optional[int] = None
+    processing_started_at: Optional[str] = None
+    processing_ended_at: Optional[str] = None
 
 
 class DeliveryIn(BaseModel):
@@ -1107,6 +1112,7 @@ class DeliveryIn(BaseModel):
     signature: Optional[str] = ""             # base64
     remarks: Optional[str] = ""
     deliver_siblings: Optional[bool] = False  # deliver all split lots in arrival together
+    delivery_date: Optional[str] = None
 
 
 class PaymentIn(BaseModel):
@@ -1221,6 +1227,8 @@ async def seed():
     """)
     await db.execute("""
         ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS parent_batch_id UUID REFERENCES public.batches(id) ON DELETE SET NULL;
+        ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ;
+        ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS processing_ended_at TIMESTAMPTZ;
     """)
     # Create counters table if not exists
     await db.execute("""
@@ -1804,9 +1812,11 @@ async def load_machine(mid: str, body: MachineLoadIn, user: dict = Depends(get_c
 
         if not is_partial:
             # Full load (no split needed)
+            t_load = t_start or now_utc().isoformat()
             await db.batches.update_one({"id": b["id"]}, {"$set": {
                 "status": "Drying",
                 "machine_id": mid,
+                "processing_started_at": t_load,
                 "remarks": f"Loaded in {m['name']} at {t_start}",
                 "updated_at": now_utc().isoformat(),
                 "updated_by": user["id"]
@@ -1860,6 +1870,7 @@ async def load_machine(mid: str, body: MachineLoadIn, user: dict = Depends(get_c
                 "balance_amount": round(load_w * rate, 2) - float(b.get("total_paid") or 0),
                 "status": "Drying",
                 "machine_id": mid,
+                "processing_started_at": t_load,
                 "is_split": True,
                 "parent_batch_id": b.get("parent_batch_id") or b["id"],
                 "remarks": f"Split lot loaded in {m['name']} at {t_start}",
@@ -1954,6 +1965,7 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
     for b in drying_batches:
         upd = {
             "status": "Completed",
+            "processing_ended_at": now_utc().isoformat(),
             "remarks": f"Drying completed in {m['name']} at {t_end}",
             "updated_at": now_utc().isoformat(),
             "updated_by": user["id"],
@@ -2548,7 +2560,8 @@ async def get_batch(bid: str, user: dict = Depends(get_current_user)):
     parent_id = b.get("parent_batch_id") or b["id"]
     base_bno = b["batch_no"].split("-")[0] if "-" in (b.get("batch_no") or "") else b.get("batch_no")
     sibling_sql = """
-        SELECT b2.id::text, b2.batch_no, b2.raw_weight, b2.status, b2.machine_id::text, m.name as machine_name, b2.actual_dry_weight
+        SELECT b2.id::text, b2.batch_no, b2.raw_weight, b2.status, b2.machine_id::text, m.name as machine_name, b2.actual_dry_weight,
+               b2.arrival_date, b2.processing_started_at, b2.processing_ended_at
         FROM public.batches b2
         LEFT JOIN public.machines m ON b2.machine_id = m.id
         WHERE (b2.parent_batch_id = %s OR b2.id = %s OR (b2.customer_id = %s AND b2.batch_no LIKE %s))
@@ -2567,6 +2580,9 @@ async def get_batch(bid: str, user: dict = Depends(get_current_user)):
                 "machine_id": str(r["machine_id"]) if r.get("machine_id") else None,
                 "machine_name": r.get("machine_name") or "Unassigned",
                 "actual_dry_weight": float(r["actual_dry_weight"]) if r.get("actual_dry_weight") is not None else None,
+                "arrival_date": r.get("arrival_date").isoformat() if r.get("arrival_date") else None,
+                "processing_started_at": r.get("processing_started_at").isoformat() if r.get("processing_started_at") else None,
+                "processing_ended_at": r.get("processing_ended_at").isoformat() if r.get("processing_ended_at") else None,
             }
             for r in sibling_rows
         ]
@@ -2868,6 +2884,8 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
     # Machine linkage — allow assignment at Load / Drying step
     machine_id = b.get("machine_id")
     if body.status in ("Loaded", "Drying"):
+        if not b.get("processing_started_at"):
+            upd["processing_started_at"] = body.processing_started_at or now_utc().isoformat()
         if body.machine_id:
             machine_id = body.machine_id
             upd["machine_id"] = machine_id
@@ -2877,6 +2895,9 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
             await db.machines.update_one({"id": machine_id},
                                          {"$set": {"status": "Running", "current_batch_id": bid}})
     elif body.status == "Completed":
+        upd["processing_ended_at"] = body.processing_ended_at or now_utc().isoformat()
+        if not b.get("processing_started_at"):
+            upd["processing_started_at"] = b.get("created_at") or now_utc().isoformat()
         if machine_id:
             # Check if any OTHER active batches are still drying in this machine before marking machine Available
             other_active = await db.query(
@@ -2957,11 +2978,12 @@ async def deliver_batch(bid: str, body: DeliveryIn,
         b["rate_per_kg"] = body.rate_per_kg
 
     weight_loss = round(float(b["raw_weight"]) - float(body.actual_dry_weight), 2)
+    deliv_time = body.delivery_date or now_utc().isoformat()
     delivery = {
         "actual_dry_weight": body.actual_dry_weight,
         "processed_bags": body.processed_bags or 0,
         "weight_loss": weight_loss,
-        "delivery_date": now_utc().isoformat(),
+        "delivery_date": deliv_time,
         "received_by": body.received_by,
         "received_by_phone": body.received_by_phone or "",
         "signature": body.signature or "",
@@ -3136,6 +3158,13 @@ async def update_batch_fields(
             upd["arrival_date"] = dt.isoformat()
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid arrival_date format, must be YYYY-MM-DD")
+
+    if body.processing_started_at is not None:
+        upd["processing_started_at"] = body.processing_started_at
+    if body.processing_ended_at is not None:
+        upd["processing_ended_at"] = body.processing_ended_at
+    if body.delivered_at is not None:
+        upd["delivered_at"] = body.delivered_at
 
     if body.raw_weight is not None and body.raw_weight > 0:
         upd["raw_weight"] = float(body.raw_weight)
@@ -4288,7 +4317,7 @@ async def dashboard_arrivals(
     in_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.processing_started_at, b.processing_ended_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
@@ -4327,7 +4356,7 @@ async def dashboard_arrivals(
     out_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.processing_started_at, b.processing_ended_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
@@ -4349,7 +4378,7 @@ async def dashboard_arrivals(
     proc_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.processing_started_at, b.processing_ended_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
@@ -4371,7 +4400,7 @@ async def dashboard_arrivals(
     comp_sql = f"""
         SELECT 
             b.id::text as batch_id, b.batch_no, b.branch_id::text as branch_id,
-            b.arrival_date, b.created_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
+            b.arrival_date, b.created_at, b.processing_started_at, b.processing_ended_at, b.raw_weight, b.rate_per_kg, b.bill_amount, b.total_paid, b.balance_amount, b.actual_dry_weight, b.status,
             b.delivered_at as delivery_date,
             b.is_split, b.parent_batch_id::text as parent_batch_id,
             c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
@@ -4411,6 +4440,8 @@ async def dashboard_arrivals(
             "branch_id": d.get("branch_id"),
             "branch_name": d.get("branch_name") or "-",
             "arrival_date": d.get("arrival_date") or d["created_at"],
+            "processing_started_at": d.get("processing_started_at"),
+            "processing_ended_at": d.get("processing_ended_at"),
             "raw_weight": float(d.get("raw_weight") or 0),
             "rate_per_kg": float(d.get("rate_per_kg") or 0),
             "bill_amount": float(d.get("bill_amount") or 0),
@@ -4468,6 +4499,10 @@ async def dashboard_arrivals(
             "machine_name": row.get("machine_name") or "Unassigned",
             "status": row["status"],
             "actual_dry_weight": row.get("actual_dry_weight"),
+            "arrival_date": row.get("arrival_date"),
+            "processing_started_at": row.get("processing_started_at"),
+            "processing_ended_at": row.get("processing_ended_at"),
+            "delivery_date": row.get("delivery_date"),
         })
 
     in_list = []

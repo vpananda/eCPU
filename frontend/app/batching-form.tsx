@@ -961,7 +961,7 @@ export default function BatchingForm() {
 
               <View style={{ flexDirection: "row", gap: spacing.md, marginTop: spacing.sm }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.completeInputLabel}>Padi Weight (KG)</Text>
+                  <Text style={styles.completeInputLabel}>Padi Weight (1L Wt)</Text>
                   <TextInput
                     testID="batching-complete-padi-weight"
                     style={styles.completeTextInput}
@@ -987,22 +987,38 @@ export default function BatchingForm() {
               </View>
 
               {/* Live Calculation Preview */}
-              {parseFloat(compDryWeight || "0") > 0 && (
-                <View style={styles.completeCalcBox}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                    <Text style={styles.completeCalcLabel}>Total Output (Dry + Padi):</Text>
-                    <Text style={styles.completeCalcVal}>
-                      {(parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0")).toFixed(2)} kg
-                    </Text>
+              {parseFloat(compDryWeight || "0") > 0 && (() => {
+                const wet = completeBatch?.raw_weight || 0;
+                const dry = parseFloat(compDryWeight || "0");
+                const loss = Math.max(0, wet - dry);
+                const lossPct = wet > 0 ? ((loss / wet) * 100).toFixed(1) : "0.0";
+                const yieldPct = wet > 0 ? ((dry / wet) * 100).toFixed(1) : "0.0";
+                const padiVal = parseFloat(compPadiWeight || "0");
+                return (
+                  <View style={styles.completeCalcBox}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                      <Text style={styles.completeCalcLabel}>Processed Dry Output:</Text>
+                      <Text style={styles.completeCalcVal}>{dry.toFixed(2)} kg</Text>
+                    </View>
+                    {padiVal > 0 && (
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                        <Text style={styles.completeCalcLabel}>Padi Weight (1L Density):</Text>
+                        <Text style={[styles.completeCalcVal, { color: colors.textMuted }]}>{padiVal.toFixed(2)} (Ref)</Text>
+                      </View>
+                    )}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                      <Text style={styles.completeCalcLabel}>Weight Loss (Moisture):</Text>
+                      <Text style={[styles.completeCalcVal, { color: colors.warning }]}>
+                        {loss.toFixed(2)} kg ({lossPct}%)
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={styles.completeCalcLabel}>Dry Yield:</Text>
+                      <Text style={[styles.completeCalcVal, { color: "#2E7D32" }]}>{yieldPct}%</Text>
+                    </View>
                   </View>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                    <Text style={styles.completeCalcLabel}>Weight Loss (Moisture):</Text>
-                    <Text style={[styles.completeCalcVal, { color: colors.warning }]}>
-                      {Math.max(0, (completeBatch?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))).toFixed(2)} kg ({completeBatch && completeBatch.raw_weight > 0 ? (((completeBatch.raw_weight - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))) / completeBatch.raw_weight) * 100).toFixed(1) : 0}%)
-                    </Text>
-                  </View>
-                </View>
-              )}
+                );
+              })()}
 
               <View style={styles.completeNoticeBox}>
                 <MaterialCommunityIcons name="whatsapp" size={16} color="#25D366" />

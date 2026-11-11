@@ -1969,7 +1969,7 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
                 "actual_dry_weight": b_dry,
                 "padi_weight": b_padi,
                 "processed_bags": b_bags,
-                "weight_loss": round(raw - (b_dry + b_padi), 2),
+                "weight_loss": round(raw - b_dry, 2),
             })
             tmp = dict(b)
             tmp["actual_dry_weight"] = b_dry
@@ -1987,7 +1987,7 @@ async def stop_machine(mid: str, body: MachineStopIn, user: dict = Depends(get_c
                 "actual_dry_weight": prop_dry_weight,
                 "padi_weight": prop_padi_weight,
                 "processed_bags": prop_bags,
-                "weight_loss": round(raw - (prop_dry_weight + prop_padi_weight), 2),
+                "weight_loss": round(raw - prop_dry_weight, 2),
             })
 
             tmp = dict(b)
@@ -2892,7 +2892,7 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
             padi = float(body.padi_weight or 0)
             upd["padi_weight"] = padi
             upd["processed_bags"] = body.processed_bags or 0
-            upd["weight_loss"] = round(raw - (body.actual_dry_weight + padi), 2)
+            upd["weight_loss"] = round(raw - body.actual_dry_weight, 2)
 
             tmp = dict(b)
             tmp["actual_dry_weight"] = body.actual_dry_weight

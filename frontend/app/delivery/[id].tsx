@@ -313,7 +313,7 @@ export default function DeliveryScreen() {
               />
               <SumStat label="Bags at arrival" value={String(batch.bags || 0)} />
               {batch.padi_weight != null && Number(batch.padi_weight) > 0 ? (
-                <SumStat label="Padi Weight" value={`${batch.padi_weight} kg`} />
+                <SumStat label="Padi Wt (1L)" value={`${batch.padi_weight}`} />
               ) : (
                 <SumStat
                   label="Machine"

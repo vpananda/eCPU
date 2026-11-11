@@ -457,7 +457,7 @@ export default function BatchDetail() {
 
               <View style={{ flexDirection: "row", gap: spacing.md }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.modalLabel}>Padi Weight (KG)</Text>
+                  <Text style={styles.modalLabel}>Padi Weight (1L Wt)</Text>
                   <TextInput
                     testID="complete-padi-weight"
                     style={styles.modalInput}
@@ -483,23 +483,38 @@ export default function BatchDetail() {
               </View>
 
               {/* Live Calculation Preview */}
-              {parseFloat(compDryWeight || "0") > 0 && (
-                <View style={styles.completeCalcBox}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                    <Text style={styles.completeCalcLabel}>Total Output (Dry + Padi):</Text>
-                    <Text style={styles.completeCalcVal}>
-                      {(parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0")).toFixed(2)} kg
-                    </Text>
+              {parseFloat(compDryWeight || "0") > 0 && (() => {
+                const wet = data?.raw_weight || 0;
+                const dry = parseFloat(compDryWeight || "0");
+                const loss = Math.max(0, wet - dry);
+                const lossPct = wet > 0 ? ((loss / wet) * 100).toFixed(1) : "0.0";
+                const yieldPct = wet > 0 ? ((dry / wet) * 100).toFixed(1) : "0.0";
+                const padiVal = parseFloat(compPadiWeight || "0");
+                return (
+                  <View style={styles.completeCalcBox}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                      <Text style={styles.completeCalcLabel}>Processed Dry Output:</Text>
+                      <Text style={styles.completeCalcVal}>{dry.toFixed(2)} kg</Text>
+                    </View>
+                    {padiVal > 0 && (
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                        <Text style={styles.completeCalcLabel}>Padi Weight (1L Density):</Text>
+                        <Text style={[styles.completeCalcVal, { color: colors.textMuted }]}>{padiVal.toFixed(2)} (Ref)</Text>
+                      </View>
+                    )}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                      <Text style={styles.completeCalcLabel}>Weight Loss (Moisture):</Text>
+                      <Text style={[styles.completeCalcVal, { color: colors.warning }]}>
+                        {loss.toFixed(2)} kg ({lossPct}%)
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                      <Text style={styles.completeCalcLabel}>Dry Yield:</Text>
+                      <Text style={[styles.completeCalcVal, { color: "#2E7D32" }]}>{yieldPct}%</Text>
+                    </View>
                   </View>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                    <Text style={styles.completeCalcLabel}>Weight Loss (Moisture):</Text>
-                    <Text style={[styles.completeCalcVal, { color: colors.warning }]}>
-                      {Math.max(0, (data?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))).toFixed(2)} kg
-                      {" "}({(((data?.raw_weight || 0) - (parseFloat(compDryWeight || "0") + parseFloat(compPadiWeight || "0"))) / (data?.raw_weight || 1) * 100).toFixed(1)}%)
-                    </Text>
-                  </View>
-                </View>
-              )}
+                );
+              })()}
             </ScrollView>
 
             <View style={[styles.modalButtons, { marginTop: spacing.md }]}>
@@ -663,11 +678,11 @@ export default function BatchDetail() {
             <>
               <Row label="Actual Dry Weight" value={`${data.actual_dry_weight} kg`} />
               {data.padi_weight != null && Number(data.padi_weight) > 0 ? (
-                <Row label="Padi Weight" value={`${data.padi_weight} kg`} />
+                <Row label="Padi Weight (1L Wt)" value={`${data.padi_weight}`} />
               ) : null}
               <Row
                 label="Weight Loss"
-                value={`${data.weight_loss != null ? data.weight_loss : Math.max(0, data.raw_weight - (Number(data.actual_dry_weight) + Number(data.padi_weight || 0)))} kg (${data.raw_weight > 0 ? (((data.raw_weight - (Number(data.actual_dry_weight) + Number(data.padi_weight || 0))) / data.raw_weight) * 100).toFixed(1) : "0"}%)`}
+                value={`${data.weight_loss != null ? data.weight_loss : Math.max(0, data.raw_weight - Number(data.actual_dry_weight))} kg (${data.raw_weight > 0 ? (((data.raw_weight - Number(data.actual_dry_weight)) / data.raw_weight) * 100).toFixed(1) : "0"}%)`}
               />
             </>
           ) : null}

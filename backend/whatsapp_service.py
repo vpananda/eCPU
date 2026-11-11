@@ -311,8 +311,8 @@ async def send_drying_completed(
 
     # 2. Try v4 (Thanks,\n{{5}} only - approved in en, ta)
     dry_display = (
-        (f"{dry_weight:,.2f} (பாடி: {padi_val:,.2f} KG)" if lang == "ta" else f"{dry_weight:,.2f} (Padi: {padi_val:,.2f} KG)")
-        if padi_val > 0 else f"{dry_weight:,.2f}"
+        (f"{dry_weight:,.2f} KG (பாடி 1L: {padi_val:,.2f})" if lang == "ta" else f"{dry_weight:,.2f} KG (Padi 1L: {padi_val:,.2f})")
+        if padi_val > 0 else f"{dry_weight:,.2f} KG"
     )
     res_v4 = await send_whatsapp_template(
         to_phone=to_phone,

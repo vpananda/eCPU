@@ -264,7 +264,7 @@ export default function StopDryer() {
                           />
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.outputInputLabel}>Padi Weight (KG)</Text>
+                          <Text style={styles.outputInputLabel}>Padi Weight (1L Wt)</Text>
                           <TextInput
                             style={styles.outputInput}
                             value={batchWeights[b.id]?.padi || ""}

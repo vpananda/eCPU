@@ -85,6 +85,9 @@ export default function BatchingForm() {
   const [compBags, setCompBags] = useState("");
   const [completing, setCompleting] = useState(false);
 
+  // In-App Overload Confirmation Modal State
+  const [overloadModalOpen, setOverloadModalOpen] = useState(false);
+
   const inhouseMachines = React.useMemo(() => machines.filter(m => !m.is_outsourced), [machines]);
   const outsourcedMachines = React.useMemo(() => machines.filter(m => !!m.is_outsourced), [machines]);
   const displayMachines = React.useMemo(() => {
@@ -257,25 +260,29 @@ export default function BatchingForm() {
     }
 
     if (selectedMachine && totalLoadWeight > selectedMachine.capacity) {
-      const overKg = (totalLoadWeight - selectedMachine.capacity).toFixed(1);
-      const proceed = Platform.OS === "web"
-        ? window.confirm(
-            `⚠️ Overload Capacity Warning\n\nTotal load (${totalLoadWeight.toFixed(2)} KG) exceeds ${selectedMachine.name} nominal capacity (${selectedMachine.capacity} KG) by ${overKg} KG.\n\nDo you want to proceed with starting this dryer with the overloaded capacity?`
-          )
-        : await new Promise<boolean>((resolve) => {
-            Alert.alert(
-              "⚠️ Overload Capacity Warning",
-              `Total load weight (${totalLoadWeight.toFixed(2)} KG) exceeds ${selectedMachine.name} nominal capacity (${selectedMachine.capacity} KG) by ${overKg} KG.\n\nDo you want to proceed with starting this dryer with the overloaded batch?`,
-              [
-                { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
-                { text: "Proceed with Overload", onPress: () => resolve(true) }
-              ]
-            );
-          });
-      if (!proceed) return;
+      setOverloadModalOpen(true);
+      return;
     }
 
+    await executeStartProcess(loads);
+  };
+
+  const executeStartProcess = async (preparedLoads?: Array<{ batch_id: string; load_weight: number; load_bags: number }>) => {
+    const selectedIds = Object.keys(selectedBatchIds).filter(id => selectedBatchIds[id]);
+    const loads = preparedLoads || selectedIds.map(id => {
+      const b = batches.find(x => x.id === id);
+      const rawW = b?.raw_weight || 0;
+      const w = parseFloat(loadWeights[id] ?? String(rawW));
+      const bagsNum = parseInt(loadBags[id] ?? String(b?.bags || 1), 10);
+      return {
+        batch_id: id,
+        load_weight: isNaN(w) || w <= 0 ? rawW : w,
+        load_bags: isNaN(bagsNum) || bagsNum <= 0 ? (b?.bags || 1) : bagsNum,
+      };
+    });
+
     setSaving(true);
+    setOverloadModalOpen(false);
     try {
       await api(`/machines/${selectedMachineId}/load`, {
         method: "POST",
@@ -1054,6 +1061,101 @@ export default function BatchingForm() {
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={styles.completeSubmitBtnText}>Complete & Notify</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* In-App Overload Capacity Confirmation Modal */}
+      <Modal
+        visible={overloadModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOverloadModalOpen(false)}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.overloadModalCard}>
+            {/* Header Icon + Title */}
+            <View style={styles.overloadHeader}>
+              <View style={styles.overloadIconCircle}>
+                <MaterialCommunityIcons name="alert-outline" size={26} color="#EA580C" />
+              </View>
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={styles.overloadTitle}>Capacity Warning</Text>
+                <Text style={styles.overloadSubtitle}>Batch exceeds dryer rated limit</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setOverloadModalOpen(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.overloadCloseBtn}
+              >
+                <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Capacity vs Load Comparison Card */}
+            <View style={styles.overloadSummaryCard}>
+              <View style={styles.overloadSummaryRow}>
+                <Text style={styles.overloadSummaryLabel}>Selected Dryer:</Text>
+                <Text style={styles.overloadSummaryVal}>{selectedMachine?.name || "Machine"}</Text>
+              </View>
+              <View style={styles.overloadDivider} />
+              <View style={styles.overloadSummaryRow}>
+                <Text style={styles.overloadSummaryLabel}>Nominal Capacity:</Text>
+                <Text style={styles.overloadSummaryVal}>{selectedMachine?.capacity || 0} KG</Text>
+              </View>
+              <View style={styles.overloadDivider} />
+              <View style={styles.overloadSummaryRow}>
+                <Text style={styles.overloadSummaryLabel}>Total Batch Load:</Text>
+                <Text style={[styles.overloadSummaryVal, { color: "#C2410C", fontWeight: "900" }]}>
+                  {totalLoadWeight.toFixed(2)} KG
+                </Text>
+              </View>
+              <View style={styles.overloadDivider} />
+              <View style={styles.overloadSummaryRow}>
+                <Text style={styles.overloadSummaryLabel}>Overloaded By:</Text>
+                <View style={styles.overloadPill}>
+                  <MaterialCommunityIcons name="arrow-up-bold" size={13} color="#C2410C" />
+                  <Text style={styles.overloadPillText}>
+                    +{selectedMachine ? (totalLoadWeight - selectedMachine.capacity).toFixed(1) : 0} KG
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Advisory Info Note */}
+            <View style={styles.overloadNoticeBox}>
+              <MaterialCommunityIcons name="information" size={18} color="#EA580C" style={{ marginTop: 1 }} />
+              <Text style={styles.overloadNoticeText}>
+                Overloading may affect air circulation and drying duration. Please verify your dryer can safely take this volume before starting.
+              </Text>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.overloadActionsRow}>
+              <TouchableOpacity
+                style={styles.overloadCancelBtn}
+                onPress={() => setOverloadModalOpen(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.overloadCancelBtnText}>Adjust Weight</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.overloadConfirmBtn}
+                onPress={() => executeStartProcess()}
+                disabled={saving}
+                activeOpacity={0.85}
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <MaterialCommunityIcons name="check-bold" size={16} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.overloadConfirmBtnText}>Proceed with Overload</Text>
+                  </>
                 )}
               </TouchableOpacity>
             </View>
@@ -1964,5 +2066,139 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "800",
     fontSize: 14,
+  },
+
+  // Overload Capacity Modal Styles
+  overloadModalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: spacing.xl,
+    maxWidth: 440,
+    width: "100%",
+    alignSelf: "center",
+    ...shadow.card,
+  },
+  overloadHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
+  overloadIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#FFEDD5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  overloadTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  overloadSubtitle: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontWeight: "500",
+  },
+  overloadCloseBtn: {
+    padding: 6,
+    borderRadius: radius.pill,
+    backgroundColor: "#F1F5F9",
+  },
+  overloadSummaryCard: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    marginBottom: spacing.md,
+  },
+  overloadSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 5,
+  },
+  overloadSummaryLabel: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+  overloadSummaryVal: {
+    fontSize: 13,
+    color: colors.text,
+    fontWeight: "700",
+  },
+  overloadDivider: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 3,
+  },
+  overloadPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFEDD5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    gap: 3,
+  },
+  overloadPillText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#C2410C",
+  },
+  overloadNoticeBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: radius.md,
+    padding: spacing.sm + 2,
+    marginBottom: spacing.xl,
+  },
+  overloadNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#92400E",
+    lineHeight: 17,
+    fontWeight: "500",
+  },
+  overloadActionsRow: {
+    flexDirection: "row",
+    gap: spacing.sm + 2,
+  },
+  overloadCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  overloadCancelBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#475569",
+  },
+  overloadConfirmBtn: {
+    flex: 1.4,
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    backgroundColor: "#EA580C",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+  },
+  overloadConfirmBtnText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#fff",
   },
 });

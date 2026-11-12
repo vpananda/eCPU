@@ -139,6 +139,36 @@ export default function Settings() {
     }
   };
 
+  if (user && user.role !== "Admin") {
+    return (
+      <SafeAreaView style={styles.safe} edges={["bottom"]}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: spacing.xl }}>
+          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: "#FEF2F2", alignItems: "center", justifyContent: "center" }}>
+            <MaterialCommunityIcons name="shield-alert-outline" size={36} color={colors.danger} />
+          </View>
+          <Text style={{ fontSize: 18, fontWeight: "800", color: colors.text, marginTop: spacing.md, textAlign: "center" }}>
+            Admin Access Only
+          </Text>
+          <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: spacing.xs, textAlign: "center", maxWidth: 300, lineHeight: 18 }}>
+            Settings and automated daily WhatsApp reports are restricted to system Administrators.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={{
+              marginTop: spacing.xl,
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+              borderRadius: radius.pill,
+              backgroundColor: colors.primary,
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700" }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       {loading ? (

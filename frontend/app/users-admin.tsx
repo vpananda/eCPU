@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
@@ -18,6 +19,7 @@ const ROLES = ["Admin", "Manager", "Store Incharge"];
 export default function UsersAdmin() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +84,14 @@ export default function UsersAdmin() {
   };
 
   const remove = async (u: User) => {
+    const ok = await confirm({
+      title: "Delete User",
+      message: `Are you sure you want to delete user "${u.name}"? This action cannot be undone.`,
+      confirmText: "Delete User",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
     try {
       await api(`/auth/users/${u.id}`, { method: "DELETE" });
       toast.show("User removed");
@@ -132,7 +142,17 @@ export default function UsersAdmin() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetWrap}>
           <View style={styles.sheet}>
             <View style={styles.handle} />
-            <Text style={styles.sheetTitle}>{editing ? "Edit User" : "New User"}</Text>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{editing ? "Edit User" : "New User"}</Text>
+              <TouchableOpacity
+                onPress={() => setOpen(false)}
+                style={styles.sheetCloseBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Close"
+              >
+                <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
             <ScrollView contentContainerStyle={{ paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
               <Input testID="user-name" label="Name *" value={name} onChangeText={setName} />
               <Input testID="user-mobile" label={editing ? "Mobile" : "Mobile *"} value={mobile} onChangeText={setMobile} keyboardType="phone-pad" editable={!editing} maxLength={15} />
@@ -153,7 +173,25 @@ export default function UsersAdmin() {
                 options={branches.map(b => ({ id: b.id, name: b.name }))}
                 placeholder="Select branch"
               />
-              <Button testID="user-save" title={editing ? "Save Changes" : "Create User"} onPress={save} loading={saving} />
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  testID="user-cancel"
+                  style={styles.cancelBtn}
+                  onPress={() => setOpen(false)}
+                  activeOpacity={0.7}
+                  disabled={saving}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <View style={{ flex: 1.6 }}>
+                  <Button
+                    testID="user-save"
+                    title={editing ? "Save Changes" : "Create User"}
+                    onPress={save}
+                    loading={saving}
+                  />
+                </View>
+              </View>
             </ScrollView>
           </View>
         </KeyboardAvoidingView>
@@ -178,7 +216,12 @@ const styles = StyleSheet.create({
   sheetWrap: { flex: 1, justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.xl, maxHeight: "88%" },
   handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: spacing.md },
-  sheetTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
+  sheetTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
+  sheetCloseBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bg, alignItems: "center", justifyContent: "center" },
+  actionsRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.lg },
+  cancelBtn: { flex: 1, height: 48, borderRadius: radius.lg, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.card },
+  cancelBtnText: { fontSize: 15, fontWeight: "700", color: colors.textMuted },
   label: { fontSize: 12, fontWeight: "700", color: colors.textMuted, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: spacing.md },
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border },

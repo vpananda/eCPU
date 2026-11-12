@@ -134,7 +134,17 @@ export default function BranchesAdmin() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetWrap}>
           <View style={styles.sheet}>
             <View style={styles.handle} />
-            <Text style={styles.sheetTitle}>{editing ? "Edit Branch" : "New Branch"}</Text>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{editing ? "Edit Branch" : "New Branch"}</Text>
+              <TouchableOpacity
+                onPress={() => setOpen(false)}
+                style={styles.sheetCloseBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Close"
+              >
+                <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
             <Input testID="branch-name" label="Branch Name *" value={name} onChangeText={setName} />
             <Input testID="branch-address" label="Address" value={address} onChangeText={setAddress} multiline />
             <Input testID="branch-phone" label="Branch Office Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
@@ -146,7 +156,20 @@ export default function BranchesAdmin() {
               placeholder="Enter manager mobile e.g. 9842100000"
             />
             <View style={{ marginTop: spacing.xs }} />
-            <Button testID="branch-save" title={editing ? "Save Changes" : "Create Branch"} onPress={save} loading={saving} />
+            <View style={styles.actionsRow}>
+              <TouchableOpacity
+                testID="branch-cancel"
+                style={styles.cancelBtn}
+                onPress={() => setOpen(false)}
+                activeOpacity={0.7}
+                disabled={saving}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <View style={{ flex: 1.6 }}>
+                <Button testID="branch-save" title={editing ? "Save Changes" : "Create Branch"} onPress={save} loading={saving} />
+              </View>
+            </View>
             
             {editing && (
               <TouchableOpacity
@@ -178,7 +201,12 @@ const styles = StyleSheet.create({
   sheetWrap: { flex: 1, justifyContent: "flex-end" },
   sheet: { backgroundColor: colors.card, borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, padding: spacing.xl, paddingBottom: spacing.xxl },
   handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: spacing.md },
-  sheetTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: spacing.md },
+  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md },
+  sheetTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
+  sheetCloseBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bg, alignItems: "center", justifyContent: "center" },
+  actionsRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.xs },
+  cancelBtn: { flex: 1, height: 48, borderRadius: radius.lg, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.card },
+  cancelBtnText: { fontSize: 15, fontWeight: "700", color: colors.textMuted },
   deleteBtn: {
     flexDirection: "row",
     alignItems: "center",

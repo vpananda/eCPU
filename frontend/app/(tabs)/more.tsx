@@ -27,11 +27,11 @@ const ADMIN_ITEMS = [
   { key: "products", label: "Spices", icon: "leaf", route: "/products-admin" as const, color: "#2E7D32" },
   { key: "expense-categories", label: "Expense Ledgers", icon: "playlist-edit", route: "/expense-categories-admin" as const, color: "#E65100" },
   { key: "reminders", label: "Payment Reminders & Schedule", icon: "clock-check-outline", route: "/payment-reminders" as const, color: "#00897B" },
+  { key: "settings", label: "Settings", icon: "cog", route: "/settings" as const, color: "#607D8B" },
 ];
 
 const AUDIT_ITEMS = [
   { key: "audit", label: "Audit Trail", icon: "history", route: "/audit", color: "#5D4037" },
-  { key: "settings", label: "Settings", icon: "cog", route: "/settings", color: "#607D8B" },
 ];
 
 export default function MoreScreen() {

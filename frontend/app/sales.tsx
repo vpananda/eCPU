@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
@@ -18,6 +19,7 @@ function monthStartISO() {
 export default function SalesScreen() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   const { user } = useAuth();
   const isAdmin = user?.role === "Admin";
   const isManager = user?.role === "Manager";
@@ -50,28 +52,24 @@ export default function SalesScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!isAdmin && !isManager) return;
-    Alert.alert(
-      "Delete Sale Record",
-      "Are you sure you want to delete this sale? This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api(`/sales/${id}`, { method: "DELETE" });
-              toast.show("Sale record deleted");
-              load();
-            } catch (e: any) {
-              toast.show(e.message || "Failed to delete sale", "error");
-            }
-          }
-        }
-      ]
-    );
+    const ok = await confirm({
+      title: "Delete Sale Record",
+      message: "Are you sure you want to delete this sale? This action cannot be undone.",
+      confirmText: "Delete Sale",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
+
+    try {
+      await api(`/sales/${id}`, { method: "DELETE" });
+      toast.show("Sale record deleted");
+      load();
+    } catch (e: any) {
+      toast.show(e.message || "Failed to delete sale", "error");
+    }
   };
 
   const totalSales = list.reduce((sum, s) => sum + (s.amount || 0), 0);

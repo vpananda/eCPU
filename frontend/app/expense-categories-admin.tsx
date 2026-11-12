@@ -5,12 +5,14 @@ import { useRouter, useFocusEffect, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 export default function ExpenseCategoriesAdmin() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [categories, setCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,22 +69,18 @@ export default function ExpenseCategoriesAdmin() {
     handleSave(updated);
   };
 
-  const deleteCategory = (categoryName: string) => {
-    Alert.alert(
-      "Delete Category",
-      `Are you sure you want to delete "${categoryName}"? This will not affect existing expenses using this category but will remove it from the dropdown options.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            const updated = categories.filter((c) => c !== categoryName);
-            handleSave(updated);
-          },
-        },
-      ]
-    );
+  const deleteCategory = async (categoryName: string) => {
+    const ok = await confirm({
+      title: "Delete Category",
+      message: `Are you sure you want to delete "${categoryName}"? This will not affect existing expenses using this category but will remove it from the dropdown options.`,
+      confirmText: "Delete Category",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
+
+    const updated = categories.filter((c) => c !== categoryName);
+    handleSave(updated);
   };
 
   const startEdit = (index: number, val: string) => {

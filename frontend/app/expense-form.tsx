@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
@@ -51,6 +52,7 @@ async function takeWithCamera(): Promise<string | null> {
 export default function ExpenseForm() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   const { user, branches: authBranches } = useAuth();
   const params = useLocalSearchParams<{
     id?: string;
@@ -172,27 +174,23 @@ export default function ExpenseForm() {
     finally { setSaving(false); }
   };
 
-  const handleDelete = () => {
-    Alert.alert(
-      "Delete Expense",
-      "Are you sure you want to delete this expense entry?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api(`/expenses/${id}`, { method: "DELETE" });
-              toast.show("Expense deleted");
-              router.back();
-            } catch (e: any) {
-              toast.show(e.message || "Failed to delete expense", "error");
-            }
-          }
-        }
-      ]
-    );
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: "Delete Expense",
+      message: "Are you sure you want to delete this expense entry?",
+      confirmText: "Delete Expense",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
+
+    try {
+      await api(`/expenses/${id}`, { method: "DELETE" });
+      toast.show("Expense deleted");
+      router.back();
+    } catch (e: any) {
+      toast.show(e.message || "Failed to delete expense", "error");
+    }
   };
 
   const addPhoto = (mode: "camera" | "library") => async () => {

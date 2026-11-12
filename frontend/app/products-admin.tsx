@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { colors, radius, shadow, spacing } from "@/src/theme";
@@ -25,6 +26,7 @@ type BranchRateLine = {
 export default function ProductsAdmin() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,32 +96,25 @@ export default function ProductsAdmin() {
     }
   };
 
-  const deleteSpice = (p: Product) => {
-    const performDelete = async () => {
-      setLoading(true);
-      try {
-        await api(`/products/${p.id}`, { method: "DELETE" });
-        toast.show("Spice product deleted");
-        await load();
-      } catch (err: any) {
-        toast.show(err.message || "Failed to delete spice", "error");
-      } finally {
-        setLoading(false);
-      }
-    };
+  const deleteSpice = async (p: Product) => {
+    const ok = await confirm({
+      title: "Delete Spice",
+      message: `Are you sure you want to delete spice "${p.name}"? This will delete all branch configurations. Check that no active batch is using it.`,
+      confirmText: "Delete Spice",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
 
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(`Are you sure you want to delete spice "${p.name}"? This will delete all branch configurations. Check that no active batch is using it.`);
-      if (confirmed) performDelete();
-    } else {
-      Alert.alert(
-        "Delete Spice",
-        `Are you sure you want to delete spice "${p.name}"? This will delete all branch configurations. Check that no active batch is using it.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Delete", style: "destructive", onPress: performDelete }
-        ]
-      );
+    setLoading(true);
+    try {
+      await api(`/products/${p.id}`, { method: "DELETE" });
+      toast.show("Spice product deleted");
+      await load();
+    } catch (err: any) {
+      toast.show(err.message || "Failed to delete spice", "error");
+    } finally {
+      setLoading(false);
     }
   };
 

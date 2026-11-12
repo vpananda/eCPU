@@ -24,6 +24,7 @@ import { colors, radius, shadow, spacing } from "@/src/theme";
 import { openWhatsApp, buildPaymentReceiptMessage } from "@/src/utils/notifications";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 
 const MODE_COLORS: Record<string, string> = {
   Cash: "#43A047",
@@ -85,6 +86,7 @@ export default function PaymentsScreen() {
   const router = useRouter();
   const { user, branches, selectedBranchId, setSelectedBranchId } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const isAdminOrManager = user?.role === "Admin" || user?.role === "Manager";
 
   const [paymentsList, setPaymentsList] = useState<any[]>([]);
@@ -823,32 +825,28 @@ export default function PaymentsScreen() {
     }
   };
 
-  const handleDeleteExpense = () => {
+  const handleDeleteExpense = async () => {
     if (!editingExpense) return;
-    Alert.alert(
-      "Delete Expense Voucher",
-      `Are you sure you want to permanently delete this expense voucher of Rs. ${editingExpense.amount}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setSavingExpenseEdit(true);
-            try {
-              await api(`/expenses/${editingExpense.id}`, { method: "DELETE" });
-              toast.show("Expense voucher deleted");
-              setEditingExpense(null);
-              load();
-            } catch (e: any) {
-              toast.show(e.message || "Failed to delete expense", "error");
-            } finally {
-              setSavingExpenseEdit(false);
-            }
-          },
-        },
-      ]
-    );
+    const ok = await confirm({
+      title: "Delete Expense Voucher",
+      message: `Are you sure you want to permanently delete this expense voucher of Rs. ${editingExpense.amount}?`,
+      confirmText: "Delete Voucher",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
+
+    setSavingExpenseEdit(true);
+    try {
+      await api(`/expenses/${editingExpense.id}`, { method: "DELETE" });
+      toast.show("Expense voucher deleted");
+      setEditingExpense(null);
+      load();
+    } catch (e: any) {
+      toast.show(e.message || "Failed to delete expense", "error");
+    } finally {
+      setSavingExpenseEdit(false);
+    }
   };
 
   // Submit Edit
@@ -881,32 +879,28 @@ export default function PaymentsScreen() {
   };
 
   // Delete Payment
-  const handleDeletePayment = () => {
+  const handleDeletePayment = async () => {
     if (!editingPayment) return;
-    Alert.alert(
-      "Delete Payment",
-      `Are you sure you want to delete this payment of ₹${editingPayment.amount}? Batch totals will be automatically recalculated.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setSavingEdit(true);
-            try {
-              await api(`/payments/${editingPayment.id}`, { method: "DELETE" });
-              toast.show("Payment deleted");
-              setEditingPayment(null);
-              load();
-            } catch (e: any) {
-              toast.show(e.message || "Failed to delete payment", "error");
-            } finally {
-              setSavingEdit(false);
-            }
-          },
-        },
-      ]
-    );
+    const ok = await confirm({
+      title: "Delete Payment",
+      message: `Are you sure you want to delete this payment of ₹${editingPayment.amount}? Batch totals will be automatically recalculated.`,
+      confirmText: "Delete Payment",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
+
+    setSavingEdit(true);
+    try {
+      await api(`/payments/${editingPayment.id}`, { method: "DELETE" });
+      toast.show("Payment deleted");
+      setEditingPayment(null);
+      load();
+    } catch (e: any) {
+      toast.show(e.message || "Failed to delete payment", "error");
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   // Render Payment Card

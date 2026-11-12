@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "@/src/auth";
 import { ConnectionProvider } from "@/src/connection";
 import { ConnectionBanner } from "@/src/components/ConnectionBanner";
 import { ToastProvider } from "@/src/components/Toast";
+import { ConfirmModalProvider } from "@/src/components/ConfirmModal";
 import { SyncProvider } from "@/src/sync";
 import { TopBanner } from "@/src/components/TopBanner";
 import { colors } from "@/src/theme";
@@ -54,21 +55,23 @@ export default function RootLayout() {
       <ConnectionProvider>
         <AuthProvider>
           <ToastProvider>
-            <SyncProvider>
-              <RouteGuard />
-              <ConnectionBanner />
-              <Stack
-                screenOptions={{
-                  headerShown: true,
-                  header: () => <TopBanner />,
-                  contentStyle: { backgroundColor: colors.bg }
-                }}
-              >
-                <Stack.Screen name="login" options={{ headerShown: false }} />
-                <Stack.Screen name="index" options={{ headerShown: false }} />
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              </Stack>
-            </SyncProvider>
+            <ConfirmModalProvider>
+              <SyncProvider>
+                <RouteGuard />
+                <ConnectionBanner />
+                <Stack
+                  screenOptions={{
+                    headerShown: true,
+                    header: () => <TopBanner />,
+                    contentStyle: { backgroundColor: colors.bg }
+                  }}
+                >
+                  <Stack.Screen name="login" options={{ headerShown: false }} />
+                  <Stack.Screen name="index" options={{ headerShown: false }} />
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                </Stack>
+              </SyncProvider>
+            </ConfirmModalProvider>
           </ToastProvider>
         </AuthProvider>
       </ConnectionProvider>

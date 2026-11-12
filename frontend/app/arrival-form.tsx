@@ -7,6 +7,7 @@ import { api } from "@/src/api";
 import { storage } from "@/src/utils/storage";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { Picker } from "@/src/components/Picker";
@@ -57,6 +58,7 @@ async function takeWithCamera(): Promise<string | null> {
 export default function ArrivalForm() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   const { user, branches } = useAuth();
 
   const isAdmin = user?.role === "Admin";
@@ -203,18 +205,17 @@ export default function ArrivalForm() {
           );
           if (check.is_duplicate && check.existing_batch) {
             setSaving(false);
-            Alert.alert(
-              "⚠️ Duplicate Entry Alert",
-              `An arrival with identical details already exists:\n\n• Batch: ${check.existing_batch.batch_no}\n• Receipt: ${check.existing_batch.receipt_no}\n• Customer: ${check.existing_batch.customer_name}\n• Spice: ${check.existing_batch.product_name}\n• Weight: ${check.existing_batch.raw_weight} KG\n• Date: ${check.existing_batch.arrival_date}\n\nDo you want to record another arrival with identical details?`,
-              [
-                { text: "Cancel (Avoid Duplicate)", style: "cancel" },
-                {
-                  text: "Yes, Save Anyway",
-                  style: "destructive",
-                  onPress: () => submit(true),
-                },
-              ]
-            );
+            const proceed = await confirm({
+              title: "Duplicate Entry Alert",
+              message: `An arrival with identical details already exists:\n\n• Batch: ${check.existing_batch.batch_no}\n• Receipt: ${check.existing_batch.receipt_no}\n• Customer: ${check.existing_batch.customer_name}\n• Spice: ${check.existing_batch.product_name}\n• Weight: ${check.existing_batch.raw_weight} KG\n• Date: ${check.existing_batch.arrival_date}\n\nDo you want to record another arrival with identical details?`,
+              confirmText: "Yes, Save Anyway",
+              cancelText: "Cancel (Avoid Duplicate)",
+              variant: "warning",
+              icon: "alert-outline",
+            });
+            if (proceed) {
+              await submit(true);
+            }
             return;
           }
         } catch {
@@ -250,18 +251,17 @@ export default function ArrivalForm() {
       setPhotos([]);
     } catch (e: any) {
       if (e.message && e.message.toLowerCase().includes("duplicate")) {
-        Alert.alert(
-          "⚠️ Duplicate Arrival Detected",
-          `${e.message}\n\nDo you want to save this arrival anyway?`,
-          [
-            { text: "Cancel (Avoid Duplicate)", style: "cancel" },
-            {
-              text: "Yes, Save Anyway",
-              style: "destructive",
-              onPress: () => submit(true),
-            },
-          ]
-        );
+        const proceed = await confirm({
+          title: "Duplicate Arrival Detected",
+          message: `${e.message}\n\nDo you want to save this arrival anyway?`,
+          confirmText: "Yes, Save Anyway",
+          cancelText: "Cancel (Avoid Duplicate)",
+          variant: "warning",
+          icon: "alert-outline",
+        });
+        if (proceed) {
+          await submit(true);
+        }
       } else {
         toast.show(e.message || "Failed to record arrival", "error");
       }

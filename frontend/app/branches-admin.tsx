@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect, Stack } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
+import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { colors, radius, shadow, spacing } from "@/src/theme";
@@ -14,6 +15,7 @@ type Branch = { id: string; name: string; address?: string; phone?: string };
 export default function BranchesAdmin() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
   const [items, setItems] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -34,49 +36,26 @@ export default function BranchesAdmin() {
   const openNew = () => { setEditing(null); setName(""); setAddress(""); setPhone(""); setOpen(true); };
   const openEdit = (b: Branch) => { setEditing(b); setName(b.name); setAddress(b.address || ""); setPhone(b.phone || ""); setOpen(true); };
 
-  const confirmDelete = (b: Branch) => {
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(`Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`);
-      if (confirmed) {
-        (async () => {
-          setSaving(true);
-          try {
-            await api(`/branches/${b.id}`, { method: "DELETE" });
-            toast.show("Branch deleted");
-            setOpen(false);
-            await load();
-          } catch (err: any) {
-            toast.show(err.message || "Failed to delete branch", "error");
-          } finally {
-            setSaving(false);
-          }
-        })();
-      }
-    } else {
-      Alert.alert(
-        "Delete Branch",
-        `Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              setSaving(true);
-              try {
-                await api(`/branches/${b.id}`, { method: "DELETE" });
-                toast.show("Branch deleted");
-                setOpen(false);
-                await load();
-              } catch (err: any) {
-                toast.show(err.message || "Failed to delete branch", "error");
-              } finally {
-                setSaving(false);
-              }
-            }
-          }
-        ]
-      );
+  const confirmDelete = async (b: Branch) => {
+    const ok = await confirm({
+      title: "Delete Branch",
+      message: `Are you sure you want to delete branch "${b.name}"? This action cannot be undone.`,
+      confirmText: "Delete Branch",
+      destructive: true,
+      icon: "trash-can-outline",
+    });
+    if (!ok) return;
+
+    setSaving(true);
+    try {
+      await api(`/branches/${b.id}`, { method: "DELETE" });
+      toast.show("Branch deleted");
+      setOpen(false);
+      await load();
+    } catch (err: any) {
+      toast.show(err.message || "Failed to delete branch", "error");
+    } finally {
+      setSaving(false);
     }
   };
 

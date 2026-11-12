@@ -7,6 +7,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { useConfirm } from "@/src/components/ConfirmModal";
+import { MultiPhoneInput } from "@/src/components/MultiPhoneInput";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const TIME_PRESETS = [
@@ -216,18 +217,14 @@ export default function Settings() {
                   />
                 </View>
 
-                {/* Executive / Owner Numbers */}
-                <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Owner / Executive Numbers (All Branches)</Text>
-                <TextInput
-                  style={styles.textInput}
+                {/* Executive / Owner Numbers (Multi-Number Tag Manager) */}
+                <MultiPhoneInput
+                  label="Owner / Executive Numbers (All Branches)"
+                  helper="Add as many owner/director numbers as needed. Every number here receives daily 9:00 PM reports for all branches."
                   value={adminPhones}
                   onChangeText={setAdminPhones}
-                  placeholder="e.g. 9176653766, 9842100000"
-                  placeholderTextColor={colors.textLight}
+                  placeholder="Enter 10-digit mobile e.g. 9176653766"
                 />
-                <Text style={styles.fieldHint}>
-                  These numbers receive daily reports for *all branches*. Branch-specific manager numbers are configured in Manage Branches.
-                </Text>
 
                 {/* Include Financials Toggle */}
                 <View style={styles.switchRow}>

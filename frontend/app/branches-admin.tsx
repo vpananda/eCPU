@@ -8,6 +8,7 @@ import { useToast } from "@/src/components/Toast";
 import { useConfirm } from "@/src/components/ConfirmModal";
 import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
+import { MultiPhoneInput } from "@/src/components/MultiPhoneInput";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 type Branch = { id: string; name: string; address?: string; phone?: string; report_phones?: string };
@@ -137,16 +138,14 @@ export default function BranchesAdmin() {
             <Input testID="branch-name" label="Branch Name *" value={name} onChangeText={setName} />
             <Input testID="branch-address" label="Address" value={address} onChangeText={setAddress} multiline />
             <Input testID="branch-phone" label="Branch Office Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-            <Input
-              testID="branch-report-phones"
-              label="Daily WhatsApp Report Numbers"
-              placeholder="e.g. 9842100000, 9176653766"
+            <MultiPhoneInput
+              label="Branch Manager Numbers (This Branch)"
+              helper="Add as many managers as needed. Every number here receives this branch's daily 9:00 PM summary."
               value={reportPhones}
               onChangeText={setReportPhones}
+              placeholder="Enter manager mobile e.g. 9842100000"
             />
-            <Text style={styles.inputHelper}>
-              Recipients for this branch's daily 9:00 PM summary. Separate multiple numbers with commas.
-            </Text>
+            <View style={{ marginTop: spacing.xs }} />
             <Button testID="branch-save" title={editing ? "Save Changes" : "Create Branch"} onPress={save} loading={saving} />
             
             {editing && (

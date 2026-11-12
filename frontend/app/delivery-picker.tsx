@@ -83,23 +83,7 @@ export default function DeliveryPicker() {
   }, [batches, q]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="delivery-picker-back">
-          <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={styles.title}>Select for Delivery</Text>
-          {selectedBranchId ? (
-            <View style={styles.branchPill}>
-              <MaterialCommunityIcons name="office-building" size={12} color={colors.primary} />
-              <Text style={styles.branchPillText}>{activeBranchName}</Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={{ width: 22 }} />
-      </View>
-
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <View style={styles.searchWrap}>
         <MaterialCommunityIcons name="magnify" size={18} color={colors.textMuted} />
         <TextInput

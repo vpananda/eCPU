@@ -539,19 +539,6 @@ export default function ArrivalsScreen() {
 
   return (
     <View style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="arrivals-back">
-          <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}>
-          <Text style={styles.title}>Customer Arrivals & Processing</Text>
-          {data?.range && (
-            <Text style={styles.subtitle}>{data.range.start} → {data.range.end}</Text>
-          )}
-        </View>
-        <View style={{ width: 22 }} />
-      </View>
-
       {/* Customer & Batch Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchBox}>

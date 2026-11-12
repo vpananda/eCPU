@@ -24,12 +24,16 @@ function getHeaderTitle(segments: string[]): string {
 
   switch (first) {
     case "arrival-form": return "New Arrival";
-    case "arrivals": return "Arrival Logs";
+    case "arrivals": return "Arrivals & Processing";
     case "audit": return "Audit Trail";
     case "batches": return "Batch List";
+    case "batching-form": return "Dryer Processing";
+    case "load-dryer": return "Load Dryer";
+    case "stop-dryer": return "Stop Dryer";
     case "branches-admin": return "Manage Branches";
     case "customer-form": return "New Customer";
     case "delivery-picker": return "Deliver Produce";
+    case "delivery": return "Delivery";
     case "expense-form": return "Record Expense";
     case "expenses": return "Expenses";
     case "machine-form": return "New Machine";
@@ -46,10 +50,9 @@ function getHeaderTitle(segments: string[]): string {
     case "users-admin": return "Manage Users";
     case "batch": return "Batch Details";
     case "customer": return "Customer Profile";
-    case "delivery": return "Delivery Details";
     case "machine": return "Machine Details";
     case "payment": return "Payment Details";
-    default: return "E3 Dryer Manager";
+    default: return "E3 Spices";
   }
 }
 
@@ -263,10 +266,11 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   title: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 16,
+    fontWeight: "800",
     color: colors.text,
     fontFamily: "Poppins-SemiBold",
+    letterSpacing: -0.2,
   },
   right: {
     flexDirection: "row",
@@ -276,17 +280,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.primary50,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     borderRadius: radius.md,
-    marginRight: spacing.sm,
-    maxWidth: 160,
+    marginRight: 6,
+    maxWidth: 130,
   },
   branchText: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
     color: colors.primary,
-    marginRight: 4,
+    marginRight: 2,
     fontFamily: "Poppins-SemiBold",
   },
   branchBadge: {

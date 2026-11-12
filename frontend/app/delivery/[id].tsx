@@ -184,15 +184,7 @@ export default function DeliveryScreen() {
   const yieldPct = arrivalWeight > 0 && dryNum > 0 ? ((dryNum / arrivalWeight) * 100).toFixed(1) : "0.0";
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="delivery-back">
-          <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Delivery</Text>
-        <View style={{ width: 22 }} />
-      </View>
-
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
 

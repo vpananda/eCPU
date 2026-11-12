@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -257,11 +257,22 @@ export default function BatchingForm() {
     }
 
     if (selectedMachine && totalLoadWeight > selectedMachine.capacity) {
-      Alert.alert(
-        "Capacity Exceeded",
-        `Total load weight (${totalLoadWeight.toFixed(2)} kg) exceeds ${selectedMachine.name} capacity of ${selectedMachine.capacity} kg. Please adjust load weights.`
-      );
-      return;
+      const overKg = (totalLoadWeight - selectedMachine.capacity).toFixed(1);
+      const proceed = Platform.OS === "web"
+        ? window.confirm(
+            `⚠️ Overload Capacity Warning\n\nTotal load (${totalLoadWeight.toFixed(2)} KG) exceeds ${selectedMachine.name} nominal capacity (${selectedMachine.capacity} KG) by ${overKg} KG.\n\nDo you want to proceed with starting this dryer with the overloaded capacity?`
+          )
+        : await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              "⚠️ Overload Capacity Warning",
+              `Total load weight (${totalLoadWeight.toFixed(2)} KG) exceeds ${selectedMachine.name} nominal capacity (${selectedMachine.capacity} KG) by ${overKg} KG.\n\nDo you want to proceed with starting this dryer with the overloaded batch?`,
+              [
+                { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+                { text: "Proceed with Overload", onPress: () => resolve(true) }
+              ]
+            );
+          });
+      if (!proceed) return;
     }
 
     setSaving(true);
@@ -484,16 +495,7 @@ export default function BatchingForm() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Dryer Processing</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
       {/* Top Segment Tabs: Start Drying vs Running Batches */}
       <View style={styles.topTabsContainer}>
         <TouchableOpacity
@@ -809,13 +811,13 @@ export default function BatchingForm() {
                 Selected: {selectedCount} arrival{selectedCount === 1 ? "" : "s"}
                 {selectedMachine ? ` • ${selectedMachine.name}` : ""}
               </Text>
-              <Text style={[styles.summaryVal, isOverCapacity && { color: colors.danger }]}>
+              <Text style={[styles.summaryVal, isOverCapacity && { color: "#C2410C" }]}>
                 Load Weight: {totalLoadWeight.toFixed(2)} KG
               </Text>
               {selectedMachine && (
-                <Text style={{ fontSize: 11, fontWeight: "700", marginTop: 2, color: isOverCapacity ? colors.danger : "#166534" }}>
+                <Text style={{ fontSize: 11, fontWeight: "700", marginTop: 2, color: isOverCapacity ? "#C2410C" : "#166534" }}>
                   {isOverCapacity
-                    ? `⚠️ Exceeds capacity by ${(totalLoadWeight - selectedMachine.capacity).toFixed(1)} KG`
+                    ? `⚠️ Exceeds capacity by ${(totalLoadWeight - selectedMachine.capacity).toFixed(1)} KG (Overload Allowed)`
                     : `✓ Fits capacity (${selectedMachine.capacity} KG cap)`}
                 </Text>
               )}
@@ -823,17 +825,25 @@ export default function BatchingForm() {
             <TouchableOpacity
               style={[
                 styles.actionBtn,
-                (saving || !selectedMachineId || selectedCount === 0 || isOverCapacity) && styles.actionBtnDisabled
+                isOverCapacity && styles.actionBtnOverload,
+                (saving || !selectedMachineId || selectedCount === 0) && styles.actionBtnDisabled
               ]}
               onPress={handleStartProcess}
-              disabled={saving || !selectedMachineId || selectedCount === 0 || isOverCapacity}
+              disabled={saving || !selectedMachineId || selectedCount === 0}
             >
               {saving ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
                 <>
-                  <MaterialCommunityIcons name="play-circle" size={20} color="#fff" style={{ marginRight: 6 }} />
-                  <Text style={styles.actionBtnText}>Start Drying</Text>
+                  <MaterialCommunityIcons
+                    name={isOverCapacity ? "alert-circle" : "play-circle"}
+                    size={20}
+                    color="#fff"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.actionBtnText}>
+                    {isOverCapacity ? "Start (Overload)" : "Start Drying"}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
@@ -1697,6 +1707,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
+  },
+  actionBtnOverload: {
+    backgroundColor: "#EA580C",
   },
   actionBtnDisabled: { opacity: 0.6 },
   actionBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },

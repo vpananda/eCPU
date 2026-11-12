@@ -176,18 +176,15 @@ export default function StopDryer() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      {/* Custom Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <MaterialCommunityIcons name="arrow-left" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Stop Machine</Text>
-          <Text style={styles.headerSub}>{machineName || "Dryer"}</Text>
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
+      {machineName ? (
+        <View style={{ paddingHorizontal: spacing.xl, paddingTop: spacing.xs, paddingBottom: spacing.xs }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.primary50, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.pill, alignSelf: "flex-start" }}>
+            <MaterialCommunityIcons name="washing-machine" size={14} color={colors.primary} />
+            <Text style={{ fontSize: 12, fontWeight: "700", color: colors.primary }}>{machineName}</Text>
+          </View>
         </View>
-        <View style={{ width: 40 }} />
-      </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>

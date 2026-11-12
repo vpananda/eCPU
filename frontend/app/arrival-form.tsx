@@ -277,15 +277,7 @@ export default function ArrivalForm() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} testID="arrival-back">
-          <MaterialCommunityIcons name="arrow-left" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>New Arrival</Text>
-        <View style={{ width: 22 }} />
-      </View>
-
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         {loadingData ? (
           <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />

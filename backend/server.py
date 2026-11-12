@@ -3879,7 +3879,7 @@ async def update_expense_cats(body: ExpenseCategoriesIn, user: dict = Depends(ge
 DEFAULT_REMINDER_CONFIG = {
     "enabled": True,
     "frequency": "weekly",  # "daily" | "weekly" | "fifteen_days" | "monthly"
-    "time": "09:00",
+    "time": "09:00 AM",
     "day_of_week": "Monday",
     "day_of_month": 1,
     "min_balance": 1.0,
@@ -3890,20 +3890,91 @@ DEFAULT_REMINDER_CONFIG = {
 
 
 @api.get("/reminders/config")
-async def get_reminder_config(user: dict = Depends(get_current_user)):
+async def get_reminder_config(
+    branch_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id or (user.get("branch_id") if user.get("role") != "Admin" else None)
+    if target_branch:
+        doc = await db.settings.find_one({"key": f"reminder_schedule_{target_branch}"}, {"_id": 0})
+        if doc and doc.get("value"):
+            cfg = dict(DEFAULT_REMINDER_CONFIG)
+            cfg.update(doc["value"])
+            cfg["branch_id"] = target_branch
+            return cfg
+
+        # fallback to global template if set
+        gdoc = await db.settings.find_one({"key": "reminder_schedule"}, {"_id": 0})
+        cfg = dict(gdoc["value"] if gdoc and gdoc.get("value") else DEFAULT_REMINDER_CONFIG)
+        cfg["branch_id"] = target_branch
+        return cfg
+
     doc = await db.settings.find_one({"key": "reminder_schedule"}, {"_id": 0})
-    return doc["value"] if doc else DEFAULT_REMINDER_CONFIG
+    return doc["value"] if doc and doc.get("value") else DEFAULT_REMINDER_CONFIG
 
 
 @api.put("/reminders/config")
-async def update_reminder_config(body: dict, user: dict = Depends(require_roles("Admin", "Manager"))):
+async def update_reminder_config(
+    body: dict,
+    branch_id: Optional[str] = None,
+    user: dict = Depends(require_roles("Admin", "Manager"))
+):
+    target_branch = branch_id or body.get("branch_id")
+    if not target_branch and user.get("role") != "Admin":
+        target_branch = user.get("branch_id")
+
+    if target_branch:
+        setting_key = f"reminder_schedule_{target_branch}"
+        body["branch_id"] = target_branch
+    else:
+        setting_key = "reminder_schedule"
+
     await db.settings.update_one(
-        {"key": "reminder_schedule"},
+        {"key": setting_key},
         {"$set": {"value": body}},
         upsert=True
     )
-    await audit("update", "settings", "reminder_schedule", user, None, body)
+    await audit("update", "settings", setting_key, user, None, body)
     return {"ok": True, "config": body}
+
+
+@api.get("/reminders/branch-configs")
+async def get_all_branch_reminder_configs(user: dict = Depends(get_current_user)):
+    branches = await db.branches.find({}, {"_id": 0}).sort("name", 1).to_list(100)
+    results = []
+    gdoc = await db.settings.find_one({"key": "reminder_schedule"}, {"_id": 0})
+    base_cfg = gdoc["value"] if gdoc and gdoc.get("value") else DEFAULT_REMINDER_CONFIG
+
+    for b in branches:
+        b_id = str(b.get("id"))
+        doc = await db.settings.find_one({"key": f"reminder_schedule_{b_id}"}, {"_id": 0})
+        cfg = dict(base_cfg)
+        if doc and doc.get("value"):
+            cfg.update(doc["value"])
+        cfg["branch_id"] = b_id
+        cfg["branch_name"] = b.get("name")
+        results.append(cfg)
+    return results
+
+
+@api.post("/reminders/copy-to-all")
+async def copy_reminder_config_to_all(
+    body: dict,
+    user: dict = Depends(require_roles("Admin"))
+):
+    source_config = body.get("config") or DEFAULT_REMINDER_CONFIG
+    branches = await db.branches.find({}, {"_id": 0}).to_list(100)
+    for b in branches:
+        b_id = str(b.get("id"))
+        cfg = dict(source_config)
+        cfg["branch_id"] = b_id
+        await db.settings.update_one(
+            {"key": f"reminder_schedule_{b_id}"},
+            {"$set": {"value": cfg}},
+            upsert=True
+        )
+    await audit("copy_to_all", "settings", "reminder_schedule", user, None, {"count": len(branches)})
+    return {"ok": True, "count": len(branches)}
 
 
 @api.get("/reminders/statements")

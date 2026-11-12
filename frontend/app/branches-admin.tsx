@@ -10,7 +10,7 @@ import { Input } from "@/src/components/Input";
 import { Button } from "@/src/components/Button";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
-type Branch = { id: string; name: string; address?: string; phone?: string };
+type Branch = { id: string; name: string; address?: string; phone?: string; report_phones?: string };
 
 export default function BranchesAdmin() {
   const router = useRouter();
@@ -24,6 +24,7 @@ export default function BranchesAdmin() {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
+  const [reportPhones, setReportPhones] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -33,8 +34,22 @@ export default function BranchesAdmin() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const openNew = () => { setEditing(null); setName(""); setAddress(""); setPhone(""); setOpen(true); };
-  const openEdit = (b: Branch) => { setEditing(b); setName(b.name); setAddress(b.address || ""); setPhone(b.phone || ""); setOpen(true); };
+  const openNew = () => {
+    setEditing(null);
+    setName("");
+    setAddress("");
+    setPhone("");
+    setReportPhones("");
+    setOpen(true);
+  };
+  const openEdit = (b: Branch) => {
+    setEditing(b);
+    setName(b.name);
+    setAddress(b.address || "");
+    setPhone(b.phone || "");
+    setReportPhones(b.report_phones || "");
+    setOpen(true);
+  };
 
   const confirmDelete = async (b: Branch) => {
     const ok = await confirm({
@@ -64,10 +79,10 @@ export default function BranchesAdmin() {
     setSaving(true);
     try {
       if (editing) {
-        await api(`/branches/${editing.id}`, { method: "PUT", body: { name, address, phone } });
+        await api(`/branches/${editing.id}`, { method: "PUT", body: { name, address, phone, report_phones: reportPhones } });
         toast.show("Branch updated");
       } else {
-        await api("/branches", { method: "POST", body: { name, address, phone } });
+        await api("/branches", { method: "POST", body: { name, address, phone, report_phones: reportPhones } });
         toast.show("Branch created");
       }
       setOpen(false);
@@ -100,6 +115,12 @@ export default function BranchesAdmin() {
                 <Text style={styles.name}>{b.name}</Text>
                 {b.address ? <Text style={styles.meta}>{b.address}</Text> : null}
                 {b.phone ? <Text style={styles.meta}>{b.phone}</Text> : null}
+                {b.report_phones ? (
+                  <View style={styles.reportPill}>
+                    <MaterialCommunityIcons name="whatsapp" size={13} color="#059669" />
+                    <Text style={styles.reportPillText} numberOfLines={1}>Daily Report: {b.report_phones}</Text>
+                  </View>
+                ) : null}
               </View>
               <MaterialCommunityIcons name="pencil" size={18} color={colors.textLight} />
             </TouchableOpacity>
@@ -115,7 +136,17 @@ export default function BranchesAdmin() {
             <Text style={styles.sheetTitle}>{editing ? "Edit Branch" : "New Branch"}</Text>
             <Input testID="branch-name" label="Branch Name *" value={name} onChangeText={setName} />
             <Input testID="branch-address" label="Address" value={address} onChangeText={setAddress} multiline />
-            <Input testID="branch-phone" label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+            <Input testID="branch-phone" label="Branch Office Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+            <Input
+              testID="branch-report-phones"
+              label="Daily WhatsApp Report Numbers"
+              placeholder="e.g. 9842100000, 9176653766"
+              value={reportPhones}
+              onChangeText={setReportPhones}
+            />
+            <Text style={styles.inputHelper}>
+              Recipients for this branch's daily 9:00 PM summary. Separate multiple numbers with commas.
+            </Text>
             <Button testID="branch-save" title={editing ? "Save Changes" : "Create Branch"} onPress={save} loading={saving} />
             
             {editing && (
@@ -164,5 +195,28 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 14,
     fontWeight: "700",
+  },
+  reportPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+    backgroundColor: "#ECFDF5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    alignSelf: "flex-start",
+  },
+  reportPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  inputHelper: {
+    fontSize: 11.5,
+    color: colors.textMuted,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.md,
+    lineHeight: 16,
   },
 });

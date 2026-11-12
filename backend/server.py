@@ -919,6 +919,7 @@ class BranchIn(BaseModel):
     name: str
     address: Optional[str] = ""
     phone: Optional[str] = ""
+    report_phones: Optional[str] = ""
 
 
 class UserCreate(BaseModel):
@@ -1213,6 +1214,10 @@ async def seed():
             expires_at TIMESTAMPTZ NOT NULL
         );
     """)
+    # Add report_phones column to public.branches for automated daily WhatsApp status reports
+    await db.execute("""
+        ALTER TABLE public.branches ADD COLUMN IF NOT EXISTS report_phones TEXT DEFAULT '';
+    """)
     # Add bill_photos TEXT[] DEFAULT '{}' column to public.expenses if not exists
     await db.execute("""
         ALTER TABLE public.expenses ADD COLUMN IF NOT EXISTS bill_photos TEXT[] DEFAULT '{}';
@@ -1310,6 +1315,51 @@ async def seed():
         }}},
         upsert=True,
     )
+    # Seed default daily WhatsApp report settings if not exist
+    daily_rep_doc = await db.settings.find_one({"key": "daily_report_settings"})
+    if not daily_rep_doc:
+        await db.settings.insert_one({
+            "key": "daily_report_settings",
+            "value": {
+                "enabled": True,
+                "send_time": "21:00",
+                "admin_phones": "",
+                "include_financials": True,
+                "last_sent_date": ""
+            }
+        })
+
+
+async def daily_report_scheduler_worker():
+    """Background worker that runs every 60 seconds to check if current IST time matches the configured daily WhatsApp status report time."""
+    logger.info("Daily WhatsApp status report scheduler worker started.")
+    while True:
+        try:
+            await asyncio.sleep(60)
+            ist_tz = timezone(timedelta(hours=5, minutes=30))
+            now_ist = datetime.now(timezone.utc).astimezone(ist_tz)
+            now_hm = now_ist.strftime("%H:%M")
+            today_str = now_ist.strftime("%Y-%m-%d")
+
+            d_doc = await db.settings.find_one({"key": "daily_report_settings"})
+            settings = (d_doc or {}).get("value") or {}
+            enabled = settings.get("enabled", True)
+            send_time = settings.get("send_time", "21:00")
+            last_sent_date = settings.get("last_sent_date", "")
+
+            if enabled and now_hm == send_time and last_sent_date != today_str:
+                logger.info(f"Triggering scheduled daily WhatsApp status reports at {now_hm} IST for date {today_str}...")
+                await dispatch_daily_reports()
+                settings["last_sent_date"] = today_str
+                await db.settings.update_one(
+                    {"key": "daily_report_settings"},
+                    {"$set": {"value": settings}}
+                )
+                logger.info(f"Scheduled daily WhatsApp status reports dispatched successfully for date {today_str}.")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in daily_report_scheduler_worker: {e}")
 
 
 async def db_keepalive_worker():
@@ -1348,14 +1398,16 @@ async def startup():
     await db.open()
     await seed()
     app.state.keepalive_task = asyncio.create_task(db_keepalive_worker())
-    logger.info("EThree Agro backend started; seed and keepalive worker active.")
+    app.state.daily_report_task = asyncio.create_task(daily_report_scheduler_worker())
+    logger.info("EThree Agro backend started; seed, keepalive, and daily report scheduler worker active.")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    task = getattr(app.state, "keepalive_task", None)
-    if task:
-        task.cancel()
+    for task_name in ["keepalive_task", "daily_report_task"]:
+        task = getattr(app.state, task_name, None)
+        if task:
+            task.cancel()
     await db.close()
 
 
@@ -4862,6 +4914,7 @@ async def create_branch(body: BranchIn, user: dict = Depends(require_roles("Admi
     b = {
         "id": str(uuid.uuid4()),
         "name": body.name, "address": body.address or "", "phone": body.phone or "",
+        "report_phones": body.report_phones or "",
         "created_at": now_utc().isoformat(), "created_by": user["id"],
         "updated_at": now_utc().isoformat(), "updated_by": user["id"],
     }
@@ -4877,6 +4930,7 @@ async def update_branch(bid: str, body: BranchIn, user: dict = Depends(require_r
         raise HTTPException(status_code=404, detail="Not found")
     await db.branches.update_one({"id": bid}, {"$set": {
         "name": body.name, "address": body.address or "", "phone": body.phone or "",
+        "report_phones": body.report_phones or "",
         "updated_at": now_utc().isoformat(), "updated_by": user["id"]
     }})
     await audit("update", "branch", bid, user, {"name": before["name"]}, {"name": body.name})
@@ -5098,6 +5152,289 @@ async def whatsapp_send_payment(body: WhatsAppPaymentReq, user: dict = Depends(g
         language_code="en"
     )
     return res
+
+
+# -----------------------------------------------------------------------------
+# AUTOMATED DAILY BRANCH-WISE WHATSAPP STATUS REPORTS
+# -----------------------------------------------------------------------------
+
+class DailyReportSettingsUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    send_time: Optional[str] = None
+    admin_phones: Optional[str] = None
+    include_financials: Optional[bool] = None
+
+class DailyReportSendNowReq(BaseModel):
+    branch_id: Optional[str] = None
+    phone: Optional[str] = None
+
+async def generate_branch_daily_summary(branch_id: str, target_date_str: Optional[str] = None) -> dict:
+    """Calculates today's operational summary for a specific branch and builds a formatted WhatsApp message."""
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(timezone.utc).astimezone(ist_tz)
+    
+    cur_date_str = target_date_str if target_date_str else now_ist.strftime("%Y-%m-%d")
+    
+    branch = await db.branches.find_one({"id": branch_id}, {"_id": 0})
+    if not branch:
+        return {"error": "Branch not found"}
+        
+    branch_name = branch.get("name", "Branch")
+    start_utc = f"{cur_date_str}T00:00:00+05:30"
+    end_utc = f"{cur_date_str}T23:59:59+05:30"
+    
+    # 1. Arrivals Received Today
+    arrivals_sql = """
+        SELECT 
+            COALESCE(p.name, 'Produce') as product_name,
+            COUNT(b.id) as lot_count,
+            COALESCE(SUM(b.raw_weight), 0) as total_weight,
+            COALESCE(SUM(b.bags), 0) as total_bags
+        FROM public.batches b
+        LEFT JOIN public.products p ON b.product_id = p.id
+        WHERE b.branch_id = %s::uuid
+          AND (
+            (b.arrival_date = %s::date)
+            OR (b.created_at >= %s::timestamptz AND b.created_at <= %s::timestamptz)
+          )
+        GROUP BY p.name
+    """
+    arrival_rows = await db.query(arrivals_sql, [branch_id, cur_date_str, start_utc, end_utc])
+    
+    total_arr_lots = sum(r.get("lot_count", 0) for r in arrival_rows)
+    total_arr_weight = sum(float(r.get("total_weight", 0)) for r in arrival_rows)
+    total_arr_bags = sum(int(r.get("total_bags", 0)) for r in arrival_rows)
+    
+    # 2. Dryer Processing Status
+    running_sql = """
+        SELECT 
+            COUNT(DISTINCT b.machine_id) as running_machines,
+            COALESCE(SUM(b.raw_weight), 0) as running_weight
+        FROM public.batches b
+        WHERE b.branch_id = %s::uuid
+          AND b.status IN ('Loaded', 'Drying')
+    """
+    running_rows = await db.query(running_sql, [branch_id])
+    running_row = running_rows[0] if running_rows else {}
+    running_machines = running_row.get("running_machines", 0)
+    running_weight = float(running_row.get("running_weight", 0.0))
+    
+    completed_sql = """
+        SELECT 
+            COUNT(b.id) as completed_lots,
+            COALESCE(SUM(b.raw_weight), 0) as completed_wet_weight,
+            COALESCE(SUM(b.actual_dry_weight), 0) as completed_dry_weight
+        FROM public.batches b
+        WHERE b.branch_id = %s::uuid
+          AND b.status IN ('Completed', 'Delivered')
+          AND (
+            (b.processing_ended_at >= %s::timestamptz AND b.processing_ended_at <= %s::timestamptz)
+            OR (b.updated_at >= %s::timestamptz AND b.updated_at <= %s::timestamptz AND b.actual_dry_weight IS NOT NULL)
+          )
+    """
+    comp_rows = await db.query(completed_sql, [branch_id, start_utc, end_utc, start_utc, end_utc])
+    comp_row = comp_rows[0] if comp_rows else {}
+    comp_lots = comp_row.get("completed_lots", 0)
+    comp_wet_weight = float(comp_row.get("completed_wet_weight", 0.0))
+    comp_dry_weight = float(comp_row.get("completed_dry_weight", 0.0))
+    yield_pct = ((comp_dry_weight / comp_wet_weight) * 100) if comp_wet_weight > 0 else 0.0
+    
+    machines_sql = """
+        SELECT 
+            COUNT(id) as total_machines,
+            COUNT(CASE WHEN status = 'Available' THEN 1 END) as available_machines
+        FROM public.machines
+        WHERE branch_id = %s::uuid
+    """
+    mach_rows = await db.query(machines_sql, [branch_id])
+    mach_row = mach_rows[0] if mach_rows else {}
+    total_machines = mach_row.get("total_machines", 0)
+    avail_machines = mach_row.get("available_machines", 0)
+    
+    # 3. Deliveries Today
+    deliv_sql = """
+        SELECT 
+            COUNT(id) as delivered_lots,
+            COALESCE(SUM(actual_dry_weight), 0) as delivered_dry_weight,
+            COALESCE(SUM(bill_amount), 0) as delivered_billed
+        FROM public.batches
+        WHERE branch_id = %s::uuid
+          AND status = 'Delivered'
+          AND (
+            (delivered_at >= %s::timestamptz AND delivered_at <= %s::timestamptz)
+            OR (updated_at >= %s::timestamptz AND updated_at <= %s::timestamptz)
+          )
+    """
+    deliv_rows = await db.query(deliv_sql, [branch_id, start_utc, end_utc, start_utc, end_utc])
+    deliv_row = deliv_rows[0] if deliv_rows else {}
+    deliv_lots = deliv_row.get("delivered_lots", 0)
+    deliv_dry_weight = float(deliv_row.get("delivered_dry_weight", 0.0))
+    deliv_billed = float(deliv_row.get("delivered_billed", 0.0))
+    
+    # 4. Collections Today
+    pay_sql = """
+        SELECT 
+            COALESCE(SUM(amount), 0) as total_collected
+        FROM public.payments
+        WHERE branch_id = %s::uuid
+          AND created_at >= %s::timestamptz AND created_at <= %s::timestamptz
+    """
+    pay_rows = await db.query(pay_sql, [branch_id, start_utc, end_utc])
+    pay_row = pay_rows[0] if pay_rows else {}
+    total_collected = float(pay_row.get("total_collected", 0.0))
+
+    # Read Settings for Include Financials
+    d_doc = await db.settings.find_one({"key": "daily_report_settings"})
+    settings = (d_doc or {}).get("value") or {}
+    inc_fin = settings.get("include_financials", True)
+
+    dt_obj = datetime.strptime(cur_date_str, "%Y-%m-%d")
+    date_display = dt_obj.strftime("%d-%b-%Y")
+    time_display = now_ist.strftime("%I:%M %p")
+    
+    arr_lines = []
+    for r in arrival_rows:
+        arr_lines.append(f"   • {r.get('product_name')}: {float(r.get('total_weight', 0)):,.2f} KG ({r.get('lot_count')} Lots)")
+    arr_breakdown = "\n".join(arr_lines) if arr_lines else "   • _(No new arrivals recorded today)_"
+
+    financials_text = ""
+    if inc_fin:
+        financials_text = (
+            f"\n💰 *4. BILLING & COLLECTIONS*\n"
+            f"• Day Billing: *₹{deliv_billed:,.2f}*\n"
+            f"• Day Collections: *₹{total_collected:,.2f}*\n"
+        )
+
+    message = (
+        f"🌿 *E3 SPICES — DAILY SUMMARY*\n"
+        f"📍 *Branch: {branch_name.upper()}*\n"
+        f"📅 *Date: {date_display} ({time_display})*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🌾 *1. ARRIVALS RECEIVED TODAY*\n"
+        f"• Total Lots: *{total_arr_lots} Lots* ({total_arr_bags} Bags)\n"
+        f"• Total Wet Weight: *{total_arr_weight:,.2f} KG*\n"
+        f"{arr_breakdown}\n\n"
+        f"🔥 *2. DRYER PROCESSING STATUS*\n"
+        f"• Active Running: *{running_machines} Dryers* ({running_weight:,.2f} KG Wet)\n"
+        f"• Completed Today: *{comp_lots} Batches* ({comp_dry_weight:,.2f} KG Dry)\n"
+        f"• Drying Yield: *{yield_pct:.1f}%*\n"
+        f"• Machines: {total_machines - avail_machines} In-Use / {avail_machines} Available\n\n"
+        f"🚚 *3. DELIVERIES TODAY*\n"
+        f"• Produce Delivered: *{deliv_lots} Batches*\n"
+        f"• Dry Dispatched: *{deliv_dry_weight:,.2f} KG*\n"
+        f"{financials_text}"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Auto-generated by E3 Management System_"
+    )
+    
+    return {
+        "branch_id": branch_id,
+        "branch_name": branch_name,
+        "date": cur_date_str,
+        "total_arr_weight": total_arr_weight,
+        "total_arr_lots": total_arr_lots,
+        "running_machines": running_machines,
+        "comp_dry_weight": comp_dry_weight,
+        "deliv_dry_weight": deliv_dry_weight,
+        "deliv_billed": deliv_billed,
+        "total_collected": total_collected,
+        "report_phones": branch.get("report_phones", ""),
+        "message": message
+    }
+
+async def dispatch_daily_reports(target_branch_id: Optional[str] = None, override_phone: Optional[str] = None):
+    d_doc = await db.settings.find_one({"key": "daily_report_settings"})
+    settings = (d_doc or {}).get("value") or {}
+    admin_phones_str = settings.get("admin_phones", "")
+    admin_phones = [clean_phone_number(p.strip()) for p in admin_phones_str.replace(";", ",").split(",") if p.strip()]
+
+    branches_to_process = []
+    if target_branch_id:
+        b = await db.branches.find_one({"id": target_branch_id}, {"_id": 0})
+        if b:
+            branches_to_process.append(b)
+    else:
+        branches_to_process = await db.branches.find({}, {"_id": 0}).to_list(200)
+
+    results = []
+    for branch in branches_to_process:
+        bid = branch["id"]
+        summary = await generate_branch_daily_summary(bid)
+        msg = summary.get("message", "")
+        if not msg:
+            continue
+
+        if override_phone:
+            phones_to_send = [clean_phone_number(override_phone)]
+        else:
+            branch_phones_str = branch.get("report_phones", "") or ""
+            branch_phones = [clean_phone_number(p.strip()) for p in branch_phones_str.replace(";", ",").split(",") if p.strip()]
+            phones_to_send = list(dict.fromkeys([p for p in (branch_phones + admin_phones) if p]))
+
+        branch_res = {"branch_id": bid, "branch_name": branch.get("name"), "recipients": []}
+        for phone in phones_to_send:
+            try:
+                res = await send_whatsapp_text(to_phone=phone, message_text=msg)
+                branch_res["recipients"].append({"phone": phone, "result": res})
+            except Exception as ex:
+                branch_res["recipients"].append({"phone": phone, "error": str(ex)})
+        results.append(branch_res)
+
+    return results
+
+@api.get("/reports/daily-whatsapp/settings")
+async def get_daily_whatsapp_settings(user: dict = Depends(get_current_user)):
+    doc = await db.settings.find_one({"key": "daily_report_settings"}, {"_id": 0})
+    val = (doc or {}).get("value") or {
+        "enabled": True,
+        "send_time": "21:00",
+        "admin_phones": "",
+        "include_financials": True,
+        "last_sent_date": ""
+    }
+    return val
+
+@api.put("/reports/daily-whatsapp/settings")
+async def update_daily_whatsapp_settings(body: DailyReportSettingsUpdate, user: dict = Depends(require_roles("Admin"))):
+    doc = await db.settings.find_one({"key": "daily_report_settings"}, {"_id": 0})
+    cur = (doc or {}).get("value") or {
+        "enabled": True,
+        "send_time": "21:00",
+        "admin_phones": "",
+        "include_financials": True,
+        "last_sent_date": ""
+    }
+    if body.enabled is not None:
+        cur["enabled"] = body.enabled
+    if body.send_time is not None:
+        cur["send_time"] = body.send_time.strip()
+    if body.admin_phones is not None:
+        cur["admin_phones"] = body.admin_phones.strip()
+    if body.include_financials is not None:
+        cur["include_financials"] = body.include_financials
+
+    await db.settings.update_one(
+        {"key": "daily_report_settings"},
+        {"$set": {"value": cur}},
+        upsert=True
+    )
+    return cur
+
+@api.get("/reports/daily-whatsapp/preview")
+async def preview_daily_whatsapp(branch_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    if branch_id:
+        return await generate_branch_daily_summary(branch_id)
+    branches = await db.branches.find({}, {"_id": 0}).to_list(200)
+    summaries = []
+    for b in branches:
+        s = await generate_branch_daily_summary(b["id"])
+        summaries.append(s)
+    return summaries
+
+@api.post("/reports/daily-whatsapp/send-now")
+async def send_daily_whatsapp_now(body: DailyReportSendNowReq, user: dict = Depends(require_roles("Admin"))):
+    results = await dispatch_daily_reports(target_branch_id=body.branch_id, override_phone=body.phone)
+    return {"success": True, "results": results}
 
 
 @api.get("/")

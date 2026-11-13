@@ -5392,7 +5392,6 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         f"🔥 *2. DRYER PROCESSING STATUS*\n"
         f"• Active Running: *{running_machines} Dryers* ({running_weight:,.2f} KG Wet)\n"
         f"• Completed Today: *{comp_lots} Batches* ({comp_dry_weight:,.2f} KG Dry)\n"
-        f"• Drying Yield: *{yield_pct:.1f}%*\n"
         f"• Machines: {total_machines - avail_machines} In-Use / {avail_machines} Available\n\n"
         f"📦 *3. DELIVERIES TODAY*\n"
         f"• Produce Delivered: *{deliv_lots} Batches*\n"

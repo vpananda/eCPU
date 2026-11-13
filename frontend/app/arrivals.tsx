@@ -668,7 +668,7 @@ export default function ArrivalsScreen() {
 
       {!data && loading ? (
         <View style={styles.loaderWrap}>
-          <Loader size={76} />
+          <Loader size={48} />
           <Text style={styles.loaderTitle}>Processing & Syncing Dryers...</Text>
           <Text style={styles.loaderSubtitle}>Fetching live machine loads and completed lots</Text>
         </View>
@@ -884,13 +884,15 @@ export default function ArrivalsScreen() {
 
       {/* Floating Overlay Loader when data is refreshing */}
       {loading && !!data && (
-        <View style={styles.loadingOverlay} pointerEvents="none">
-          <View style={styles.loadingModalCard}>
-            <Loader size={60} />
-            <Text style={styles.loadingModalTitle}>Processing & Syncing Dryers...</Text>
-            <Text style={styles.loadingModalSubtitle}>Fetching live machine loads and completed lots</Text>
+        <Modal transparent animationType="fade" visible={loading && !!data} onRequestClose={() => {}}>
+          <View style={styles.loadingOverlay}>
+            <View style={styles.loadingModalCard}>
+              <Loader size={38} />
+              <Text style={styles.loadingModalTitle}>Processing & Syncing Dryers...</Text>
+              <Text style={styles.loadingModalSubtitle}>Fetching live machine loads and completed lots</Text>
+            </View>
           </View>
-        </View>
+        </Modal>
       )}
     </View>
   );
@@ -898,42 +900,40 @@ export default function ArrivalsScreen() {
 
 const styles = StyleSheet.create({
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15, 23, 42, 0.38)",
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.16)",
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 99999,
-    elevation: 20,
   },
   loadingModalCard: {
     backgroundColor: "#ffffff",
-    paddingHorizontal: 26,
-    paddingVertical: 22,
-    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingVertical: 16,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
-    shadowRadius: 24,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    elevation: 10,
     borderWidth: 1,
-    borderColor: "rgba(226, 232, 240, 0.8)",
-    minWidth: 220,
-    maxWidth: 320,
+    borderColor: "rgba(226, 232, 240, 0.9)",
+    minWidth: 180,
+    maxWidth: 240,
   },
   loadingModalTitle: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: "700",
     color: "#0F172A",
-    marginTop: 14,
+    marginTop: 8,
     textAlign: "center",
   },
   loadingModalSubtitle: {
-    fontSize: 11.5,
+    fontSize: 10.5,
     fontWeight: "500",
     color: "#64748B",
-    marginTop: 4,
+    marginTop: 2,
     textAlign: "center",
   },
   safe: { flex: 1, backgroundColor: colors.bg },

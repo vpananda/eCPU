@@ -59,7 +59,7 @@ export default function Loader({ size = 64, showRing = true, style }: LoaderProp
     outputRange: ["0deg", "360deg"],
   });
 
-  const ringSize = size + 18;
+  const ringSize = Math.round(size * 1.24);
   const logoSize = Math.round(size * 0.72);
 
   return (
@@ -115,12 +115,12 @@ const styles = StyleSheet.create({
   container: {
     justifyContent: "center",
     alignItems: "center",
-    padding: 10,
+    padding: 2,
   },
   orbitalRing: {
     position: "absolute",
-    borderWidth: 2.5,
-    borderColor: "rgba(16, 185, 129, 0.18)",
+    borderWidth: 2,
+    borderColor: "rgba(16, 185, 129, 0.16)",
     borderTopColor: "#10B981",
     borderRightColor: "#059669",
   },
@@ -131,9 +131,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8F0",
     shadowColor: "#059669",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.14,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 3,
   },
 });

@@ -53,6 +53,7 @@ type Dash = {
   pending_payments: number;
   pending_payments_count: number;
   drying_completed_count: number;
+  drying_completed_weight?: number;
   pending_deliveries_count: number;
   machines_running: number;
   machines_available: number;
@@ -931,6 +932,35 @@ export default function Dashboard() {
                     </Text>
                   </TouchableOpacity>
                 </View>
+
+                {/* Completed & Ready for Delivery Strip */}
+                {(data.drying_completed_count || 0) > 0 && (
+                  <TouchableOpacity
+                    style={styles.completedStockBar}
+                    onPress={() => router.push({ pathname: "/batches", params: { status: "Completed" } })}
+                    activeOpacity={0.85}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                      <View style={styles.completedStockIconWrap}>
+                        <MaterialCommunityIcons name="check-decagram" size={16} color="#047857" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.completedStockTitle}>
+                          Drying Completed — Ready for Delivery
+                        </Text>
+                        <Text style={styles.completedStockSubtitle}>
+                          {data.drying_completed_count} {data.drying_completed_count === 1 ? "batch" : "batches"} awaiting bagging & delivery
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Text style={styles.completedStockWeight}>
+                        {fmtNum(data.drying_completed_weight || 0, "", " KG")}
+                      </Text>
+                      <MaterialCommunityIcons name="chevron-right" size={16} color="#047857" />
+                    </View>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 
@@ -2907,6 +2937,42 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     fontWeight: "800",
     letterSpacing: 0.3,
+  },
+  completedStockBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 12,
+    marginHorizontal: spacing.xl,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  completedStockIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: "#DCFCE7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completedStockTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#065F46",
+  },
+  completedStockSubtitle: {
+    fontSize: 10.5,
+    fontWeight: "600",
+    color: "#047857",
+  },
+  completedStockWeight: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#047857",
   },
   separateLiveCard: {
     marginHorizontal: spacing.xl,

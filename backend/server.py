@@ -4183,17 +4183,18 @@ async def dashboard(
             COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_in_count,
             COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND (COALESCE(b.delivered_at::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.created_at::date) < %s::date) THEN b.actual_dry_weight ELSE 0 END), 0) AS today_out_weight,
             COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND (COALESCE(b.delivered_at::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.created_at::date) < %s::date) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_out_count,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN b.raw_weight ELSE 0 END), 0) AS processing_weight,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS processing_count,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN 1 ELSE 0 END), 0) AS processing_batches_count,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND b.machine_id IS NOT NULL THEN b.machine_id ELSE NULL END), 0) AS processing_machines_count,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN b.raw_weight ELSE 0 END), 0) AS inhouse_processing_weight,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS inhouse_processing_count,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS inhouse_processing_batches_count,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN b.raw_weight ELSE 0 END), 0) AS outsourced_processing_weight,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS outsourced_processing_count,
-            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS outsourced_processing_batches_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying') THEN b.raw_weight ELSE 0 END), 0) AS processing_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying') THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying') THEN 1 ELSE 0 END), 0) AS processing_batches_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying') AND b.machine_id IS NOT NULL THEN b.machine_id ELSE NULL END), 0) AS processing_machines_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN b.raw_weight ELSE 0 END), 0) AS inhouse_processing_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS inhouse_processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS inhouse_processing_batches_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying') AND m.is_outsourced IS TRUE THEN b.raw_weight ELSE 0 END), 0) AS outsourced_processing_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying') AND m.is_outsourced IS TRUE THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS outsourced_processing_count,
+            COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS outsourced_processing_batches_count,
             COALESCE(SUM(CASE WHEN b.status = 'Completed' THEN 1 ELSE 0 END), 0) AS drying_completed_count,
+            COALESCE(SUM(CASE WHEN b.status = 'Completed' THEN b.raw_weight ELSE 0 END), 0) AS drying_completed_weight,
             COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN b.raw_weight ELSE 0 END), 0) AS period_inhouse_weight,
             COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS period_inhouse_count,
             COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS period_inhouse_batches_count,
@@ -4341,6 +4342,7 @@ async def dashboard(
     outsourced_processing_count = int(batch_stats.get("outsourced_processing_count") or 0)
     outsourced_processing_batches_count = int(batch_stats.get("outsourced_processing_batches_count") or 0)
     drying_completed_count = int(batch_stats.get("drying_completed_count") or 0)
+    drying_completed_weight = round(float(batch_stats.get("drying_completed_weight") or 0), 2)
     pending_deliveries_count = drying_completed_count
     
     pending_payments = max(0.00, round(float(batch_stats.get("pending_payments") or 0), 2))
@@ -4401,6 +4403,7 @@ async def dashboard(
         "pending_payments": pending_payments,
         "pending_payments_count": pending_payments_count,
         "drying_completed_count": drying_completed_count,
+        "drying_completed_weight": drying_completed_weight,
         "pending_deliveries_count": pending_deliveries_count,
         "machines_running": machines_running,
         "machines_available": machines_available,

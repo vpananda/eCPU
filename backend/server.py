@@ -5572,7 +5572,7 @@ async def dispatch_daily_reports(
             if not b_phones:
                 try:
                     incharges = await db.query(
-                        "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role IN ('Store Incharge', 'Manager', 'Store Manager')",
+                        "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role::text IN ('Store Incharge', 'Manager')",
                         (target_branch_id,)
                     )
                     b_phones = [clean_phone_number(inc.get("mobile", "")) for inc in (incharges or []) if clean_phone_number(inc.get("mobile", ""))]
@@ -5621,7 +5621,7 @@ async def dispatch_daily_reports(
         if not manager_phones:
             try:
                 incharges = await db.query(
-                    "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role IN ('Store Incharge', 'Manager', 'Store Manager')",
+                    "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role::text IN ('Store Incharge', 'Manager')",
                     (bid,)
                 )
                 for inc in (incharges or []):

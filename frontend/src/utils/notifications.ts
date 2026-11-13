@@ -103,7 +103,7 @@ export function buildArrivalMessage(p: ArrivalNotificationParams): string {
   const recvText = p.receivedFrom && p.receivedFrom !== p.customerName ? `\n🚚 Received From: ${p.receivedFrom}` : "";
 
   return (
-    `*${p.companyName || "E3 SPICE PROCESSORS"}*\n` +
+    `*${p.companyName || "E3 AGRO"}*\n` +
     `${branch}` +
     `🌾 *Produce Arrival Receipt / எடை ரசீது*\n` +
     `--------------------------------\n` +
@@ -141,7 +141,7 @@ export function buildPaymentReceiptMessage(p: PaymentNotificationParams): string
       : "";
 
   return (
-    `*${p.companyName || "E3 SPICE PROCESSORS"}*\n` +
+    `*${p.companyName || "E3 AGRO"}*\n` +
     `${branch}` +
     `🧾 *Payment Receipt / கட்டண ரசீது*\n` +
     `--------------------------------\n` +
@@ -179,7 +179,7 @@ export function buildStatementReminderMessage(p: StatementReminderParams): strin
   const note = p.customNote ? `\n📝 Note: ${p.customNote}\n` : "";
 
   return (
-    `*${p.companyName || "E3 SPICE PROCESSORS"}*\n` +
+    `*${p.companyName || "E3 AGRO"}*\n` +
     `${branch}` +
     `${title}\n` +
     `--------------------------------\n` +

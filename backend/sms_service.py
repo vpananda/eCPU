@@ -93,3 +93,4 @@ async def send_sms(to_phone: str, message: str) -> Dict[str, Any]:
     except Exception as ex:
         logger.error(f"SMS gateway connection error: {ex}")
         return {"success": False, "recipient": clean_phone, "error": str(ex)}
+

@@ -52,7 +52,7 @@ function getHeaderTitle(segments: string[]): string {
     case "customer": return "Customer Profile";
     case "machine": return "Machine Details";
     case "payment": return "Payment Details";
-    default: return "E3 Spices";
+    default: return "E3 Agro";
   }
 }
 

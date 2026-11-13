@@ -2517,11 +2517,10 @@ async def list_batches(user: dict = Depends(get_current_user),
         params.append(customer_id)
 
     if start and end:
-        pstart, pend = _parse_range(start, end)
         s_date = start[:10]
         e_date = end[:10]
-        where_clauses.append("((b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date::text >= %s AND b.arrival_date::text <= %s))")
-        params.extend([pstart, pend, s_date, e_date])
+        where_clauses.append("COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) <= %s::date")
+        params.extend([s_date, e_date])
         
     if status:
         where_clauses.append("b.status = %s")
@@ -4176,14 +4175,14 @@ async def dashboard(
     # Fast single-pass SQL aggregation across the entire batches table
     batch_sql = f"""
         SELECT
-            COALESCE(SUM(CASE WHEN (b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date) THEN b.raw_weight ELSE 0 END), 0) AS period_received_weight,
-            COALESCE(SUM(CASE WHEN (b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date) THEN b.bill_amount ELSE 0 END), 0) AS period_billed,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS period_deliveries,
-            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND ((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)) THEN b.actual_dry_weight ELSE 0 END), 0) AS period_delivered_weight,
-            COALESCE(SUM(CASE WHEN b.created_at >= %s AND b.created_at < %s THEN b.raw_weight ELSE 0 END), 0) AS today_in_weight,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.created_at >= %s AND b.created_at < %s THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_in_count,
-            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN b.actual_dry_weight ELSE 0 END), 0) AS today_out_weight,
-            COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND b.delivered_at >= %s AND b.delivered_at < %s THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_out_count,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) THEN b.raw_weight ELSE 0 END), 0) AS period_received_weight,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) THEN b.bill_amount ELSE 0 END), 0) AS period_billed,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND (COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) < %s::date) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS period_deliveries,
+            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND (COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) < %s::date) THEN b.actual_dry_weight ELSE 0 END), 0) AS period_delivered_weight,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) THEN b.raw_weight ELSE 0 END), 0) AS today_in_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_in_count,
+            COALESCE(SUM(CASE WHEN b.status = 'Delivered' AND (COALESCE(b.delivered_at::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.created_at::date) < %s::date) THEN b.actual_dry_weight ELSE 0 END), 0) AS today_out_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN b.status = 'Delivered' AND (COALESCE(b.delivered_at::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.created_at::date) < %s::date) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS today_out_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN b.raw_weight ELSE 0 END), 0) AS processing_weight,
             COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS processing_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') THEN 1 ELSE 0 END), 0) AS processing_batches_count,
@@ -4201,15 +4200,17 @@ async def dashboard(
         LEFT JOIN public.machines m ON b.machine_id = m.id
         WHERE {" AND ".join(batch_where)}
     """
+    ts_date = tstart[:10]
+    te_date = tend[:10]
     full_batch_params = [
-        pstart, pend, s_date, e_date,
-        pstart, pend, s_date, e_date,
-        pstart, pend, s_date, e_date,
-        pstart, pend, s_date, e_date,
-        tstart, tend,
-        tstart, tend,
-        tstart, tend,
-        tstart, tend
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        ts_date, te_date,
+        ts_date, te_date,
+        ts_date, te_date,
+        ts_date, te_date
     ] + batch_params
 
     # Direct SQL sum on payments
@@ -4239,12 +4240,12 @@ async def dashboard(
         FROM public.batches b
         LEFT JOIN public.products p ON b.product_id = p.id
         WHERE {" AND ".join(batch_where)}
-          AND (((b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date >= %s::date AND b.arrival_date < %s::date)))
+          AND (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date)
         GROUP BY p.name
         HAVING COALESCE(SUM(b.raw_weight), 0) > 0
         ORDER BY total_weight DESC
     """
-    product_params = batch_params + [pstart, pend, s_date, e_date]
+    product_params = batch_params + [s_date, e_date]
 
     # Active in-branch stock by product (Received, Loaded, Drying, Completed)
     active_stock_sql = f"""
@@ -4425,19 +4426,18 @@ async def dashboard_arrivals(
     in_where = [where_str]
     in_params = list(params)
     if start and end:
-        pstart, pend = _parse_range(start, end)
         s_date = start[:10]
         e_date = end[:10]
-        in_where.append("((b.created_at >= %s AND b.created_at < %s) OR (b.arrival_date::text >= %s AND b.arrival_date::text <= %s))")
-        in_params.extend([pstart, pend, s_date, e_date])
+        in_where.append("COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) <= %s::date")
+        in_params.extend([s_date, e_date])
     elif start:
         s_date = start[:10]
-        in_where.append("(b.created_at >= %s OR b.arrival_date::text >= %s)")
-        in_params.extend([s_date, s_date])
+        in_where.append("COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date")
+        in_params.append(s_date)
     elif end:
         e_date = end[:10]
-        in_where.append("(b.created_at <= %s OR b.arrival_date::text <= %s)")
-        in_params.extend([e_date, e_date])
+        in_where.append("COALESCE(b.arrival_date::date, b.created_at::date) <= %s::date")
+        in_params.append(e_date)
 
     in_sql = f"""
         SELECT 
@@ -4464,19 +4464,18 @@ async def dashboard_arrivals(
     out_where = [where_str, "b.status = 'Delivered'"]
     out_params = list(params)
     if start and end:
-        pstart, pend = _parse_range(start, end)
         s_date = start[:10]
         e_date = end[:10]
-        out_where.append("((b.delivered_at >= %s AND b.delivered_at < %s) OR (b.arrival_date::text >= %s AND b.arrival_date::text <= %s))")
-        out_params.extend([pstart, pend, s_date, e_date])
+        out_where.append("COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) <= %s::date")
+        out_params.extend([s_date, e_date])
     elif start:
         s_date = start[:10]
-        out_where.append("(b.delivered_at >= %s OR b.arrival_date::text >= %s)")
-        out_params.extend([s_date, s_date])
+        out_where.append("COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) >= %s::date")
+        out_params.append(s_date)
     elif end:
         e_date = end[:10]
-        out_where.append("(b.delivered_at <= %s OR b.arrival_date::text <= %s)")
-        out_params.extend([e_date, e_date])
+        out_where.append("COALESCE(b.delivered_at::date, b.arrival_date::date, b.created_at::date) <= %s::date")
+        out_params.append(e_date)
 
     out_sql = f"""
         SELECT 
@@ -4757,7 +4756,7 @@ async def dashboard_arrivals(
     total_comp = round(sum((r["actual_dry_weight"] or 0) for r in comp_list), 2)
     
     range_start = start if start else "All"
-    range_end = (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10] if (start and end) else (end if end else "Time")
+    range_end = end if end else "Time"
 
     res = {
         "range": {"start": range_start, "end": range_end},
@@ -5268,13 +5267,10 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         FROM public.batches b
         LEFT JOIN public.products p ON b.product_id = p.id
         WHERE b.branch_id = %s::uuid
-          AND (
-            (b.arrival_date = %s::date)
-            OR (b.created_at >= %s::timestamptz AND b.created_at <= %s::timestamptz)
-          )
+          AND COALESCE(b.arrival_date::date, b.created_at::date) = %s::date
         GROUP BY p.name
     """
-    arrival_rows = await db.query(arrivals_sql, [branch_id, cur_date_str, start_utc, end_utc])
+    arrival_rows = await db.query(arrivals_sql, [branch_id, cur_date_str])
     
     total_arr_lots = sum(r.get("lot_count", 0) for r in arrival_rows)
     total_arr_weight = sum(float(r.get("total_weight", 0)) for r in arrival_rows)

@@ -35,6 +35,7 @@ from whatsapp_service import (
     clean_phone_number,
     get_config,
 )
+from sms_service import send_sms, check_sms_wallet
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -5759,6 +5760,21 @@ async def send_daily_whatsapp_now(body: DailyReportSendNowReq, user: dict = Depe
         target_date_str=body.target_date
     )
     return {"success": True, "results": results}
+
+
+class SendSmsReq(BaseModel):
+    phone: str
+    message: str
+
+
+@api.get("/sms/wallet")
+async def get_sms_wallet(user: dict = Depends(require_roles("Admin"))):
+    return await check_sms_wallet()
+
+
+@api.post("/sms/send")
+async def send_custom_sms(body: SendSmsReq, user: dict = Depends(require_roles("Admin"))):
+    return await send_sms(body.phone, body.message)
 
 
 @api.get("/")

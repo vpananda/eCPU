@@ -525,7 +525,14 @@ async def send_daily_summary_whatsapp(
     if not clean_to:
         return {"success": False, "error": f"Invalid recipient phone: '{to_phone}'"}
 
-    # 1. Attempt template send
+    # 1. Attempt rich direct text send first (delivers exact formatted markdown, sections 1-4 and emojis)
+    if full_message_text:
+        direct_res = await send_whatsapp_text(to_phone=clean_to, message_text=full_message_text)
+        if direct_res.get("success"):
+            return direct_res
+        logger.warning(f"Direct text send failed ({direct_res.get('error')}), falling back to template")
+
+    # 2. Template fallback if outside 24-hr customer service window
     try:
         tpl_res = await send_whatsapp_template(
             to_phone=clean_to,
@@ -544,9 +551,8 @@ async def send_daily_summary_whatsapp(
         if tpl_res.get("success"):
             return tpl_res
     except Exception as e:
-        logger.warning(f"Template send error, falling back to direct text: {e}")
+        logger.warning(f"Template send error: {e}")
 
-    # 2. Direct text message fallback
-    return await send_whatsapp_text(to_phone=clean_to, message_text=full_message_text)
+    return {"success": False, "error": "Both direct text and template send failed"}
 
 

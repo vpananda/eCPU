@@ -5241,6 +5241,7 @@ class DailyReportSendNowReq(BaseModel):
     branch_id: Optional[str] = None
     phone: Optional[str] = None
     admin_phones: Optional[str] = None
+    target_date: Optional[str] = None
 
 async def generate_branch_daily_summary(branch_id: str, target_date_str: Optional[str] = None) -> dict:
     """Calculates today's operational summary for a specific branch and builds a formatted WhatsApp message."""
@@ -5384,7 +5385,7 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         f"📍 *Branch: {branch_name.upper()}*\n"
         f"📅 *Date: {date_display} ({time_display})*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"🌾 *1. ARRIVALS RECEIVED TODAY*\n"
+        f"📥 *1. ARRIVALS RECEIVED TODAY*\n"
         f"• Total Lots: *{total_arr_lots} Lots* ({total_arr_bags} Bags)\n"
         f"• Total Wet Weight: *{total_arr_weight:,.2f} KG*\n"
         f"{arr_breakdown}\n\n"
@@ -5393,7 +5394,7 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         f"• Completed Today: *{comp_lots} Batches* ({comp_dry_weight:,.2f} KG Dry)\n"
         f"• Drying Yield: *{yield_pct:.1f}%*\n"
         f"• Machines: {total_machines - avail_machines} In-Use / {avail_machines} Available\n\n"
-        f"🚚 *3. DELIVERIES TODAY*\n"
+        f"📦 *3. DELIVERIES TODAY*\n"
         f"• Produce Delivered: *{deliv_lots} Batches*\n"
         f"• Dry Dispatched: *{deliv_dry_weight:,.2f} KG*\n"
         f"{financials_text}"
@@ -5497,7 +5498,8 @@ def generate_consolidated_daily_summary(summaries: list) -> dict:
 async def dispatch_daily_reports(
     target_branch_id: Optional[str] = None,
     override_phone: Optional[str] = None,
-    admin_phones_override: Optional[str] = None
+    admin_phones_override: Optional[str] = None,
+    target_date_str: Optional[str] = None
 ):
     d_doc = await db.settings.find_one({"key": "daily_report_settings"})
     settings = (d_doc or {}).get("value") or {}
@@ -5509,7 +5511,7 @@ async def dispatch_daily_reports(
         b = await db.branches.find_one({"id": target_branch_id}, {"_id": 0})
         if not b:
             return []
-        summary = await generate_branch_daily_summary(target_branch_id)
+        summary = await generate_branch_daily_summary(target_branch_id, target_date_str=target_date_str)
         msg = summary.get("message", "")
         if override_phone:
             phones = [clean_phone_number(override_phone)]
@@ -5548,7 +5550,7 @@ async def dispatch_daily_reports(
     # 1. Collect individual branch summaries and send ONLY to that branch's manager (1 single msg per manager)
     for branch in branches:
         bid = branch["id"]
-        summary = await generate_branch_daily_summary(bid)
+        summary = await generate_branch_daily_summary(bid, target_date_str=target_date_str)
         summaries.append(summary)
 
         manager_phones_str = branch.get("report_phones", "") or ""
@@ -5678,7 +5680,8 @@ async def send_daily_whatsapp_now(body: DailyReportSendNowReq, user: dict = Depe
     results = await dispatch_daily_reports(
         target_branch_id=body.branch_id,
         override_phone=body.phone,
-        admin_phones_override=body.admin_phones
+        admin_phones_override=body.admin_phones,
+        target_date_str=body.target_date
     )
     return {"success": True, "results": results}
 

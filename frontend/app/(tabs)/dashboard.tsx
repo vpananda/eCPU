@@ -125,6 +125,13 @@ function fmtNum(v: number, prefix = "", suffix = "") {
   return `${prefix}${(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}${suffix}`;
 }
 
+function getResponsiveWeightStyle(text: string) {
+  const len = (text || "").length;
+  if (len > 12) return { fontSize: 13, letterSpacing: -0.5 };
+  if (len > 9) return { fontSize: 14.5, letterSpacing: -0.4 };
+  return { fontSize: 16 };
+}
+
 function fmtDisplayDate(iso: string) {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
@@ -598,39 +605,59 @@ export default function Dashboard() {
             <View style={styles.produceHubContainer}>
               {/* Inbound & Outbound Bar */}
               <View style={styles.hubInOutRow}>
-                <TouchableOpacity
-                  style={styles.hubInOutCard}
-                  onPress={() => router.push("/arrivals?tab=in")}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.hubIconCircle, { backgroundColor: "#E8F5E9" }]}>
-                    <MaterialCommunityIcons name="arrow-bottom-left" size={18} color="#2E7D32" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.hubMicroLabel}>TOTAL RECEIVED</Text>
-                    <Text style={styles.hubMainWeight}>{fmtNum(data?.period_received_weight || 0, "", " KG")}</Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
-                </TouchableOpacity>
+                {(() => {
+                  const recStr = fmtNum(data?.period_received_weight || 0, "", " KG");
+                  const delStr = fmtNum(data?.period_delivered_weight || 0, "", " KG");
+                  return (
+                    <>
+                      <TouchableOpacity
+                        style={styles.hubInOutCard}
+                        onPress={() => router.push("/arrivals?tab=in")}
+                        activeOpacity={0.8}
+                      >
+                        <View style={[styles.hubIconCircle, { backgroundColor: "#E8F5E9" }]}>
+                          <MaterialCommunityIcons name="arrow-bottom-left" size={16} color="#2E7D32" />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0, justifyContent: "center" }}>
+                          <Text style={styles.hubMicroLabel} numberOfLines={1}>TOTAL RECEIVED</Text>
+                          <Text
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.65}
+                            style={[styles.hubMainWeight, getResponsiveWeightStyle(recStr)]}
+                          >
+                            {recStr}
+                          </Text>
+                        </View>
+                        <MaterialCommunityIcons name="chevron-right" size={15} color={colors.textLight} />
+                      </TouchableOpacity>
 
-                <View style={styles.hubInOutDivider} />
+                      <View style={styles.hubInOutDivider} />
 
-                <TouchableOpacity
-                  style={styles.hubInOutCard}
-                  onPress={() => router.push("/arrivals?tab=out")}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.hubIconCircle, { backgroundColor: "#F3E5F5" }]}>
-                    <MaterialCommunityIcons name="arrow-top-right" size={18} color="#7B1FA2" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.hubMicroLabel}>TOTAL DELIVERED</Text>
-                    <Text style={[styles.hubMainWeight, { color: "#7B1FA2" }]}>
-                      {fmtNum(data?.period_delivered_weight || 0, "", " KG")}
-                    </Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
-                </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.hubInOutCard}
+                        onPress={() => router.push("/arrivals?tab=out")}
+                        activeOpacity={0.8}
+                      >
+                        <View style={[styles.hubIconCircle, { backgroundColor: "#F3E5F5" }]}>
+                          <MaterialCommunityIcons name="arrow-top-right" size={16} color="#7B1FA2" />
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0, justifyContent: "center" }}>
+                          <Text style={styles.hubMicroLabel} numberOfLines={1}>TOTAL DELIVERED</Text>
+                          <Text
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.65}
+                            style={[styles.hubMainWeight, { color: "#7B1FA2" }, getResponsiveWeightStyle(delStr)]}
+                          >
+                            {delStr}
+                          </Text>
+                        </View>
+                        <MaterialCommunityIcons name="chevron-right" size={15} color={colors.textLight} />
+                      </TouchableOpacity>
+                    </>
+                  );
+                })()}
               </View>
 
               {/* Spices Arrival Breakdown */}
@@ -2624,28 +2651,29 @@ const styles = StyleSheet.create({
   hubInOutRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     backgroundColor: "#F8FAFC",
   },
   hubInOutCard: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 7,
+    minWidth: 0,
   },
   hubIconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   hubMicroLabel: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: "700",
     color: "#64748B",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
     marginBottom: 2,
   },
   hubMainWeight: {
@@ -2656,9 +2684,9 @@ const styles = StyleSheet.create({
   },
   hubInOutDivider: {
     width: 1,
-    height: 36,
+    height: 32,
     backgroundColor: "#E2E8F0",
-    marginHorizontal: 10,
+    marginHorizontal: 6,
   },
   hubSpicesSection: {
     backgroundColor: "#FFFFFF",

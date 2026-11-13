@@ -295,7 +295,7 @@ export default function Dashboard() {
   }, []);
 
   const load = useCallback(async (s = start, e = end, bid = selectedBranchId, silent = false) => {
-    if (!silent && !cachedMemoryDash && !data) setLoading(true);
+    if (!silent) setLoading(true);
     try {
       setLoadError(null);
       const qs = new URLSearchParams();
@@ -323,7 +323,7 @@ export default function Dashboard() {
 
   useSyncRefresh(
     useCallback(async () => {
-      await load(start, end, selectedBranchId, false);
+      await load(start, end, selectedBranchId, true);
     }, [load, start, end, selectedBranchId])
   );
 
@@ -363,14 +363,16 @@ export default function Dashboard() {
 
     setStart(s);
     setEnd(e);
-    load(s, e, selectedBranchId);
+    setLoading(true);
+    load(s, e, selectedBranchId, false);
   };
 
   const applyRange = () => {
     setStart(draftStart);
     setEnd(draftEnd);
     setPickerOpen(false);
-    load(draftStart, draftEnd, selectedBranchId);
+    setLoading(true);
+    load(draftStart, draftEnd, selectedBranchId, false);
   };
 
   const handleSelectBranch = (id: string) => {

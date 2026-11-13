@@ -162,12 +162,12 @@ export default function ArrivalsScreen() {
     setCompBags(r.processed_bags ? String(r.processed_bags) : "");
   };
 
-  const load = useCallback(async (silent = false, forceRefresh = false) => {
-    if (!silent && (!cachedMemoryArrivals || forceRefresh)) setLoading(true);
+  const load = useCallback(async (s = start, e = end, silent = false, forceRefresh = false) => {
+    if (!silent) setLoading(true);
     try {
       const qs = new URLSearchParams();
-      if (start) qs.set("start", start);
-      if (end) qs.set("end", end);
+      if (s) qs.set("start", s);
+      if (e) qs.set("end", e);
       if (selectedBranchId) qs.set("branch_id", selectedBranchId);
       if (search.trim()) qs.set("q", search.trim());
       if (forceRefresh) qs.set("no_cache", "true");
@@ -180,18 +180,18 @@ export default function ArrivalsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [start, end, selectedBranchId, search]);
+  }, [selectedBranchId, search]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
       cachedMemoryArrivals = null;
       await storage.removeItem("cached_arrivals_dashboard");
-      await load(true, true);
+      await load(start, end, true, true);
     } finally {
       setRefreshing(false);
     }
-  }, [load]);
+  }, [load, start, end]);
 
   const handleCompleteSubmit = async () => {
     if (!completeBatch) return;
@@ -225,7 +225,7 @@ export default function ArrivalsScreen() {
       // Trigger full refresh showing loader image & switch to completed tab
       setLoading(true);
       setProcSubTab("completed");
-      await load(false, true);
+      await load(start, end, false, true);
 
       Alert.alert("Processing Completed", `Batch ${targetBatchNo} marked Completed & WhatsApp alert sent to ${targetCustomerName}!`);
     } catch (e: any) {
@@ -238,22 +238,28 @@ export default function ArrivalsScreen() {
 
   const applyPreset = (key: string) => {
     setActivePreset(key);
+    let s = "";
+    let e = "";
     if (key === "today") {
-      setStart(todayISO());
-      setEnd(todayISO());
+      s = todayISO();
+      e = todayISO();
     } else if (key === "yesterday") {
-      setStart(yesterdayISO());
-      setEnd(yesterdayISO());
+      s = yesterdayISO();
+      e = yesterdayISO();
     } else if (key === "week") {
-      setStart(weekStartISO());
-      setEnd(todayISO());
+      s = weekStartISO();
+      e = todayISO();
     } else if (key === "month") {
-      setStart(monthStartISO());
-      setEnd(todayISO());
+      s = monthStartISO();
+      e = todayISO();
     } else if (key === "all") {
-      setStart("");
-      setEnd("");
+      s = "";
+      e = "";
     }
+    setStart(s);
+    setEnd(e);
+    setLoading(true);
+    load(s, e, false, true);
   };
 
   useEffect(() => {
@@ -267,7 +273,7 @@ export default function ArrivalsScreen() {
     loadFromCache();
   }, []);
 
-  useFocusEffect(useCallback(() => { load(!!data); }, [load, !!data]));
+  useFocusEffect(useCallback(() => { load(start, end, !!data); }, [load, start, end, !!data]));
 
   useSyncRefresh(useCallback(async () => {
     await load(false, true);
@@ -613,9 +619,13 @@ export default function ArrivalsScreen() {
               style={styles.applyBtn}
               onPress={() => {
                 if (draftStart) {
-                  setStart(draftStart);
-                  setEnd(draftEnd || draftStart);
+                  const s = draftStart;
+                  const e = draftEnd || draftStart;
+                  setStart(s);
+                  setEnd(e);
                   setActivePreset("custom");
+                  setLoading(true);
+                  load(s, e, false, true);
                 }
                 setFilterOpen(false);
               }}

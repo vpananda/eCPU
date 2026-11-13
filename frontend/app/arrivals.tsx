@@ -133,7 +133,7 @@ let cachedMemoryArrivals: Payload | null = null;
 export default function ArrivalsScreen() {
   const { selectedBranchId } = useAuth();
   const router = useRouter();
-  const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string; q?: string }>();
+  const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string; q?: string; preset?: string }>();
   const [data, setData] = useState<Payload | null>(cachedMemoryArrivals);
   const [loading, setLoading] = useState(!cachedMemoryArrivals);
   const [refreshing, setRefreshing] = useState(false);
@@ -141,9 +141,44 @@ export default function ArrivalsScreen() {
   const [tab, setTab] = useState<"in" | "processing" | "out">((params.tab as any) || "in");
   const [procSubTab, setProcSubTab] = useState<"active" | "completed">("active");
 
-  const [start, setStart] = useState<string>(params.start || "");
-  const [end, setEnd] = useState<string>(params.end || "");
-  const [activePreset, setActivePreset] = useState<string>(params.start ? "custom" : "all");
+  const resolveDatesFromParams = useCallback(() => {
+    let s = "";
+    let e = "";
+    let p = "all";
+    if (params.preset) {
+      p = params.preset;
+      if (params.preset === "today") {
+        s = todayISO();
+        e = todayISO();
+      } else if (params.preset === "yesterday") {
+        s = yesterdayISO();
+        e = yesterdayISO();
+      } else if (params.preset === "week") {
+        s = weekStartISO();
+        e = todayISO();
+      } else if (params.preset === "month") {
+        s = monthStartISO();
+        e = todayISO();
+      } else if (params.preset === "all") {
+        s = "";
+        e = "";
+      } else {
+        s = params.start || "";
+        e = params.end || "";
+        p = "custom";
+      }
+    } else if (params.start || params.end) {
+      s = params.start || "";
+      e = params.end || "";
+      p = "custom";
+    }
+    return { s, e, p };
+  }, [params.preset, params.start, params.end]);
+
+  const initialDates = resolveDatesFromParams();
+  const [start, setStart] = useState<string>(initialDates.s);
+  const [end, setEnd] = useState<string>(initialDates.e);
+  const [activePreset, setActivePreset] = useState<string>(initialDates.p);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(start);
@@ -273,6 +308,20 @@ export default function ArrivalsScreen() {
     loadFromCache();
   }, []);
 
+  useEffect(() => {
+    if (params.q !== undefined) {
+      setSearch(params.q);
+    }
+    if (params.tab && ["in", "processing", "out"].includes(params.tab)) {
+      setTab(params.tab as any);
+    }
+    const resolved = resolveDatesFromParams();
+    setStart(resolved.s);
+    setEnd(resolved.e);
+    setActivePreset(resolved.p);
+    load(resolved.s, resolved.e, false, true);
+  }, [params.q, params.tab, params.preset, params.start, params.end, resolveDatesFromParams]);
+
   useFocusEffect(useCallback(() => { load(start, end, !!data); }, [load, start, end, !!data]));
 
   useSyncRefresh(useCallback(async () => {
@@ -281,7 +330,7 @@ export default function ArrivalsScreen() {
 
     const shareArrivalWhatsApp = async (r: Row) => {
     const msg = buildArrivalMessage({
-      companyName: "E3 SPICE PROCESSORS",
+      companyName: "E3 AGRO",
       branchName: r.branch_name || "Factory",
       customerName: r.customer_name,
       batchNo: r.batch_no,

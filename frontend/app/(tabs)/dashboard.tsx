@@ -612,7 +612,7 @@ export default function Dashboard() {
                     <>
                       <TouchableOpacity
                         style={styles.hubInOutCard}
-                        onPress={() => router.push("/arrivals?tab=in")}
+                        onPress={() => router.push({ pathname: "/arrivals", params: { tab: "in", start, end, preset: activePreset } })}
                         activeOpacity={0.8}
                       >
                         <View style={[styles.hubIconCircle, { backgroundColor: "#E8F5E9" }]}>
@@ -636,7 +636,7 @@ export default function Dashboard() {
 
                       <TouchableOpacity
                         style={styles.hubInOutCard}
-                        onPress={() => router.push("/arrivals?tab=out")}
+                        onPress={() => router.push({ pathname: "/arrivals", params: { tab: "out", start, end, preset: activePreset } })}
                         activeOpacity={0.8}
                       >
                         <View style={[styles.hubIconCircle, { backgroundColor: "#F3E5F5" }]}>
@@ -696,7 +696,7 @@ export default function Dashboard() {
                             <TouchableOpacity
                               key={item.product_name + idx}
                               style={[styles.hubSpiceCard, { borderColor: theme.border, backgroundColor: theme.bg }]}
-                              onPress={() => router.push({ pathname: "/arrivals", params: { tab: "in", q: item.product_name } })}
+                              onPress={() => router.push({ pathname: "/arrivals", params: { tab: "in", q: item.product_name, start, end, preset: activePreset } })}
                               activeOpacity={0.8}
                             >
                               <View style={styles.hubSpiceCardTop}>

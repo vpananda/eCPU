@@ -635,10 +635,7 @@ export default function Dashboard() {
 
               {/* Spices Arrival Breakdown */}
               {(() => {
-                const periodArrivals = data?.product_arrivals || [];
-                const activeStock = data?.active_product_arrivals || [];
-                const displaySpices = periodArrivals.length > 0 ? periodArrivals : activeStock;
-                const isShowingActive = periodArrivals.length === 0 && activeStock.length > 0;
+                const displaySpices = data?.product_arrivals || [];
 
                 return (
                   <View style={styles.hubSpicesSection}>
@@ -649,8 +646,8 @@ export default function Dashboard() {
                       </View>
                       <Text style={styles.hubSpicesSubtitle}>
                         {displaySpices.length > 0
-                          ? `${displaySpices.length} ${displaySpices.length === 1 ? "variety" : "varieties"} ${isShowingActive ? "in branch" : "arrived"}`
-                          : "0 varieties"}
+                          ? `${displaySpices.length} ${displaySpices.length === 1 ? "variety" : "varieties"} arrived`
+                          : "0 varieties arrived"}
                       </Text>
                     </View>
 

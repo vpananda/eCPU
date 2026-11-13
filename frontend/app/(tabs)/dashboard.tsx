@@ -540,7 +540,7 @@ export default function Dashboard() {
           </ScrollView>
         </View>
 
-        {loading ? (
+        {!data && loading ? (
           <View style={styles.loadingContainer}>
             <Loader size={80} />
             <Text style={styles.loadingText}>Fetching active reports...</Text>
@@ -1318,11 +1318,61 @@ export default function Dashboard() {
           </View>
         </View>
       </Modal>
+
+      {/* Modern Floating Overlay Loader when data is refreshing */}
+      {loading && !!data && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <View style={styles.loadingModalCard}>
+            <Loader size={60} />
+            <Text style={styles.loadingModalTitle}>Fetching Active Reports...</Text>
+            <Text style={styles.loadingModalSubtitle}>Updating live metrics</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.38)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 99999,
+    elevation: 20,
+  },
+  loadingModalCard: {
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 26,
+    paddingVertical: 22,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: "rgba(226, 232, 240, 0.8)",
+    minWidth: 220,
+    maxWidth: 320,
+  },
+  loadingModalTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginTop: 14,
+    textAlign: "center",
+  },
+  loadingModalSubtitle: {
+    fontSize: 11.5,
+    fontWeight: "500",
+    color: "#64748B",
+    marginTop: 4,
+    textAlign: "center",
+  },
   container: {
     flex: 1,
     backgroundColor: colors.bg,

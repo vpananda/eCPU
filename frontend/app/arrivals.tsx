@@ -666,7 +666,7 @@ export default function ArrivalsScreen() {
         })}
       </View>
 
-      {loading ? (
+      {!data && loading ? (
         <View style={styles.loaderWrap}>
           <Loader size={76} />
           <Text style={styles.loaderTitle}>Processing & Syncing Dryers...</Text>
@@ -881,11 +881,61 @@ export default function ArrivalsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Floating Overlay Loader when data is refreshing */}
+      {loading && !!data && (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <View style={styles.loadingModalCard}>
+            <Loader size={60} />
+            <Text style={styles.loadingModalTitle}>Processing & Syncing Dryers...</Text>
+            <Text style={styles.loadingModalSubtitle}>Fetching live machine loads and completed lots</Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15, 23, 42, 0.38)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 99999,
+    elevation: 20,
+  },
+  loadingModalCard: {
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 26,
+    paddingVertical: 22,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
+    elevation: 12,
+    borderWidth: 1,
+    borderColor: "rgba(226, 232, 240, 0.8)",
+    minWidth: 220,
+    maxWidth: 320,
+  },
+  loadingModalTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#0F172A",
+    marginTop: 14,
+    textAlign: "center",
+  },
+  loadingModalSubtitle: {
+    fontSize: 11.5,
+    fontWeight: "500",
+    color: "#64748B",
+    marginTop: 4,
+    textAlign: "center",
+  },
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { fontSize: 18, fontWeight: "800", color: colors.text },

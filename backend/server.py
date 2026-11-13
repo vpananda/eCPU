@@ -31,6 +31,7 @@ from whatsapp_service import (
     send_payment_receipt,
     send_whatsapp_template,
     send_whatsapp_text,
+    send_daily_summary_whatsapp,
     clean_phone_number,
     get_config,
 )
@@ -1347,8 +1348,9 @@ async def daily_report_scheduler_worker():
             send_time = settings.get("send_time", "21:00")
             last_sent_date = settings.get("last_sent_date", "")
 
-            if enabled and now_hm == send_time and last_sent_date != today_str:
-                logger.info(f"Triggering scheduled daily WhatsApp status reports at {now_hm} IST for date {today_str}...")
+            # Trigger if enabled, current time has reached or passed scheduled send_time, and not yet sent today
+            if enabled and now_hm >= send_time and last_sent_date != today_str:
+                logger.info(f"Triggering scheduled daily WhatsApp status reports at {now_hm} IST for date {today_str} (configured send_time: {send_time})...")
                 await dispatch_daily_reports()
                 settings["last_sent_date"] = today_str
                 await db.settings.update_one(
@@ -5238,6 +5240,7 @@ class DailyReportSettingsUpdate(BaseModel):
 class DailyReportSendNowReq(BaseModel):
     branch_id: Optional[str] = None
     phone: Optional[str] = None
+    admin_phones: Optional[str] = None
 
 async def generate_branch_daily_summary(branch_id: str, target_date_str: Optional[str] = None) -> dict:
     """Calculates today's operational summary for a specific branch and builds a formatted WhatsApp message."""
@@ -5413,10 +5416,14 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         "message": message
     }
 
-async def dispatch_daily_reports(target_branch_id: Optional[str] = None, override_phone: Optional[str] = None):
+async def dispatch_daily_reports(
+    target_branch_id: Optional[str] = None,
+    override_phone: Optional[str] = None,
+    admin_phones_override: Optional[str] = None
+):
     d_doc = await db.settings.find_one({"key": "daily_report_settings"})
     settings = (d_doc or {}).get("value") or {}
-    admin_phones_str = settings.get("admin_phones", "")
+    admin_phones_str = admin_phones_override if admin_phones_override is not None else settings.get("admin_phones", "")
     admin_phones = [clean_phone_number(p.strip()) for p in admin_phones_str.replace(";", ",").split(",") if p.strip()]
 
     branches_to_process = []
@@ -5443,9 +5450,25 @@ async def dispatch_daily_reports(target_branch_id: Optional[str] = None, overrid
             phones_to_send = list(dict.fromkeys([p for p in (branch_phones + admin_phones) if p]))
 
         branch_res = {"branch_id": bid, "branch_name": branch.get("name"), "recipients": []}
+
+        # Format summaries for template
+        arr_summary = f"{summary.get('total_arr_weight', 0):,.1f} KG ({summary.get('total_arr_lots', 0)} Lots)"
+        dryers_summary = f"{summary.get('running_machines', 0)} Active ({summary.get('comp_dry_weight', 0):,.1f} KG Dry)"
+        deliv_summary = f"{summary.get('deliv_dry_weight', 0):,.1f} KG Dry"
+        fin_summary = f"Billed: Rs. {summary.get('deliv_billed', 0):,.0f} | Recv: Rs. {summary.get('total_collected', 0):,.0f}"
+
         for phone in phones_to_send:
             try:
-                res = await send_whatsapp_text(to_phone=phone, message_text=msg)
+                res = await send_daily_summary_whatsapp(
+                    to_phone=phone,
+                    branch_name=branch.get("name", "Branch"),
+                    date_display=summary.get("date", ""),
+                    arr_summary=arr_summary,
+                    dryers_summary=dryers_summary,
+                    deliv_summary=deliv_summary,
+                    fin_summary=fin_summary,
+                    full_message_text=msg
+                )
                 branch_res["recipients"].append({"phone": phone, "result": res})
             except Exception as ex:
                 branch_res["recipients"].append({"phone": phone, "error": str(ex)})
@@ -5504,7 +5527,21 @@ async def preview_daily_whatsapp(branch_id: Optional[str] = None, user: dict = D
 
 @api.post("/reports/daily-whatsapp/send-now")
 async def send_daily_whatsapp_now(body: DailyReportSendNowReq, user: dict = Depends(require_roles("Admin"))):
-    results = await dispatch_daily_reports(target_branch_id=body.branch_id, override_phone=body.phone)
+    if body.admin_phones is not None:
+        d_doc = await db.settings.find_one({"key": "daily_report_settings"}, {"_id": 0})
+        cur = (d_doc or {}).get("value") or {}
+        cur["admin_phones"] = body.admin_phones.strip()
+        await db.settings.update_one(
+            {"key": "daily_report_settings"},
+            {"$set": {"value": cur}},
+            upsert=True
+        )
+
+    results = await dispatch_daily_reports(
+        target_branch_id=body.branch_id,
+        override_phone=body.phone,
+        admin_phones_override=body.admin_phones
+    )
     return {"success": True, "results": results}
 
 

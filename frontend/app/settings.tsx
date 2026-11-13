@@ -8,6 +8,7 @@ import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { useConfirm } from "@/src/components/ConfirmModal";
 import { MultiPhoneInput } from "@/src/components/MultiPhoneInput";
+import { openWhatsApp } from "@/src/utils/notifications";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 
 const TIME_PRESETS = [
@@ -117,9 +118,19 @@ export default function Settings() {
   };
 
   const handleSendTestNow = async () => {
+    const cleanPhones = adminPhones
+      .split(/[,;\n]/)
+      .map(p => p.trim())
+      .filter(Boolean);
+
+    if (cleanPhones.length === 0) {
+      toast.show("Please enter at least one mobile number under Owner / Executive Numbers", "error");
+      return;
+    }
+
     const ok = await confirm({
       title: "Send Test WhatsApp Report",
-      message: "This will compile today's live operational summary and dispatch it immediately via WhatsApp to all configured recipients. Proceed?",
+      message: `Send today's operational summary to ${cleanPhones.length} number(s) (${cleanPhones.join(", ")}) immediately via WhatsApp?`,
       confirmText: "Send Test Now",
       icon: "whatsapp",
     });
@@ -127,11 +138,33 @@ export default function Settings() {
 
     setTestingDaily(true);
     try {
-      await api("/reports/daily-whatsapp/send-now", {
-        method: "POST",
-        body: {},
+      // 1. Automatically save settings with current captured screen values
+      await api("/reports/daily-whatsapp/settings", {
+        method: "PUT",
+        body: {
+          enabled: dailyEnabled,
+          send_time: sendTime,
+          admin_phones: adminPhones,
+          include_financials: includeFinancials,
+        },
       });
-      toast.show("Daily summary dispatched to WhatsApp!");
+
+      // 2. Dispatch report to captured numbers
+      const res = await api<any>("/reports/daily-whatsapp/send-now", {
+        method: "POST",
+        body: {
+          admin_phones: adminPhones,
+        },
+      });
+
+      let sentCount = 0;
+      (res?.results || []).forEach((b: any) => {
+        (b.recipients || []).forEach((r: any) => {
+          if (r.result?.success) sentCount++;
+        });
+      });
+
+      toast.show(`Daily report dispatched for ${cleanPhones.length} number(s)!`);
     } catch (e: any) {
       toast.show(e.message || "Failed to send report", "error");
     } finally {
@@ -268,6 +301,27 @@ export default function Settings() {
                     trackColor={{ false: "#CBD5E1", true: "#86EFAC" }}
                     thumbColor={includeFinancials ? "#16A34A" : "#F1F5F9"}
                   />
+                </View>
+
+                {/* Information Card for Meta WhatsApp Delivery */}
+                <View style={styles.waNoticeCard}>
+                  <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+                    <MaterialCommunityIcons name="information" size={17} color="#059669" style={{ marginTop: 2 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.waNoticeTitle}>Automated WhatsApp Delivery Info</Text>
+                      <Text style={styles.waNoticeDesc}>
+                        Automatic reports are dispatched from E3 Agro business line (+91 99402 89766) every day at {sendTime} IST.
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.waNoticeLink}
+                        onPress={() => openWhatsApp("919940289766", "Hi")}
+                        activeOpacity={0.7}
+                      >
+                        <MaterialCommunityIcons name="whatsapp" size={14} color="#059669" />
+                        <Text style={styles.waNoticeLinkText}>Tap to message bot (+91 99402 89766) to enable delivery</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
 
                 {/* Actions */}
@@ -409,9 +463,34 @@ export default function Settings() {
               </View>
             )}
 
-            <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewOpen(false)}>
-              <Text style={styles.previewCloseBtnText}>Done</Text>
-            </TouchableOpacity>
+            {previews.length > 0 && previews[activePreviewIndex]?.message ? (
+              <View style={styles.previewActionsRow}>
+                <TouchableOpacity
+                  style={styles.previewShareBtn}
+                  onPress={() => {
+                    const msg = previews[activePreviewIndex]?.message;
+                    if (!msg) return;
+                    const firstNum = adminPhones.split(/[,;\n]/)[0]?.trim() || "";
+                    openWhatsApp(firstNum, msg);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
+                  <Text style={styles.previewShareBtnText}>Open in WhatsApp</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.previewCloseBtn}
+                  onPress={() => setPreviewOpen(false)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.previewCloseBtnText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.previewCloseBtn} onPress={() => setPreviewOpen(false)}>
+                <Text style={styles.previewCloseBtnText}>Done</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -700,16 +779,75 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
-  previewCloseBtn: {
+  previewActionsRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
     marginTop: spacing.sm,
-    backgroundColor: colors.primary,
+  },
+  previewShareBtn: {
+    flex: 1.5,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#25D366",
     paddingVertical: 10,
     borderRadius: radius.pill,
-    alignItems: "center",
   },
-  previewCloseBtnText: {
+  previewShareBtnText: {
     color: "#fff",
     fontSize: 13,
     fontWeight: "700",
+  },
+  previewCloseBtn: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  previewCloseBtnText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  waNoticeCard: {
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  waNoticeTitle: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#065F46",
+    marginBottom: 2,
+  },
+  waNoticeDesc: {
+    fontSize: 11,
+    color: "#047857",
+    lineHeight: 16,
+  },
+  waNoticeLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 6,
+    backgroundColor: "#D1FAE5",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    alignSelf: "flex-start",
+  },
+  waNoticeLinkText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#065F46",
   },
 });

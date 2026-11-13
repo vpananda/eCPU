@@ -505,3 +505,48 @@ async def send_payment_receipt(
         language_code="en"
     )
 
+
+async def send_daily_summary_whatsapp(
+    to_phone: str,
+    branch_name: str,
+    date_display: str,
+    arr_summary: str,
+    dryers_summary: str,
+    deliv_summary: str,
+    fin_summary: str,
+    full_message_text: str
+) -> Dict[str, Any]:
+    """
+    Sends daily operational summary to a recipient.
+    Tries approved template 'e3_daily_summary_v1' first (which Meta delivers to any phone outside the 24-hr window).
+    Falls back to direct freeform text message.
+    """
+    clean_to = clean_phone_number(to_phone)
+    if not clean_to:
+        return {"success": False, "error": f"Invalid recipient phone: '{to_phone}'"}
+
+    # 1. Attempt template send
+    try:
+        tpl_res = await send_whatsapp_template(
+            to_phone=clean_to,
+            template_name="e3_daily_summary_v1",
+            parameters=[
+                "Director / Manager",
+                branch_name,
+                date_display,
+                arr_summary,
+                dryers_summary,
+                deliv_summary,
+                fin_summary
+            ],
+            language_code="en"
+        )
+        if tpl_res.get("success"):
+            return tpl_res
+    except Exception as e:
+        logger.warning(f"Template send error, falling back to direct text: {e}")
+
+    # 2. Direct text message fallback
+    return await send_whatsapp_text(to_phone=clean_to, message_text=full_message_text)
+
+

@@ -5687,6 +5687,23 @@ async def dispatch_daily_reports(
             "recipients": recipients
         })
 
+        # Also dispatch compact SMS summary to executives if SMS gateway is configured
+        if os.getenv("FAST2SMS_API_KEY"):
+            active_b_names = [s.get("branch_name") for s in summaries if (s.get("total_arr_weight") or 0) > 0 or (s.get("running_machines") or 0) > 0]
+            active_note = f" ({', '.join(active_b_names)})" if active_b_names else ""
+            sms_text = (
+                f"E3 Agro Daily Summary ({consolidated['date']}):\n"
+                f"Arrivals: {consolidated['total_arr_weight']:,.1f} KG ({consolidated['total_arr_lots']} Lots)\n"
+                f"Dryers: {consolidated['running_machines']} Active{active_note}\n"
+                f"Delivered: {consolidated['deliv_dry_weight']:,.1f} KG\n"
+                f"Billing: Rs. {consolidated['deliv_billed']:,.0f} | Recv: Rs. {consolidated['total_collected']:,.0f}"
+            )
+            for phone in exec_phones:
+                try:
+                    await send_sms(phone, sms_text)
+                except Exception as e:
+                    logger.warning(f"Executive SMS dispatch failed for {phone}: {e}")
+
     return results
 
 @api.get("/reports/daily-whatsapp/settings")

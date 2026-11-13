@@ -33,6 +33,16 @@ type Dash = {
     outsourced_processing_count?: number;
     outsourced_processing_batches_count?: number;
   };
+  period_drying?: {
+    inhouse_weight: number;
+    inhouse_count: number;
+    inhouse_batches_count: number;
+    inhouse_machines_count: number;
+    outsourced_weight: number;
+    outsourced_count: number;
+    outsourced_batches_count: number;
+    outsourced_machines_count: number;
+  };
   period_customers: number;
   period_received_weight: number;
   period_deliveries: number;
@@ -708,18 +718,22 @@ export default function Dashboard() {
                       <MaterialCommunityIcons name="factory" size={13} color="#2E7D32" />
                       <Text style={styles.hubDryingTagTextInhouse}>IN-HOUSE</Text>
                     </View>
-                    <View style={[styles.statusDotMini, { backgroundColor: isInhouseRunning ? "#2E7D32" : "#94A3B8" }]} />
+                    <View style={[styles.statusDotMini, { backgroundColor: (data?.period_drying ? data.period_drying.inhouse_weight > 0 : isInhouseRunning) ? "#2E7D32" : "#94A3B8" }]} />
                   </View>
 
                   <Text style={[styles.hubDryingWeight, { color: "#1B5E20" }]} numberOfLines={1}>
-                    {fmtNum(data?.today_arrival?.inhouse_processing_weight || 0, "", " KG")}
+                    {fmtNum(data?.period_drying ? data.period_drying.inhouse_weight : (data?.today_arrival?.inhouse_processing_weight || 0), "", " KG")}
                   </Text>
                   <Text style={styles.hubDryingSubtitle}>Plant Dryers</Text>
                   <View style={styles.hubDryingBadge}>
                     <Text style={styles.hubDryingBadgeText}>
-                      {data?.today_arrival?.inhouse_processing_batches_count && data.today_arrival.inhouse_processing_batches_count !== data.today_arrival.inhouse_processing_count
-                        ? `${data.today_arrival.inhouse_processing_count} arrivals (${data.today_arrival.inhouse_processing_batches_count} lots)`
-                        : `${data?.today_arrival?.inhouse_processing_count || 0} batches`} • {data?.inhouse_machines_running || 0} dryers
+                      {(() => {
+                        const pd = data?.period_drying;
+                        const count = pd ? pd.inhouse_count : (data?.today_arrival?.inhouse_processing_count || 0);
+                        const lots = pd ? pd.inhouse_batches_count : (data?.today_arrival?.inhouse_processing_batches_count || count);
+                        const dryers = pd ? pd.inhouse_machines_count : (data?.inhouse_machines_running || 0);
+                        return `${lots !== count ? `${count} arrivals (${lots} lots)` : `${count} batches`} • ${dryers} dryers`;
+                      })()}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -735,16 +749,21 @@ export default function Dashboard() {
                       <MaterialCommunityIcons name="truck-delivery-outline" size={13} color="#E65100" />
                       <Text style={styles.hubDryingTagTextOutsource}>OUTSOURCE</Text>
                     </View>
-                    <View style={[styles.statusDotMini, { backgroundColor: isOutsourceRunning ? "#E65100" : "#94A3B8" }]} />
+                    <View style={[styles.statusDotMini, { backgroundColor: (data?.period_drying ? data.period_drying.outsourced_weight > 0 : isOutsourceRunning) ? "#E65100" : "#94A3B8" }]} />
                   </View>
 
                   <Text style={[styles.hubDryingWeight, { color: "#E65100" }]} numberOfLines={1}>
-                    {fmtNum(data?.today_arrival?.outsourced_processing_weight || 0, "", " KG")}
+                    {fmtNum(data?.period_drying ? data.period_drying.outsourced_weight : (data?.today_arrival?.outsourced_processing_weight || 0), "", " KG")}
                   </Text>
                   <Text style={styles.hubDryingSubtitle}>Vendor Contract</Text>
                   <View style={[styles.hubDryingBadge, { backgroundColor: "#FFF3E0" }]}>
                     <Text style={[styles.hubDryingBadgeText, { color: "#E65100" }]}>
-                      {data?.today_arrival?.outsourced_processing_count || 0} batches • {data?.outsourced_machines_running || 0} vendors
+                      {(() => {
+                        const pd = data?.period_drying;
+                        const count = pd ? pd.outsourced_count : (data?.today_arrival?.outsourced_processing_count || 0);
+                        const vendors = pd ? pd.outsourced_machines_count : (data?.outsourced_machines_running || 0);
+                        return `${count} batches • ${vendors} vendors`;
+                      })()}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -803,97 +822,115 @@ export default function Dashboard() {
               </>
             )}
 
-            {/* 4. Currently Processing Sections (In-House vs Outsource Separate Cards) */}
+            {/* 4. Currently Processing Sections (Side-by-Side Professional Cards) */}
             {data?.today_arrival && (
-              <View style={{ marginTop: spacing.md, marginBottom: spacing.md }}>
+              <View style={{ marginTop: spacing.lg, marginBottom: spacing.md }}>
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitleText}>CURRENTLY PROCESSING</Text>
-                  <Text style={styles.sectionDateText}>{activeBranchName}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <MaterialCommunityIcons name="tumble-dryer" size={17} color={colors.primary} />
+                    <Text style={styles.sectionTitleText}>CURRENTLY PROCESSING</Text>
+                  </View>
+                  <View style={styles.branchScopeBadge}>
+                    <Text style={styles.branchScopeText}>{activeBranchName}</Text>
+                  </View>
                 </View>
 
-                {/* Card 1: In-House Dryers Processing */}
-                <TouchableOpacity
-                  onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
-                  style={[
-                    styles.separateLiveCard,
-                    { borderLeftColor: colors.primary, marginBottom: spacing.md },
-                    !isInhouseRunning && styles.liveCardDisabled,
-                  ]}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.liveSeparateHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <View style={[styles.kpiIconWrap, { backgroundColor: "#E8F5E9" }]}>
-                        <MaterialCommunityIcons name="factory" size={20} color={colors.primary} />
+                {/* Side-by-Side Cards Row */}
+                <View style={styles.liveGridRow}>
+                  {/* Card 1: In-House Dryers */}
+                  <TouchableOpacity
+                    onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
+                    style={[
+                      styles.liveSideCard,
+                      { borderColor: isInhouseRunning ? "#A7F3D0" : "#E2E8F0" },
+                      !isInhouseRunning && styles.liveCardDisabled,
+                    ]}
+                    activeOpacity={0.85}
+                  >
+                    {/* Top bar accent */}
+                    <View style={[styles.liveSideAccent, { backgroundColor: isInhouseRunning ? colors.primary : "#94A3B8" }]} />
+                    
+                    <View style={styles.liveSideHeader}>
+                      <View style={[styles.liveSideIconBox, { backgroundColor: "#ECFDF5" }]}>
+                        <MaterialCommunityIcons name="factory" size={16} color={colors.primary} />
                       </View>
-                      <View>
-                        <Text style={[styles.liveSeparateTitle, { color: colors.primary }]}>In-House Dryers</Text>
-                        <Text style={styles.liveSeparateSub}>Internal plant machinery</Text>
+                      <View style={[styles.liveStatusPillMini, isInhouseRunning ? styles.livePillActive : styles.livePillIdle]}>
+                        <View style={[styles.liveStatusDotMini, isInhouseRunning ? styles.liveDotActive : styles.liveDotIdle]} />
+                        <Text style={[styles.liveStatusTextMini, isInhouseRunning ? styles.liveTextActive : styles.liveTextIdle]}>
+                          {isInhouseRunning ? "LIVE" : "IDLE"}
+                        </Text>
                       </View>
                     </View>
-                    <View style={[styles.liveStatusPill, isInhouseRunning ? styles.livePillActive : styles.livePillIdle]}>
-                      <View style={[styles.liveStatusDot, isInhouseRunning ? styles.liveDotActive : styles.liveDotIdle]} />
-                      <Text style={[styles.liveStatusText, isInhouseRunning ? styles.liveTextActive : styles.liveTextIdle]}>
-                        {isInhouseRunning ? "LIVE DRYING" : "IDLE"}
-                      </Text>
-                    </View>
-                  </View>
 
-                  <View style={styles.liveSeparateBody}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.liveSeparateWeight, { color: colors.text }]}>
-                        {fmtNum(data.today_arrival.inhouse_processing_weight ?? 0, "", " KG")}
-                      </Text>
-                      <Text style={styles.liveSeparateSub}>
-                        {data.today_arrival.inhouse_processing_batches_count && data.today_arrival.inhouse_processing_batches_count !== data.today_arrival.inhouse_processing_count
-                          ? `${data.today_arrival.inhouse_processing_count} arrivals (${data.today_arrival.inhouse_processing_batches_count} lots)`
-                          : `${data.today_arrival.inhouse_processing_count ?? 0} batches`} drying • {data.inhouse_machines_running ?? 0} dryers active
-                      </Text>
-                    </View>
-                    <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />
-                  </View>
-                </TouchableOpacity>
+                    <Text style={styles.liveSideTitle} numberOfLines={1}>In-House</Text>
+                    <Text style={styles.liveSideSubtitle} numberOfLines={1}>Plant Dryers</Text>
 
-                {/* Card 2: Outsource Dryers Processing */}
-                <TouchableOpacity
-                  onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
-                  style={[
-                    styles.separateLiveCard,
-                    { borderLeftColor: "#E65100" },
-                    !isOutsourceRunning && styles.liveCardDisabled,
-                  ]}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.liveSeparateHeader}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <View style={[styles.kpiIconWrap, { backgroundColor: "#FFF3E0" }]}>
-                        <MaterialCommunityIcons name="truck-delivery-outline" size={20} color="#E65100" />
-                      </View>
-                      <View>
-                        <Text style={[styles.liveSeparateTitle, { color: "#E65100" }]}>Outsource Dryers</Text>
-                        <Text style={styles.liveSeparateSub}>Vendor contract processing</Text>
-                      </View>
-                    </View>
-                    <View style={[styles.liveStatusPill, isOutsourceRunning ? styles.livePillOutsourceActive : styles.livePillIdle]}>
-                      <View style={[styles.liveStatusDot, isOutsourceRunning ? styles.liveDotOutsourceActive : styles.liveDotIdle]} />
-                      <Text style={[styles.liveStatusText, isOutsourceRunning ? styles.liveTextOutsourceActive : styles.liveTextIdle]}>
-                        {isOutsourceRunning ? "LIVE DRYING" : "IDLE"}
-                      </Text>
-                    </View>
-                  </View>
+                    <Text style={[styles.liveSideWeight, { color: colors.primary }]} numberOfLines={1}>
+                      {fmtNum(data.today_arrival.inhouse_processing_weight ?? 0, "", " KG")}
+                    </Text>
 
-                  <View style={styles.liveSeparateBody}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.liveSeparateWeight, { color: "#E65100" }]}>
-                        {fmtNum(data.today_arrival.outsourced_processing_weight ?? 0, "", " KG")}
-                      </Text>
-                      <Text style={styles.liveSeparateSub}>
-                        {data.today_arrival.outsourced_processing_count ?? 0} batches drying • {data.outsourced_machines_running ?? 0} vendors active
-                      </Text>
+                    <View style={styles.liveSideFooter}>
+                      <View style={[styles.liveSideBadge, { backgroundColor: "#ECFDF5" }]}>
+                        <Text style={[styles.liveSideBadgeText, { color: colors.primary }]}>
+                          {data.inhouse_machines_running ?? 0} active
+                        </Text>
+                      </View>
+                      <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
                     </View>
-                    <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textLight} />
-                  </View>
-                </TouchableOpacity>
+
+                    <Text style={styles.liveSideLotsText} numberOfLines={1}>
+                      {data.today_arrival.inhouse_processing_batches_count && data.today_arrival.inhouse_processing_batches_count !== data.today_arrival.inhouse_processing_count
+                        ? `${data.today_arrival.inhouse_processing_count} arr (${data.today_arrival.inhouse_processing_batches_count} lots)`
+                        : `${data.today_arrival.inhouse_processing_count ?? 0} batches drying`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Card 2: Outsource Dryers */}
+                  <TouchableOpacity
+                    onPress={() => router.push({ pathname: "/batches", params: { status: "Drying" } })}
+                    style={[
+                      styles.liveSideCard,
+                      { borderColor: isOutsourceRunning ? "#FED7AA" : "#E2E8F0" },
+                      !isOutsourceRunning && styles.liveCardDisabled,
+                    ]}
+                    activeOpacity={0.85}
+                  >
+                    {/* Top bar accent */}
+                    <View style={[styles.liveSideAccent, { backgroundColor: isOutsourceRunning ? "#EA580C" : "#94A3B8" }]} />
+
+                    <View style={styles.liveSideHeader}>
+                      <View style={[styles.liveSideIconBox, { backgroundColor: "#FFF7ED" }]}>
+                        <MaterialCommunityIcons name="truck-delivery-outline" size={16} color="#EA580C" />
+                      </View>
+                      <View style={[styles.liveStatusPillMini, isOutsourceRunning ? styles.livePillOutsourceActive : styles.livePillIdle]}>
+                        <View style={[styles.liveStatusDotMini, isOutsourceRunning ? styles.liveDotOutsourceActive : styles.liveDotIdle]} />
+                        <Text style={[styles.liveStatusTextMini, isOutsourceRunning ? styles.liveTextOutsourceActive : styles.liveTextIdle]}>
+                          {isOutsourceRunning ? "LIVE" : "IDLE"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.liveSideTitle} numberOfLines={1}>Outsource</Text>
+                    <Text style={styles.liveSideSubtitle} numberOfLines={1}>Vendor Contract</Text>
+
+                    <Text style={[styles.liveSideWeight, { color: "#EA580C" }]} numberOfLines={1}>
+                      {fmtNum(data.today_arrival.outsourced_processing_weight ?? 0, "", " KG")}
+                    </Text>
+
+                    <View style={styles.liveSideFooter}>
+                      <View style={[styles.liveSideBadge, { backgroundColor: "#FFF7ED" }]}>
+                        <Text style={[styles.liveSideBadgeText, { color: "#EA580C" }]}>
+                          {data.outsourced_machines_running ?? 0} active
+                        </Text>
+                      </View>
+                      <MaterialCommunityIcons name="chevron-right" size={16} color={colors.textLight} />
+                    </View>
+
+                    <Text style={styles.liveSideLotsText} numberOfLines={1}>
+                      {data.today_arrival.outsourced_processing_count ?? 0} batches drying
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
@@ -2767,6 +2804,110 @@ const styles = StyleSheet.create({
   },
 
   /* Professional Live Processing Separate Cards */
+  branchScopeBadge: {
+    backgroundColor: "#F1F5F9",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  branchScopeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+  },
+  liveGridRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginHorizontal: spacing.xl,
+  },
+  liveSideCard: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 13,
+    borderWidth: 1.5,
+    overflow: "hidden",
+    position: "relative",
+    ...shadow.card,
+  },
+  liveSideAccent: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3.5,
+  },
+  liveSideHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    marginTop: 2,
+  },
+  liveSideIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveSideTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+    letterSpacing: -0.2,
+  },
+  liveSideSubtitle: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: colors.textMuted,
+    marginBottom: 6,
+  },
+  liveSideWeight: {
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+    marginBottom: 8,
+  },
+  liveSideFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 3,
+  },
+  liveSideBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2.5,
+    borderRadius: 6,
+  },
+  liveSideBadgeText: {
+    fontSize: 9.5,
+    fontWeight: "700",
+  },
+  liveSideLotsText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  liveStatusPillMini: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: radius.pill,
+  },
+  liveStatusDotMini: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  liveStatusTextMini: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
   separateLiveCard: {
     marginHorizontal: spacing.xl,
     backgroundColor: colors.card,

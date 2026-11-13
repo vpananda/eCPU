@@ -4194,6 +4194,14 @@ async def dashboard(
             COALESCE(COUNT(DISTINCT CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS outsourced_processing_count,
             COALESCE(SUM(CASE WHEN b.status IN ('Loaded', 'Drying', 'Completed') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS outsourced_processing_batches_count,
             COALESCE(SUM(CASE WHEN b.status = 'Completed' THEN 1 ELSE 0 END), 0) AS drying_completed_count,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN b.raw_weight ELSE 0 END), 0) AS period_inhouse_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS period_inhouse_count,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) THEN 1 ELSE 0 END), 0) AS period_inhouse_batches_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND (m.is_outsourced IS FALSE OR m.is_outsourced IS NULL) AND b.machine_id IS NOT NULL THEN b.machine_id ELSE NULL END), 0) AS period_inhouse_machines_count,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND m.is_outsourced IS TRUE THEN b.raw_weight ELSE 0 END), 0) AS period_outsourced_weight,
+            COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND m.is_outsourced IS TRUE THEN COALESCE(b.parent_batch_id, b.id) ELSE NULL END), 0) AS period_outsourced_count,
+            COALESCE(SUM(CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND m.is_outsourced IS TRUE THEN 1 ELSE 0 END), 0) AS period_outsourced_batches_count,
+            COALESCE(COUNT(DISTINCT CASE WHEN (COALESCE(b.arrival_date::date, b.created_at::date) >= %s::date AND COALESCE(b.arrival_date::date, b.created_at::date) < %s::date) AND b.status IN ('Loaded', 'Drying', 'Completed', 'Delivered') AND m.is_outsourced IS TRUE AND b.machine_id IS NOT NULL THEN b.machine_id ELSE NULL END), 0) AS period_outsourced_machines_count,
             COALESCE(SUM(b.balance_amount), 0) AS pending_payments,
             COALESCE(SUM(CASE WHEN b.balance_amount > 0 THEN 1 ELSE 0 END), 0) AS pending_payments_count
         FROM public.batches b
@@ -4210,7 +4218,15 @@ async def dashboard(
         ts_date, te_date,
         ts_date, te_date,
         ts_date, te_date,
-        ts_date, te_date
+        ts_date, te_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
+        s_date, e_date,
     ] + batch_params
 
     # Direct SQL sum on payments
@@ -4339,7 +4355,17 @@ async def dashboard(
     inhouse_machines_running = sum(1 for m in machines if m["status"] == "Running" and not m.get("is_outsourced"))
     outsourced_machines_running = sum(1 for m in machines if m["status"] == "Running" and m.get("is_outsourced"))
 
-    return {
+    period_inhouse_weight = round(float(batch_stats.get("period_inhouse_weight") or 0), 2)
+    period_inhouse_count = int(batch_stats.get("period_inhouse_count") or 0)
+    period_inhouse_batches_count = int(batch_stats.get("period_inhouse_batches_count") or 0)
+    period_inhouse_machines_count = int(batch_stats.get("period_inhouse_machines_count") or 0)
+
+    period_outsourced_weight = round(float(batch_stats.get("period_outsourced_weight") or 0), 2)
+    period_outsourced_count = int(batch_stats.get("period_outsourced_count") or 0)
+    period_outsourced_batches_count = int(batch_stats.get("period_outsourced_batches_count") or 0)
+    period_outsourced_machines_count = int(batch_stats.get("period_outsourced_machines_count") or 0)
+
+    res = {
         "range": {"start": pstart[:10], "end": (datetime.fromisoformat(pend) - timedelta(days=1)).isoformat()[:10]},
         "today_arrival": {
             "in_weight": today_in_weight, "in_count": today_in_count,
@@ -4353,6 +4379,16 @@ async def dashboard(
             "outsourced_processing_weight": outsourced_processing_weight,
             "outsourced_processing_count": outsourced_processing_count,
             "outsourced_processing_batches_count": outsourced_processing_batches_count,
+        },
+        "period_drying": {
+            "inhouse_weight": period_inhouse_weight,
+            "inhouse_count": period_inhouse_count,
+            "inhouse_batches_count": period_inhouse_batches_count,
+            "inhouse_machines_count": period_inhouse_machines_count,
+            "outsourced_weight": period_outsourced_weight,
+            "outsourced_count": period_outsourced_count,
+            "outsourced_batches_count": period_outsourced_batches_count,
+            "outsourced_machines_count": period_outsourced_machines_count,
         },
         "period_customers": period_customers,
         "period_received_weight": period_received_weight,

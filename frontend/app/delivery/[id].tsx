@@ -181,7 +181,7 @@ export default function DeliveryScreen() {
 
   const weightLoss = dryNum > 0 ? Math.max(0, arrivalWeight - dryNum) : 0;
   const lossPct = arrivalWeight > 0 && dryNum > 0 ? ((weightLoss / arrivalWeight) * 100).toFixed(1) : "0.0";
-  const yieldPct = arrivalWeight > 0 && dryNum > 0 ? ((dryNum / arrivalWeight) * 100).toFixed(1) : "0.0";
+  const ratio = arrivalWeight > 0 && dryNum > 0 ? (arrivalWeight / dryNum).toFixed(1) : "0.0";
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
@@ -385,7 +385,7 @@ export default function DeliveryScreen() {
             <View style={styles.lossPill}>
               <MaterialCommunityIcons name="scale-balance" size={14} color={colors.warning} />
               <Text style={styles.lossText}>
-                Weight loss: {weightLoss.toFixed(2)} kg ({lossPct}%) • Yield: {yieldPct}%
+                Weight loss: {weightLoss.toFixed(2)} kg ({lossPct}%) • Wet to Dry Ratio: {ratio}
               </Text>
             </View>
           )}

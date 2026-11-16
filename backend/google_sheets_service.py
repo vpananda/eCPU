@@ -34,7 +34,7 @@ TAB_HEADERS = {
         "Status",
         "Loaded Wet Weight (KG)",
         "Unloaded Dry Weight (KG)",
-        "Recovery %",
+        "Wet to Dry Ratio",
         "Processing Started",
         "Processing Ended",
         "Total Hours"
@@ -226,7 +226,7 @@ async def sync_drying_batch_to_sheets(batch: dict, branch_name: str = "", custom
     
     raw_wt = float(batch.get("raw_weight") or 0)
     dry_wt = float(batch.get("actual_dry_weight") or 0)
-    rec_pct = f"{(dry_wt / raw_wt * 100):.1f}%" if raw_wt > 0 and dry_wt > 0 else ""
+    ratio_str = f"{(raw_wt / dry_wt):.1f}" if raw_wt > 0 and dry_wt > 0 else ""
     
     st_time = str(batch.get("processing_started_at") or "")[:16]
     end_time = str(batch.get("processing_ended_at") or "")[:16]
@@ -241,7 +241,7 @@ async def sync_drying_batch_to_sheets(batch: dict, branch_name: str = "", custom
         batch.get("status") or "Drying",
         raw_wt,
         dry_wt if dry_wt > 0 else "",
-        rec_pct,
+        ratio_str,
         st_time,
         end_time,
         batch.get("drying_hours") or ""
@@ -407,7 +407,7 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
         # Drying row (if processed or loaded)
         raw_wt = float(b.get("raw_weight") or 0)
         dry_wt = float(b.get("actual_dry_weight") or 0)
-        rec_pct = f"{(dry_wt / raw_wt * 100):.1f}%" if raw_wt > 0 and dry_wt > 0 else ""
+        ratio_str = f"{(raw_wt / dry_wt):.1f}" if raw_wt > 0 and dry_wt > 0 else ""
         if b.get("status") in ("Loaded", "Drying", "Completed", "Delivered") or dry_wt > 0 or m_name:
             dry_rows.append([
                 b.get("batch_no") or "",
@@ -419,7 +419,7 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
                 b.get("status") or "Drying",
                 raw_wt,
                 dry_wt if dry_wt > 0 else "",
-                rec_pct,
+                ratio_str,
                 str(b.get("processing_started_at") or "")[:16],
                 str(b.get("processing_ended_at") or "")[:16],
                 b.get("drying_hours") or ""

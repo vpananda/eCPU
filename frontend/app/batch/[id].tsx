@@ -502,7 +502,7 @@ export default function BatchDetail() {
                 const dry = parseFloat(compDryWeight || "0");
                 const loss = Math.max(0, wet - dry);
                 const lossPct = wet > 0 ? ((loss / wet) * 100).toFixed(1) : "0.0";
-                const yieldPct = wet > 0 ? ((dry / wet) * 100).toFixed(1) : "0.0";
+                const ratio = dry > 0 ? (wet / dry).toFixed(1) : "0.0";
                 const padiVal = parseFloat(compPadiWeight || "0");
                 return (
                   <View style={styles.completeCalcBox}>
@@ -523,8 +523,8 @@ export default function BatchDetail() {
                       </Text>
                     </View>
                     <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                      <Text style={styles.completeCalcLabel}>Dry Yield:</Text>
-                      <Text style={[styles.completeCalcVal, { color: "#2E7D32" }]}>{yieldPct}%</Text>
+                      <Text style={styles.completeCalcLabel}>Wet to Dry Ratio:</Text>
+                      <Text style={[styles.completeCalcVal, { color: "#2E7D32" }]}>{ratio}</Text>
                     </View>
                   </View>
                 );

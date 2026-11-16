@@ -565,7 +565,7 @@ export default function ArrivalsScreen() {
                 <Text style={styles.completedBadgeTitle}>Processing Completed ✓</Text>
                 <Text style={styles.completedBadgeSub}>
                   Dry: {r.actual_dry_weight} kg • Wet: {r.raw_weight} kg
-                  {r.raw_weight && r.actual_dry_weight ? ` (Yield: ${((Number(r.actual_dry_weight) / Number(r.raw_weight)) * 100).toFixed(1)}%)` : ""}
+                  {r.raw_weight && r.actual_dry_weight ? ` (Ratio: ${(Number(r.raw_weight) / Number(r.actual_dry_weight)).toFixed(1)})` : ""}
                 </Text>
               </View>
             </View>
@@ -898,7 +898,7 @@ export default function ArrivalsScreen() {
                 const dry = parseFloat(compDryWeight || "0");
                 const loss = Math.max(0, wet - dry);
                 const lossPct = wet > 0 ? ((loss / wet) * 100).toFixed(1) : "0.0";
-                const yieldPct = wet > 0 ? ((dry / wet) * 100).toFixed(1) : "0.0";
+                const ratio = dry > 0 ? (wet / dry).toFixed(1) : "0.0";
                 const padiVal = parseFloat(compPadiWeight || "0");
                 return (
                   <View style={styles.calcSummaryBox}>
@@ -919,8 +919,8 @@ export default function ArrivalsScreen() {
                       </Text>
                     </View>
                     <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                      <Text style={styles.calcLabel}>Dry Yield:</Text>
-                      <Text style={[styles.calcVal, { color: "#2E7D32" }]}>{yieldPct}%</Text>
+                      <Text style={styles.calcLabel}>Wet to Dry Ratio:</Text>
+                      <Text style={[styles.calcVal, { color: "#2E7D32" }]}>{ratio}</Text>
                     </View>
                   </View>
                 );

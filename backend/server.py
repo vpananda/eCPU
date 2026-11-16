@@ -5,7 +5,7 @@ import asyncio
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Security
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Security, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -5942,6 +5942,43 @@ async def get_google_sheets_status(user: dict = Depends(require_roles("Admin")))
 @api.post("/admin/google-sheets/sync-all")
 async def sync_all_google_sheets(user: dict = Depends(require_roles("Admin"))):
     return await bulk_sync_all_database_to_sheets(db)
+
+
+@api.post("/admin/google-sheets/backfill")
+async def backfill_google_sheets(req: Request):
+    auth_header = req.headers.get("x-sync-key") or ""
+    if not auth_header or auth_header != JWT_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    body = await req.json()
+    service_account_info = body.get("service_account_json")
+    sheet_id = body.get("sheet_id") or os.getenv("GOOGLE_SHEET_ID")
+    return await bulk_sync_all_database_to_sheets(db, service_account_info=service_account_info, sheet_id=sheet_id)
+
+
+@api.get("/admin/google-sheets/export-all")
+async def export_all_database_records(req: Request):
+    auth_header = req.headers.get("x-sync-key") or ""
+    if not auth_header or auth_header != JWT_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    branches = await db.branches.find({}, {"_id": 0}).to_list(200)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    products = await db.products.find({}, {"_id": 0}).to_list(200)
+    machines = await db.machines.find({}, {"_id": 0}).to_list(200)
+    batches = await db.batches.find({}, {"_id": 0}).to_list(20000)
+    payments = await db.payments.find({}, {"_id": 0}).to_list(20000)
+    expenses = await db.expenses.find({}, {"_id": 0}).to_list(20000)
+    
+    return clean({
+        "branches": branches,
+        "customers": customers,
+        "products": products,
+        "machines": machines,
+        "batches": batches,
+        "payments": payments,
+        "expenses": expenses,
+    })
 
 
 @api.get("/")

@@ -99,23 +99,27 @@ def find_credentials_file() -> Optional[str]:
     return None
 
 
-def get_sheets_client() -> Optional[gspread.Spreadsheet]:
+def get_sheets_client(service_account_info: Optional[Dict[str, Any]] = None, sheet_id: Optional[str] = None) -> Optional[gspread.Spreadsheet]:
     """Get authenticated gspread Spreadsheet instance."""
-    sheet_id = os.getenv("GOOGLE_SHEET_ID", "").strip()
-    if not sheet_id:
-        logger.debug("GOOGLE_SHEET_ID not set in .env")
-        return None
-
-    creds_path = find_credentials_file()
-    if not creds_path:
-        logger.debug("Google service account credentials JSON not found in backend")
+    target_sheet_id = (sheet_id or os.getenv("GOOGLE_SHEET_ID", "")).strip()
+    if not target_sheet_id:
+        logger.debug("GOOGLE_SHEET_ID not set")
         return None
 
     try:
+        if service_account_info:
+            gc = gspread.service_account_from_dict(service_account_info)
+            return gc.open_by_key(target_sheet_id)
+
+        creds_path = find_credentials_file()
+        if not creds_path:
+            logger.debug("Google service account credentials JSON not found in backend")
+            return None
+
         gc = gspread.service_account(filename=creds_path)
-        return gc.open_by_key(sheet_id)
+        return gc.open_by_key(target_sheet_id)
     except Exception as e:
-        logger.error(f"Failed to connect to Google Sheet {sheet_id}: {e}")
+        logger.error(f"Failed to connect to Google Sheet {target_sheet_id}: {e}")
         return None
 
 
@@ -298,12 +302,12 @@ async def sync_expense_to_sheets(expense: dict, branch_name: str = "", recorder_
 
 # ---------------------------- FULL BULK BACKFILL ----------------------------
 
-async def bulk_sync_all_database_to_sheets(db) -> Dict[str, Any]:
+async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Dict[str, Any]] = None, sheet_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Export all existing records from Supabase/Postgres database
     directly into Google Sheets tabs (Arrivals, Drying, Deliveries, Payments, Expenses).
     """
-    sh = get_sheets_client()
+    sh = get_sheets_client(service_account_info=service_account_info, sheet_id=sheet_id)
     if not sh:
         return {"success": False, "error": "Could not connect to Google Sheets with configured credentials."}
 
@@ -474,3 +478,4 @@ async def bulk_sync_all_database_to_sheets(db) -> Dict[str, Any]:
 
     logger.info(f"Bulk sync complete to Google Sheet: {counts}")
     return {"success": True, "sheet_title": sh.title, "counts": counts}
+

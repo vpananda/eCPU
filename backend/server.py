@@ -42,6 +42,7 @@ from google_sheets_service import (
     sync_delivery_to_sheets,
     sync_payment_to_sheets,
     sync_expense_to_sheets,
+    sync_customer_to_sheets,
     bulk_sync_all_database_to_sheets,
 )
 
@@ -2407,6 +2408,19 @@ async def create_customer(body: CustomerIn, user: dict = Depends(get_current_use
     })
     await db.customers.insert_one(dict(c))
     await audit("create", "customer", c["id"], user, None, {"name": c["name"], "code": c["code"]})
+
+    # Auto-sync customer to Google Sheets
+    try:
+        br = await db.branches.find_one({"id": target_branch_id}, {"_id": 0})
+        asyncio.create_task(
+            sync_customer_to_sheets(
+                customer=c,
+                branch_name=br.get("name", "") if br else ""
+            )
+        )
+    except Exception as ex:
+        logger.warning(f"Failed to queue Google Sheets customer sync: {ex}")
+
     return clean(c)
 
 

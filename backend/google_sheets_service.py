@@ -79,6 +79,23 @@ TAB_HEADERS = {
         "Receipt / Ref",
         "Recorded By",
         "Created At"
+    ],
+    "Customers": [
+        "Customer Code",
+        "Customer Name",
+        "Mobile",
+        "Alt Mobile",
+        "Branch",
+        "Village",
+        "Taluk",
+        "District",
+        "Total Arrivals",
+        "Total Billed (₹)",
+        "Total Paid (₹)",
+        "Balance Due (₹)",
+        "WhatsApp Alerts",
+        "Registered Date",
+        "Remarks"
     ]
 }
 
@@ -300,6 +317,29 @@ async def sync_expense_to_sheets(expense: dict, branch_name: str = "", recorder_
     return await append_row_async("Expenses", row)
 
 
+async def sync_customer_to_sheets(customer: dict, branch_name: str = ""):
+    """Sync new customer to Google Sheets Customers tab."""
+    c_date = str(customer.get("created_at") or "")[:10]
+    row = [
+        customer.get("code") or "",
+        customer.get("name") or "",
+        customer.get("mobile") or "",
+        customer.get("alt_mobile") or "",
+        branch_name or customer.get("branch_name") or "",
+        customer.get("village") or "",
+        customer.get("taluk") or "",
+        customer.get("district") or "",
+        customer.get("total_arrivals") or 0,
+        customer.get("total_amount") or 0,
+        customer.get("amount_received") or 0,
+        (customer.get("total_amount") or 0) - (customer.get("amount_received") or 0),
+        "Yes" if customer.get("whatsapp_enabled") else "No",
+        c_date,
+        customer.get("remarks") or ""
+    ]
+    return await append_row_async("Customers", row)
+
+
 # ---------------------------- FULL BULK BACKFILL ----------------------------
 
 async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Dict[str, Any]] = None, sheet_id: Optional[str] = None) -> Dict[str, Any]:
@@ -475,6 +515,39 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
     if exp_rows:
         ws_exp.append_rows(exp_rows, value_input_option="USER_ENTERED")
         counts["expenses"] = len(exp_rows)
+
+    # 4. Backfill Customers
+    cust_rows = []
+    for c in customers_raw:
+        c_bid = c.get("branch_id")
+        b_name = branch_map.get(c_bid, "Main")
+        c_date = str(c.get("created_at") or "")[:10]
+        tot_arr = c.get("total_arrivals") or 0
+        tot_bill = c.get("total_amount") or 0
+        tot_paid = c.get("amount_received") or 0
+        bal = tot_bill - tot_paid
+        cust_rows.append([
+            c.get("code") or "",
+            c.get("name") or "",
+            c.get("mobile") or "",
+            c.get("alt_mobile") or "",
+            b_name,
+            c.get("village") or "",
+            c.get("taluk") or "",
+            c.get("district") or "",
+            tot_arr,
+            tot_bill,
+            tot_paid,
+            bal,
+            "Yes" if c.get("whatsapp_enabled") else "No",
+            c_date,
+            c.get("remarks") or ""
+        ])
+
+    ws_cust = ensure_worksheet(sh, "Customers", TAB_HEADERS["Customers"])
+    if cust_rows:
+        ws_cust.append_rows(cust_rows, value_input_option="USER_ENTERED")
+        counts["customers"] = len(cust_rows)
 
     logger.info(f"Bulk sync complete to Google Sheet: {counts}")
     return {"success": True, "sheet_title": sh.title, "counts": counts}

@@ -88,3 +88,6 @@ credentials.json
 *.key
 .credentials
 *.apk
+
+*e3-agro*.json
+*service_account*.json

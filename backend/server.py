@@ -36,6 +36,14 @@ from whatsapp_service import (
     get_config,
 )
 from sms_service import send_sms, check_sms_wallet
+from google_sheets_service import (
+    sync_arrival_to_sheets,
+    sync_drying_batch_to_sheets,
+    sync_delivery_to_sheets,
+    sync_payment_to_sheets,
+    sync_expense_to_sheets,
+    bulk_sync_all_database_to_sheets,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -2752,6 +2760,19 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Failed to queue WhatsApp arrival: {e}")
 
+    # Auto-sync new arrival to Google Sheets in background
+    try:
+        asyncio.create_task(
+            sync_arrival_to_sheets(
+                batch=b,
+                branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                customer=cust,
+                product_name=prod.get("name", "Cardamom") if prod else "Cardamom"
+            )
+        )
+    except Exception as ex:
+        logger.warning(f"Failed to queue Google Sheets arrival sync: {ex}")
+
     return clean(await clean_batch(b))
 
 
@@ -2913,6 +2934,19 @@ async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)
     except Exception as e:
         logger.error(f"Failed to queue WhatsApp arrival: {e}")
 
+    # Auto-sync new arrival to Google Sheets in background
+    try:
+        asyncio.create_task(
+            sync_arrival_to_sheets(
+                batch=b,
+                branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                customer=cust,
+                product_name=prod.get("name", "Cardamom") if prod else "Cardamom"
+            )
+        )
+    except Exception as ex:
+        logger.warning(f"Failed to queue Google Sheets arrival sync: {ex}")
+
     return clean(await clean_batch(b))
 
 
@@ -3009,6 +3043,22 @@ async def update_batch_status(bid: str, body: BatchStatusUpdate,
                 logger.info(f"Queued WhatsApp drying completed alert for {cust.get('name')} ({phone})")
         except Exception as e:
             logger.error(f"Failed to queue WhatsApp drying completed: {e}")
+
+        # Auto-sync drying completion to Google Sheets
+        try:
+            b_full = dict(b)
+            b_full.update(upd)
+            mach = await db.machines.find_one({"id": b_full.get("machine_id")}, {"_id": 0})
+            asyncio.create_task(
+                sync_drying_batch_to_sheets(
+                    batch=b_full,
+                    branch_name=br.get("name", "") if br else "",
+                    customer=cust,
+                    machine_name=mach.get("name", "") if mach else ""
+                )
+            )
+        except Exception as ex:
+            logger.warning(f"Failed to queue Google Sheets drying sync: {ex}")
 
     return {"ok": True}
 
@@ -3185,6 +3235,23 @@ async def deliver_batch(bid: str, body: DeliveryIn,
             logger.info(f"Queued WhatsApp delivery statement for {cust.get('name')} ({phone})")
     except Exception as e:
         logger.error(f"Failed to queue WhatsApp delivery statement: {e}")
+
+    # Auto-sync delivery to Google Sheets
+    try:
+        b_sync = dict(b)
+        b_sync["actual_dry_weight"] = combined_delivered_weight
+        b_sync["delivered_to"] = delivered_to
+        b_sync["bill_amount"] = combined_bill
+        b_sync["balance_amount"] = combined_balance
+        asyncio.create_task(
+            sync_delivery_to_sheets(
+                batch=b_sync,
+                branch_name=branch_name,
+                customer=cust
+            )
+        )
+    except Exception as ex:
+        logger.warning(f"Failed to queue Google Sheets delivery sync: {ex}")
 
     fast_cache.clear()
     return {"ok": True, "weight_loss": weight_loss, "bill_amount": totals["bill_amount"], "balance_amount": totals["balance_amount"]}
@@ -3591,6 +3658,22 @@ async def add_payment(body: PaymentIn, user: dict = Depends(get_current_user)):
         except Exception as e:
             logger.error(f"Failed to queue WhatsApp payment: {e}")
 
+        # Auto-sync payment to Google Sheets in background
+        try:
+            p_sync = dict(first_p) if first_p else {}
+            p_sync["amount"] = body.amount
+            p_sync["receipt_no"] = (first_p or {}).get("id", "")[:8].upper()
+            asyncio.create_task(
+                sync_payment_to_sheets(
+                    payment=p_sync,
+                    branch_name=branch_name,
+                    customer=cust,
+                    recorder_name=user.get("name", "")
+                )
+            )
+        except Exception as ex:
+            logger.warning(f"Failed to queue Google Sheets payment sync: {ex}")
+
         return clean(first_p)
 
 
@@ -3808,6 +3891,20 @@ async def add_expense(body: ExpenseIn, user: dict = Depends(get_current_user)):
     })
     await db.expenses.insert_one(dict(e))
     await audit("create", "expense", e["id"], user, None, {"category": e["category"], "amount": e["amount"]})
+
+    # Auto-sync expense to Google Sheets in background
+    try:
+        br = await db.branches.find_one({"id": e.get("branch_id")}, {"_id": 0})
+        asyncio.create_task(
+            sync_expense_to_sheets(
+                expense=e,
+                branch_name=br.get("name", "") if br else "",
+                recorder_name=user.get("name", "")
+            )
+        )
+    except Exception as ex:
+        logger.warning(f"Failed to queue Google Sheets expense sync: {ex}")
+
     return clean(e)
 
 
@@ -5826,6 +5923,25 @@ async def get_sms_wallet(user: dict = Depends(require_roles("Admin"))):
 @api.post("/sms/send")
 async def send_custom_sms(body: SendSmsReq, user: dict = Depends(require_roles("Admin"))):
     return await send_sms(body.phone, body.message)
+
+
+@api.get("/admin/google-sheets/status")
+async def get_google_sheets_status(user: dict = Depends(require_roles("Admin"))):
+    from google_sheets_service import get_sheets_client
+    sh = get_sheets_client()
+    if not sh:
+        return {"connected": False, "error": "Could not connect to Google Sheet with configured credentials"}
+    return {
+        "connected": True,
+        "title": sh.title,
+        "sheet_id": sh.id,
+        "tabs": [ws.title for ws in sh.worksheets()]
+    }
+
+
+@api.post("/admin/google-sheets/sync-all")
+async def sync_all_google_sheets(user: dict = Depends(require_roles("Admin"))):
+    return await bulk_sync_all_database_to_sheets(db)
 
 
 @api.get("/")

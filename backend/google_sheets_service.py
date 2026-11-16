@@ -1,0 +1,476 @@
+import os
+import glob
+import logging
+from typing import Dict, Any, List, Optional
+import gspread
+
+logger = logging.getLogger("ethree.sheets")
+
+TAB_HEADERS = {
+    "Arrivals": [
+        "Arrival Date",
+        "Time",
+        "Branch",
+        "Batch No",
+        "Receipt No",
+        "Customer Name",
+        "Customer Code",
+        "Mobile",
+        "Spice / Produce",
+        "Wet Weight (KG)",
+        "Bags",
+        "Rate / KG (₹)",
+        "Status",
+        "Received From",
+        "Created At"
+    ],
+    "Drying Batches": [
+        "Batch No",
+        "Branch",
+        "Customer Name",
+        "Customer Code",
+        "Spice",
+        "Machine / Dryer",
+        "Status",
+        "Loaded Wet Weight (KG)",
+        "Unloaded Dry Weight (KG)",
+        "Recovery %",
+        "Processing Started",
+        "Processing Ended",
+        "Total Hours"
+    ],
+    "Deliveries": [
+        "Delivery Date",
+        "Branch",
+        "Batch No",
+        "Customer Name",
+        "Customer Code",
+        "Mobile",
+        "Spice",
+        "Delivered Dry Weight (KG)",
+        "Delivered To",
+        "Bill Amount (₹)",
+        "Total Paid (₹)",
+        "Balance Due (₹)",
+        "Status"
+    ],
+    "Payments": [
+        "Payment Date",
+        "Branch",
+        "Receipt / Ref No",
+        "Customer Name",
+        "Customer Code",
+        "Mobile",
+        "Amount Paid (₹)",
+        "Payment Mode",
+        "Batch Ref",
+        "Remarks",
+        "Recorded By",
+        "Created At"
+    ],
+    "Expenses": [
+        "Expense Date",
+        "Branch",
+        "Category",
+        "Description",
+        "Amount (₹)",
+        "Paid To",
+        "Payment Mode",
+        "Receipt / Ref",
+        "Recorded By",
+        "Created At"
+    ]
+}
+
+
+def find_credentials_file() -> Optional[str]:
+    """Find service account json in backend root."""
+    explicit = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    if explicit and os.path.exists(explicit):
+        return explicit
+    
+    # Search common patterns in backend directory
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = glob.glob(os.path.join(backend_dir, "*e3-agro*.json")) + \
+                 glob.glob(os.path.join(backend_dir, "*service_account*.json")) + \
+                 glob.glob(os.path.join(backend_dir, "google_credentials.json"))
+    if candidates:
+        return candidates[0]
+    return None
+
+
+def get_sheets_client() -> Optional[gspread.Spreadsheet]:
+    """Get authenticated gspread Spreadsheet instance."""
+    sheet_id = os.getenv("GOOGLE_SHEET_ID", "").strip()
+    if not sheet_id:
+        logger.debug("GOOGLE_SHEET_ID not set in .env")
+        return None
+
+    creds_path = find_credentials_file()
+    if not creds_path:
+        logger.debug("Google service account credentials JSON not found in backend")
+        return None
+
+    try:
+        gc = gspread.service_account(filename=creds_path)
+        return gc.open_by_key(sheet_id)
+    except Exception as e:
+        logger.error(f"Failed to connect to Google Sheet {sheet_id}: {e}")
+        return None
+
+
+def ensure_worksheet(sh: gspread.Spreadsheet, title: str, headers: List[str]) -> gspread.Worksheet:
+    """Ensure worksheet exists with properly formatted headers."""
+    try:
+        ws = sh.worksheet(title)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=title, rows=1000, cols=len(headers) + 2)
+        # Delete default 'Sheet1' if it exists and is empty
+        try:
+            default_ws = sh.worksheet("Sheet1")
+            if default_ws.row_count <= 100 and default_ws.get_all_values() == []:
+                sh.del_worksheet(default_ws)
+        except Exception:
+            pass
+
+    # Ensure header row
+    existing_headers = ws.row_values(1)
+    if not existing_headers:
+        ws.append_row(headers)
+        # Format top row bold
+        try:
+            ws.format("A1:Z1", {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.9, "green": 0.95, "blue": 0.9}
+            })
+            ws.freeze(rows=1)
+        except Exception:
+            pass
+    return ws
+
+
+async def append_row_async(tab_name: str, row_values: List[Any]) -> bool:
+    """Append row into specific tab in background."""
+    try:
+        sh = get_sheets_client()
+        if not sh:
+            return False
+        headers = TAB_HEADERS.get(tab_name, [])
+        ws = ensure_worksheet(sh, tab_name, headers)
+        # Clean values for JSON serializability
+        clean_row = ["" if v is None else str(v) for v in row_values]
+        ws.append_row(clean_row, value_input_option="USER_ENTERED")
+        logger.info(f"Appended row to Google Sheet tab '{tab_name}': {clean_row[:3]}")
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to append to Google Sheet tab '{tab_name}': {ex}")
+        return False
+
+
+# ---------------------------- SPECIALIZED SYNC HELPERS ----------------------------
+
+async def sync_arrival_to_sheets(batch: dict, branch_name: str = "", customer: dict = None, product_name: str = ""):
+    """Sync an arrival batch record to Google Sheets."""
+    c_name = (customer or {}).get("name") or batch.get("customer_name") or ""
+    c_code = (customer or {}).get("code") or batch.get("customer_code") or ""
+    c_mob = (customer or {}).get("mobile") or batch.get("customer_mobile") or ""
+    
+    arr_date = str(batch.get("arrival_date") or batch.get("created_at") or "")[:10]
+    arr_time = str(batch.get("arrival_date") or batch.get("created_at") or "")[11:16]
+    
+    row = [
+        arr_date,
+        arr_time,
+        branch_name or batch.get("branch_name") or "",
+        batch.get("batch_no") or "",
+        batch.get("receipt_no") or "",
+        c_name,
+        c_code,
+        c_mob,
+        product_name or batch.get("product_name") or "Cardamom",
+        batch.get("raw_weight", 0),
+        batch.get("bags", 0),
+        batch.get("rate_per_kg", 12),
+        batch.get("status", "Received"),
+        batch.get("received_from") or c_name,
+        str(batch.get("created_at") or "")[:19]
+    ]
+    return await append_row_async("Arrivals", row)
+
+
+async def sync_drying_batch_to_sheets(batch: dict, branch_name: str = "", customer: dict = None, machine_name: str = ""):
+    """Sync drying batch processing row to Google Sheets."""
+    c_name = (customer or {}).get("name") or batch.get("customer_name") or ""
+    c_code = (customer or {}).get("code") or batch.get("customer_code") or ""
+    
+    raw_wt = float(batch.get("raw_weight") or 0)
+    dry_wt = float(batch.get("actual_dry_weight") or 0)
+    rec_pct = f"{(dry_wt / raw_wt * 100):.1f}%" if raw_wt > 0 and dry_wt > 0 else ""
+    
+    st_time = str(batch.get("processing_started_at") or "")[:16]
+    end_time = str(batch.get("processing_ended_at") or "")[:16]
+    
+    row = [
+        batch.get("batch_no") or "",
+        branch_name or batch.get("branch_name") or "",
+        c_name,
+        c_code,
+        batch.get("product_name") or "Cardamom",
+        machine_name or batch.get("machine_name") or "",
+        batch.get("status") or "Drying",
+        raw_wt,
+        dry_wt if dry_wt > 0 else "",
+        rec_pct,
+        st_time,
+        end_time,
+        batch.get("drying_hours") or ""
+    ]
+    return await append_row_async("Drying Batches", row)
+
+
+async def sync_delivery_to_sheets(batch: dict, branch_name: str = "", customer: dict = None):
+    """Sync delivery event to Google Sheets."""
+    c_name = (customer or {}).get("name") or batch.get("customer_name") or ""
+    c_code = (customer or {}).get("code") or batch.get("customer_code") or ""
+    c_mob = (customer or {}).get("mobile") or batch.get("customer_mobile") or ""
+    deliv_date = str(batch.get("delivered_at") or batch.get("arrival_date") or "")[:10]
+    
+    row = [
+        deliv_date,
+        branch_name or batch.get("branch_name") or "",
+        batch.get("batch_no") or "",
+        c_name,
+        c_code,
+        c_mob,
+        batch.get("product_name") or "Cardamom",
+        batch.get("actual_dry_weight") or 0,
+        batch.get("delivered_to") or c_name,
+        batch.get("bill_amount") or 0,
+        batch.get("total_paid") or 0,
+        batch.get("balance_amount") or 0,
+        batch.get("status") or "Delivered"
+    ]
+    return await append_row_async("Deliveries", row)
+
+
+async def sync_payment_to_sheets(payment: dict, branch_name: str = "", customer: dict = None, recorder_name: str = ""):
+    """Sync payment receipt to Google Sheets."""
+    c_name = (customer or {}).get("name") or payment.get("customer_name") or ""
+    c_code = (customer or {}).get("code") or payment.get("customer_code") or ""
+    c_mob = (customer or {}).get("mobile") or payment.get("customer_mobile") or ""
+    p_date = str(payment.get("payment_date") or payment.get("created_at") or "")[:10]
+    
+    row = [
+        p_date,
+        branch_name or payment.get("branch_name") or "",
+        payment.get("receipt_no") or "",
+        c_name,
+        c_code,
+        c_mob,
+        payment.get("amount") or 0,
+        payment.get("mode") or "Cash",
+        payment.get("batch_no") or payment.get("batch_id") or "",
+        payment.get("remarks") or "",
+        recorder_name or payment.get("recorded_by") or "",
+        str(payment.get("created_at") or "")[:19]
+    ]
+    return await append_row_async("Payments", row)
+
+
+async def sync_expense_to_sheets(expense: dict, branch_name: str = "", recorder_name: str = ""):
+    """Sync business expense to Google Sheets."""
+    e_date = str(expense.get("expense_date") or expense.get("date") or expense.get("created_at") or "")[:10]
+    
+    row = [
+        e_date,
+        branch_name or expense.get("branch_name") or "",
+        expense.get("category") or "General",
+        expense.get("description") or "",
+        expense.get("amount") or 0,
+        expense.get("paid_to") or "",
+        expense.get("mode") or "Cash",
+        expense.get("receipt_no") or expense.get("reference") or "",
+        recorder_name or expense.get("recorded_by") or "",
+        str(expense.get("created_at") or "")[:19]
+    ]
+    return await append_row_async("Expenses", row)
+
+
+# ---------------------------- FULL BULK BACKFILL ----------------------------
+
+async def bulk_sync_all_database_to_sheets(db) -> Dict[str, Any]:
+    """
+    Export all existing records from Supabase/Postgres database
+    directly into Google Sheets tabs (Arrivals, Drying, Deliveries, Payments, Expenses).
+    """
+    sh = get_sheets_client()
+    if not sh:
+        return {"success": False, "error": "Could not connect to Google Sheets with configured credentials."}
+
+    counts = {"arrivals": 0, "drying": 0, "deliveries": 0, "payments": 0, "expenses": 0}
+
+    # Fetch lookup maps
+    branches_raw = await db.branches.find({}, {"_id": 0}).to_list(100)
+    branch_map = {b["id"]: b.get("name", "Branch") for b in branches_raw}
+
+    customers_raw = await db.customers.find({}, {"_id": 0}).to_list(5000)
+    customer_map = {c["id"]: c for c in customers_raw}
+
+    products_raw = await db.products.find({}, {"_id": 0}).to_list(100)
+    product_map = {p["id"]: p.get("name", "Produce") for p in products_raw}
+
+    machines_raw = await db.machines.find({}, {"_id": 0}).to_list(100)
+    machine_map = {m["id"]: m.get("name", "Dryer") for m in machines_raw}
+
+    # 1. Backfill Arrivals & Drying & Deliveries from Batches
+    batches = await db.batches.find({}, {"_id": 0}).to_list(10000)
+    
+    arr_rows = []
+    dry_rows = []
+    del_rows = []
+
+    for b in batches:
+        bid = b.get("branch_id")
+        b_name = branch_map.get(bid, "Main")
+        cust = customer_map.get(b.get("customer_id"), {})
+        c_name = cust.get("name") or b.get("customer_name") or ""
+        c_code = cust.get("code") or b.get("customer_code") or ""
+        c_mob = cust.get("mobile") or b.get("customer_mobile") or ""
+        p_name = product_map.get(b.get("product_id"), "Cardamom")
+        m_name = machine_map.get(b.get("machine_id"), "")
+
+        # Arrival row
+        arr_date = str(b.get("arrival_date") or b.get("created_at") or "")[:10]
+        arr_time = str(b.get("arrival_date") or b.get("created_at") or "")[11:16]
+        arr_rows.append([
+            arr_date,
+            arr_time,
+            b_name,
+            b.get("batch_no") or "",
+            b.get("receipt_no") or "",
+            c_name,
+            c_code,
+            c_mob,
+            p_name,
+            b.get("raw_weight", 0),
+            b.get("bags", 0),
+            b.get("rate_per_kg", 12),
+            b.get("status", "Received"),
+            b.get("received_from") or c_name,
+            str(b.get("created_at") or "")[:19]
+        ])
+
+        # Drying row (if processed or loaded)
+        raw_wt = float(b.get("raw_weight") or 0)
+        dry_wt = float(b.get("actual_dry_weight") or 0)
+        rec_pct = f"{(dry_wt / raw_wt * 100):.1f}%" if raw_wt > 0 and dry_wt > 0 else ""
+        if b.get("status") in ("Loaded", "Drying", "Completed", "Delivered") or dry_wt > 0 or m_name:
+            dry_rows.append([
+                b.get("batch_no") or "",
+                b_name,
+                c_name,
+                c_code,
+                p_name,
+                m_name,
+                b.get("status") or "Drying",
+                raw_wt,
+                dry_wt if dry_wt > 0 else "",
+                rec_pct,
+                str(b.get("processing_started_at") or "")[:16],
+                str(b.get("processing_ended_at") or "")[:16],
+                b.get("drying_hours") or ""
+            ])
+
+        # Delivery row (if delivered)
+        if b.get("status") == "Delivered" or b.get("delivered_at"):
+            deliv_date = str(b.get("delivered_at") or b.get("arrival_date") or "")[:10]
+            del_rows.append([
+                deliv_date,
+                b_name,
+                b.get("batch_no") or "",
+                c_name,
+                c_code,
+                c_mob,
+                p_name,
+                dry_wt,
+                b.get("delivered_to") or c_name,
+                b.get("bill_amount") or 0,
+                b.get("total_paid") or 0,
+                b.get("balance_amount") or 0,
+                b.get("status") or "Delivered"
+            ])
+
+    # Populate Arrivals
+    ws_arr = ensure_worksheet(sh, "Arrivals", TAB_HEADERS["Arrivals"])
+    if arr_rows:
+        ws_arr.append_rows(arr_rows, value_input_option="USER_ENTERED")
+        counts["arrivals"] = len(arr_rows)
+
+    # Populate Drying Batches
+    ws_dry = ensure_worksheet(sh, "Drying Batches", TAB_HEADERS["Drying Batches"])
+    if dry_rows:
+        ws_dry.append_rows(dry_rows, value_input_option="USER_ENTERED")
+        counts["drying"] = len(dry_rows)
+
+    # Populate Deliveries
+    ws_del = ensure_worksheet(sh, "Deliveries", TAB_HEADERS["Deliveries"])
+    if del_rows:
+        ws_del.append_rows(del_rows, value_input_option="USER_ENTERED")
+        counts["deliveries"] = len(del_rows)
+
+    # 2. Backfill Payments
+    payments = await db.payments.find({}, {"_id": 0}).to_list(10000)
+    pay_rows = []
+    for p in payments:
+        b_name = branch_map.get(p.get("branch_id"), "Main")
+        cust = customer_map.get(p.get("customer_id"), {})
+        c_name = cust.get("name") or p.get("customer_name") or ""
+        c_code = cust.get("code") or p.get("customer_code") or ""
+        c_mob = cust.get("mobile") or p.get("customer_mobile") or ""
+        p_date = str(p.get("payment_date") or p.get("created_at") or "")[:10]
+        pay_rows.append([
+            p_date,
+            b_name,
+            p.get("receipt_no") or "",
+            c_name,
+            c_code,
+            c_mob,
+            p.get("amount") or 0,
+            p.get("mode") or "Cash",
+            p.get("batch_no") or p.get("batch_id") or "",
+            p.get("remarks") or "",
+            p.get("recorded_by") or "",
+            str(p.get("created_at") or "")[:19]
+        ])
+
+    ws_pay = ensure_worksheet(sh, "Payments", TAB_HEADERS["Payments"])
+    if pay_rows:
+        ws_pay.append_rows(pay_rows, value_input_option="USER_ENTERED")
+        counts["payments"] = len(pay_rows)
+
+    # 3. Backfill Expenses
+    expenses = await db.expenses.find({}, {"_id": 0}).to_list(10000)
+    exp_rows = []
+    for e in expenses:
+        b_name = branch_map.get(e.get("branch_id"), "Main")
+        e_date = str(e.get("expense_date") or e.get("date") or e.get("created_at") or "")[:10]
+        exp_rows.append([
+            e_date,
+            b_name,
+            e.get("category") or "General",
+            e.get("description") or "",
+            e.get("amount") or 0,
+            e.get("paid_to") or "",
+            e.get("mode") or "Cash",
+            e.get("receipt_no") or e.get("reference") or "",
+            e.get("recorded_by") or "",
+            str(e.get("created_at") or "")[:19]
+        ])
+
+    ws_exp = ensure_worksheet(sh, "Expenses", TAB_HEADERS["Expenses"])
+    if exp_rows:
+        ws_exp.append_rows(exp_rows, value_input_option="USER_ENTERED")
+        counts["expenses"] = len(exp_rows)
+
+    logger.info(f"Bulk sync complete to Google Sheet: {counts}")
+    return {"success": True, "sheet_title": sh.title, "counts": counts}

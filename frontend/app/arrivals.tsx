@@ -119,6 +119,8 @@ const DATE_PRESETS = [
   { key: "yesterday", label: "Yesterday" },
   { key: "week", label: "This Week" },
   { key: "month", label: "This Month" },
+  { key: "fy_25_26", label: "25-26" },
+  { key: "fy_26_27", label: "26-27" },
   { key: "all", label: "All Time" },
 ];
 
@@ -142,34 +144,43 @@ export default function ArrivalsScreen() {
   const [procSubTab, setProcSubTab] = useState<"active" | "completed">("active");
 
   const resolveDatesFromParams = useCallback(() => {
+    const rawPreset = Array.isArray(params.preset) ? params.preset[0] : params.preset;
+    const rawStart = Array.isArray(params.start) ? params.start[0] : params.start;
+    const rawEnd = Array.isArray(params.end) ? params.end[0] : params.end;
     let s = "";
     let e = "";
     let p = "all";
-    if (params.preset) {
-      p = params.preset;
-      if (params.preset === "today") {
+    if (rawPreset) {
+      p = String(rawPreset);
+      if (p === "today") {
         s = todayISO();
         e = todayISO();
-      } else if (params.preset === "yesterday") {
+      } else if (p === "yesterday") {
         s = yesterdayISO();
         e = yesterdayISO();
-      } else if (params.preset === "week") {
+      } else if (p === "week") {
         s = weekStartISO();
         e = todayISO();
-      } else if (params.preset === "month") {
+      } else if (p === "month") {
         s = monthStartISO();
         e = todayISO();
-      } else if (params.preset === "all") {
+      } else if (p === "fy_25_26") {
+        s = "2025-04-01";
+        e = "2026-03-31";
+      } else if (p === "fy_26_27") {
+        s = "2026-04-01";
+        e = "2027-03-31";
+      } else if (p === "all") {
         s = "";
         e = "";
       } else {
-        s = params.start || "";
-        e = params.end || "";
+        s = rawStart || "";
+        e = rawEnd || "";
         p = "custom";
       }
-    } else if (params.start || params.end) {
-      s = params.start || "";
-      e = params.end || "";
+    } else if (rawStart || rawEnd) {
+      s = rawStart || "";
+      e = rawEnd || "";
       p = "custom";
     }
     return { s, e, p };
@@ -287,6 +298,12 @@ export default function ArrivalsScreen() {
     } else if (key === "month") {
       s = monthStartISO();
       e = todayISO();
+    } else if (key === "fy_25_26") {
+      s = "2025-04-01";
+      e = "2026-03-31";
+    } else if (key === "fy_26_27") {
+      s = "2026-04-01";
+      e = "2027-03-31";
     } else if (key === "all") {
       s = "";
       e = "";
@@ -309,11 +326,13 @@ export default function ArrivalsScreen() {
   }, []);
 
   useEffect(() => {
-    if (params.q !== undefined) {
-      setSearch(params.q);
+    const rawQ = Array.isArray(params.q) ? params.q[0] : params.q;
+    const rawTab = Array.isArray(params.tab) ? params.tab[0] : params.tab;
+    if (rawQ !== undefined) {
+      setSearch(rawQ);
     }
-    if (params.tab && ["in", "processing", "out"].includes(params.tab)) {
-      setTab(params.tab as any);
+    if (rawTab && ["in", "processing", "out"].includes(rawTab)) {
+      setTab(rawTab as any);
     }
     const resolved = resolveDatesFromParams();
     setStart(resolved.s);

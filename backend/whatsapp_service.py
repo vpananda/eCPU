@@ -514,34 +514,52 @@ async def send_daily_summary_whatsapp(
     dryers_summary: str,
     deliv_summary: str,
     fin_summary: str,
-    full_message_text: str = ""
+    full_message_text: str = "",
+    branch_breakdown: str = ""
 ) -> Dict[str, Any]:
     """
     Sends daily operational summary to a recipient.
-    Uses Meta-approved UTILITY template 'e3_daily_summary_v1' which guarantees 100% delivery
-    to all recipients (outside or inside 24-hr customer service window) across India.
-    Falls back to direct freeform text message if template fails.
+    For All Branches (Executives/Directors): Uses approved 'e3_executive_summary_v1' with full branch breakdown.
+    For Individual Branches: Uses approved 'e3_daily_summary_v1'.
+    Falls back to direct freeform text if template fails.
     """
     clean_to = clean_phone_number(to_phone)
     if not clean_to:
         return {"success": False, "error": f"Invalid recipient phone: '{to_phone}'"}
 
-    # 1. Primary: Send approved utility template (guaranteed delivery across Meta network)
+    # 1. Primary: Use Meta-approved Utility templates (guarantees delivery outside 24-hr window)
     try:
-        tpl_res = await send_whatsapp_template(
-            to_phone=clean_to,
-            template_name="e3_daily_summary_v1",
-            parameters=[
-                "Director / Manager",
-                branch_name,
-                date_display,
-                arr_summary,
-                dryers_summary,
-                deliv_summary,
-                fin_summary
-            ],
-            language_code="en"
-        )
+        if branch_name == "All Branches" and branch_breakdown:
+            # Use dedicated executive summary template with branch breakdown
+            tpl_res = await send_whatsapp_template(
+                to_phone=clean_to,
+                template_name="e3_executive_summary_v1",
+                parameters=[
+                    date_display,
+                    arr_summary,
+                    dryers_summary,
+                    deliv_summary,
+                    fin_summary,
+                    branch_breakdown
+                ],
+                language_code="en"
+            )
+        else:
+            tpl_res = await send_whatsapp_template(
+                to_phone=clean_to,
+                template_name="e3_daily_summary_v1",
+                parameters=[
+                    "Director / Manager",
+                    branch_name,
+                    date_display,
+                    arr_summary,
+                    dryers_summary,
+                    deliv_summary,
+                    fin_summary
+                ],
+                language_code="en"
+            )
+
         if tpl_res.get("success"):
             return tpl_res
         logger.warning(f"Daily summary template send failed ({tpl_res.get('error')}), falling back to direct text")

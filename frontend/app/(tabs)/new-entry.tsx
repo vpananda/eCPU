@@ -49,7 +49,7 @@ export default function NewEntrySheet() {
                 <Text style={styles.subtitle}>Select an operation or transaction to record</Text>
               </View>
               <TouchableOpacity onPress={close} style={styles.closeBtn} activeOpacity={0.7} testID="quick-close-x">
-                <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
@@ -72,7 +72,7 @@ export default function NewEntrySheet() {
                   <Text style={[styles.stepBadgeText, { color: "#15803D" }]}>1 · INBOUND</Text>
                 </View>
                 <View style={[styles.iconBoxCircle, { backgroundColor: "#DCFCE7" }]}>
-                  <MaterialCommunityIcons name="arrow-down-circle" size={26} color="#15803D" />
+                  <MaterialCommunityIcons name="arrow-down-circle" size={30} color="#15803D" />
                 </View>
                 <Text style={styles.pipelineCardTitle}>Arrival</Text>
                 <Text style={styles.pipelineCardSub}>Wet produce</Text>
@@ -89,7 +89,7 @@ export default function NewEntrySheet() {
                   <Text style={[styles.stepBadgeText, { color: "#C2410C" }]}>2 · DRYING</Text>
                 </View>
                 <View style={[styles.iconBoxCircle, { backgroundColor: "#FFEDD5" }]}>
-                  <MaterialCommunityIcons name="engine-outline" size={26} color="#C2410C" />
+                  <MaterialCommunityIcons name="engine-outline" size={30} color="#C2410C" />
                 </View>
                 <Text style={styles.pipelineCardTitle}>Processing</Text>
                 <Text style={styles.pipelineCardSub}>Load dryers</Text>
@@ -106,7 +106,7 @@ export default function NewEntrySheet() {
                   <Text style={[styles.stepBadgeText, { color: "#7C3AED" }]}>3 · DISPATCH</Text>
                 </View>
                 <View style={[styles.iconBoxCircle, { backgroundColor: "#F3E8FF" }]}>
-                  <MaterialCommunityIcons name="truck-fast" size={26} color="#7C3AED" />
+                  <MaterialCommunityIcons name="truck-fast" size={30} color="#7C3AED" />
                 </View>
                 <Text style={styles.pipelineCardTitle}>Deliver</Text>
                 <Text style={styles.pipelineCardSub}>Dry outturn</Text>
@@ -129,7 +129,7 @@ export default function NewEntrySheet() {
                 onPress={() => go("/payments")}
               >
                 <View style={[styles.financeIconBox, { backgroundColor: "#E0F2FE" }]}>
-                  <MaterialCommunityIcons name="book-open-page-variant" size={24} color="#0284C7" />
+                  <MaterialCommunityIcons name="book-open-page-variant" size={28} color="#0284C7" />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
@@ -150,7 +150,7 @@ export default function NewEntrySheet() {
                 onPress={() => go("/sale-form")}
               >
                 <View style={[styles.financeIconBox, { backgroundColor: "#CCFBF1" }]}>
-                  <MaterialCommunityIcons name="tag-outline" size={24} color="#0D9488" />
+                  <MaterialCommunityIcons name="tag-outline" size={28} color="#0D9488" />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
@@ -181,43 +181,43 @@ const styles = StyleSheet.create({
   sheetWrap: { flex: 1, justifyContent: "flex-end" },
   sheet: {
     backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xl + spacing.md,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
     ...shadow.card,
   },
   handle: {
     alignSelf: "center",
-    width: 36,
-    height: 4,
-    borderRadius: 2,
+    width: 44,
+    height: 5,
+    borderRadius: 3,
     backgroundColor: "#E2E8F0",
-    marginBottom: spacing.md,
+    marginBottom: 16,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: spacing.md,
+    marginBottom: 16,
   },
   title: {
-    fontSize: 21,
+    fontSize: 23,
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -0.4,
   },
   subtitle: {
-    fontSize: 12,
+    fontSize: 13.5,
     color: "#64748B",
-    marginTop: 2,
+    marginTop: 3,
     fontWeight: "500",
   },
   closeBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
@@ -228,66 +228,66 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginBottom: spacing.sm,
+    gap: 10,
+    marginBottom: 12,
   },
   sectionHeaderLine: {
     flex: 1,
     height: 1,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: "#E2E8F0",
   },
   sectionTitle: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "800",
     color: "#94A3B8",
-    letterSpacing: 0.8,
+    letterSpacing: 1,
     textTransform: "uppercase",
   },
 
   /* 3-Column Pipeline Grid */
   pipelineRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
   },
   pipelineCard: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 6,
-    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 8,
+    borderRadius: 18,
     borderWidth: 1.5,
     ...shadow.sm,
   },
   stepBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginBottom: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginBottom: 10,
   },
   stepBadgeText: {
-    fontSize: 8.5,
+    fontSize: 9.5,
     fontWeight: "800",
     letterSpacing: 0.3,
   },
   iconBoxCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 8,
+    marginBottom: 10,
   },
   pipelineCardTitle: {
-    fontSize: 14,
+    fontSize: 15.5,
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -0.2,
     textAlign: "center",
   },
   pipelineCardSub: {
-    fontSize: 10.5,
+    fontSize: 11.5,
     color: "#64748B",
-    marginTop: 2,
+    marginTop: 3,
     fontWeight: "500",
     textAlign: "center",
   },
@@ -295,52 +295,52 @@ const styles = StyleSheet.create({
   /* 2-Column Finance Grid */
   financeRow: {
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
   },
   financeCard: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    padding: 12,
-    borderRadius: 16,
+    gap: 12,
+    padding: 14,
+    borderRadius: 18,
     borderWidth: 1.5,
     ...shadow.sm,
   },
   financeIconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
   },
   financeTitle: {
-    fontSize: 13.5,
+    fontSize: 15,
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -0.2,
   },
   microTag: {
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
   },
   microTagText: {
-    fontSize: 8,
+    fontSize: 9,
     fontWeight: "800",
     letterSpacing: 0.3,
   },
   financeSub: {
-    fontSize: 10.5,
+    fontSize: 11.5,
     color: "#64748B",
-    lineHeight: 14,
+    lineHeight: 16,
     fontWeight: "500",
   },
 
   /* Cancel Button */
   cancelBtn: {
-    marginTop: spacing.lg,
-    paddingVertical: 13,
+    marginTop: 20,
+    paddingVertical: 15,
     borderRadius: radius.pill,
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cancelText: {
-    fontSize: 14,
+    fontSize: 15.5,
     fontWeight: "700",
     color: "#64748B",
   },

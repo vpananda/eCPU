@@ -589,6 +589,14 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
     overwrite_worksheet(ws_cust, TAB_HEADERS["Customers"], cust_rows)
     counts["customers"] = len(cust_rows)
 
+    # 5. Ensure Executive Dashboard Tab
+    try:
+        from build_dashboard_sheet import build_dashboard
+        build_dashboard()
+        counts["dashboard"] = True
+    except Exception as ex:
+        logger.warning(f"Failed to ensure dashboard tab: {ex}")
+
     logger.info(f"Bulk sync complete to Google Sheet: {counts}")
     return {"success": True, "sheet_title": sh.title, "counts": counts}
 

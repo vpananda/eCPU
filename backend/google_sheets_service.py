@@ -469,23 +469,41 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
                 b.get("status") or "Delivered"
             ])
 
+    # Helper to clean and overwrite worksheet data without leaving stale duplicates
+    def overwrite_worksheet(ws: gspread.Worksheet, headers: List[str], rows: List[List[Any]]):
+        ws.clear()
+        clean_rows = [[("" if v is None else str(v)) for v in r] for r in rows]
+        ws.update([headers] + clean_rows, value_input_option="USER_ENTERED")
+        try:
+            ws.freeze(rows=1)
+            ws.format("A1:Z1", {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.9, "green": 0.95, "blue": 0.9}
+            })
+        except Exception:
+            pass
+
+    # Delete default Sheet1 if present
+    try:
+        s1 = sh.worksheet("Sheet1")
+        sh.del_worksheet(s1)
+    except Exception:
+        pass
+
     # Populate Arrivals
     ws_arr = ensure_worksheet(sh, "Arrivals", TAB_HEADERS["Arrivals"])
-    if arr_rows:
-        ws_arr.append_rows(arr_rows, value_input_option="USER_ENTERED")
-        counts["arrivals"] = len(arr_rows)
+    overwrite_worksheet(ws_arr, TAB_HEADERS["Arrivals"], arr_rows)
+    counts["arrivals"] = len(arr_rows)
 
     # Populate Drying Batches
     ws_dry = ensure_worksheet(sh, "Drying Batches", TAB_HEADERS["Drying Batches"])
-    if dry_rows:
-        ws_dry.append_rows(dry_rows, value_input_option="USER_ENTERED")
-        counts["drying"] = len(dry_rows)
+    overwrite_worksheet(ws_dry, TAB_HEADERS["Drying Batches"], dry_rows)
+    counts["drying"] = len(dry_rows)
 
     # Populate Deliveries
     ws_del = ensure_worksheet(sh, "Deliveries", TAB_HEADERS["Deliveries"])
-    if del_rows:
-        ws_del.append_rows(del_rows, value_input_option="USER_ENTERED")
-        counts["deliveries"] = len(del_rows)
+    overwrite_worksheet(ws_del, TAB_HEADERS["Deliveries"], del_rows)
+    counts["deliveries"] = len(del_rows)
 
     # 2. Backfill Payments
     payments = await db.payments.find({}, {"_id": 0}).to_list(10000)
@@ -513,9 +531,8 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
         ])
 
     ws_pay = ensure_worksheet(sh, "Payments", TAB_HEADERS["Payments"])
-    if pay_rows:
-        ws_pay.append_rows(pay_rows, value_input_option="USER_ENTERED")
-        counts["payments"] = len(pay_rows)
+    overwrite_worksheet(ws_pay, TAB_HEADERS["Payments"], pay_rows)
+    counts["payments"] = len(pay_rows)
 
     # 3. Backfill Expenses
     expenses = await db.expenses.find({}, {"_id": 0}).to_list(10000)
@@ -537,9 +554,8 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
         ])
 
     ws_exp = ensure_worksheet(sh, "Expenses", TAB_HEADERS["Expenses"])
-    if exp_rows:
-        ws_exp.append_rows(exp_rows, value_input_option="USER_ENTERED")
-        counts["expenses"] = len(exp_rows)
+    overwrite_worksheet(ws_exp, TAB_HEADERS["Expenses"], exp_rows)
+    counts["expenses"] = len(exp_rows)
 
     # 4. Backfill Customers
     cust_rows = []
@@ -570,9 +586,8 @@ async def bulk_sync_all_database_to_sheets(db, service_account_info: Optional[Di
         ])
 
     ws_cust = ensure_worksheet(sh, "Customers", TAB_HEADERS["Customers"])
-    if cust_rows:
-        ws_cust.append_rows(cust_rows, value_input_option="USER_ENTERED")
-        counts["customers"] = len(cust_rows)
+    overwrite_worksheet(ws_cust, TAB_HEADERS["Customers"], cust_rows)
+    counts["customers"] = len(cust_rows)
 
     logger.info(f"Bulk sync complete to Google Sheet: {counts}")
     return {"success": True, "sheet_title": sh.title, "counts": counts}

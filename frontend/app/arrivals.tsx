@@ -344,8 +344,8 @@ export default function ArrivalsScreen() {
   useFocusEffect(useCallback(() => { load(start, end, !!data); }, [load, start, end, !!data]));
 
   useSyncRefresh(useCallback(async () => {
-    await load(false, true);
-  }, [load]));
+    await load(start, end, true, true);
+  }, [load, start, end]));
 
     const shareArrivalWhatsApp = async (r: Row) => {
     const msg = buildArrivalMessage({

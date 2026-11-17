@@ -10,6 +10,7 @@ import { useConfirm } from "@/src/components/ConfirmModal";
 import { MultiPhoneInput } from "@/src/components/MultiPhoneInput";
 import { openWhatsApp } from "@/src/utils/notifications";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { useLanguage } from "@/src/i18n";
 
 const TIME_PRESETS = [
   { label: "7:00 PM", val: "19:00" },
@@ -25,6 +26,7 @@ export default function Settings() {
   const toast = useToast();
   const confirm = useConfirm();
   const { user } = useAuth();
+  const { language, setLanguage, languages } = useLanguage();
   const [company, setCompany] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [machines, setMachines] = useState<any[]>([]);
@@ -229,6 +231,53 @@ export default function Settings() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: 100 }}>
+          {/* App Language Selection Section */}
+          <View style={[styles.section, { borderColor: "#DDD6FE", borderWidth: 1 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <View style={{ width: 36, height: 36, borderRadius: radius.md, backgroundColor: "#F5F3FF", alignItems: "center", justifyContent: "center" }}>
+                <MaterialCommunityIcons name="translate" size={20} color="#6D28D9" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.sectionTitle}>App Language / மொழி / ഭാഷ / भाषा</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted }}>Select your preferred interface language</Text>
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+              {languages.map(l => {
+                const isActive = language === l.code;
+                return (
+                  <TouchableOpacity
+                    key={l.code}
+                    onPress={() => setLanguage(l.code)}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      paddingVertical: 10,
+                      paddingHorizontal: 14,
+                      borderRadius: radius.md,
+                      borderWidth: 1.5,
+                      borderColor: isActive ? "#6D28D9" : colors.border,
+                      backgroundColor: isActive ? "#F5F3FF" : "#ffffff",
+                    }}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={{ fontSize: 18 }}>{l.flag}</Text>
+                    <View>
+                      <Text style={{ fontSize: 13, fontWeight: "800", color: isActive ? "#6D28D9" : colors.text }}>
+                        {l.nativeName}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colors.textMuted }}>{l.label}</Text>
+                    </View>
+                    {isActive && (
+                      <MaterialCommunityIcons name="check-circle" size={16} color="#6D28D9" style={{ marginLeft: 4 }} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
           {/* Automated Daily WhatsApp Status Report Section */}
           <View style={[styles.section, styles.waHighlightSection]}>
             <View style={styles.waSectionHeader}>

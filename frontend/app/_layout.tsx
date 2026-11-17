@@ -12,6 +12,7 @@ import { ConnectionBanner } from "@/src/components/ConnectionBanner";
 import { ToastProvider } from "@/src/components/Toast";
 import { ConfirmModalProvider } from "@/src/components/ConfirmModal";
 import { SyncProvider } from "@/src/sync";
+import { LanguageProvider } from "@/src/i18n";
 import { TopBanner } from "@/src/components/TopBanner";
 import { colors } from "@/src/theme";
 
@@ -54,25 +55,27 @@ export default function RootLayout() {
       <StatusBar barStyle="dark-content" backgroundColor={colors.bg} />
       <ConnectionProvider>
         <AuthProvider>
-          <ToastProvider>
-            <ConfirmModalProvider>
-              <SyncProvider>
-                <RouteGuard />
-                <ConnectionBanner />
-                <Stack
-                  screenOptions={{
-                    headerShown: true,
-                    header: () => <TopBanner />,
-                    contentStyle: { backgroundColor: colors.bg }
-                  }}
-                >
-                  <Stack.Screen name="login" options={{ headerShown: false }} />
-                  <Stack.Screen name="index" options={{ headerShown: false }} />
-                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                </Stack>
-              </SyncProvider>
-            </ConfirmModalProvider>
-          </ToastProvider>
+          <LanguageProvider>
+            <ToastProvider>
+              <ConfirmModalProvider>
+                <SyncProvider>
+                  <RouteGuard />
+                  <ConnectionBanner />
+                  <Stack
+                    screenOptions={{
+                      headerShown: true,
+                      header: () => <TopBanner />,
+                      contentStyle: { backgroundColor: colors.bg }
+                    }}
+                  >
+                    <Stack.Screen name="login" options={{ headerShown: false }} />
+                    <Stack.Screen name="index" options={{ headerShown: false }} />
+                    <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  </Stack>
+                </SyncProvider>
+              </ConfirmModalProvider>
+            </ToastProvider>
+          </LanguageProvider>
         </AuthProvider>
       </ConnectionProvider>
     </SafeAreaProvider>

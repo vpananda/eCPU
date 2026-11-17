@@ -5,6 +5,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
+import { useLanguage } from "@/src/i18n";
 import Calendar from "@/src/components/Calendar";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { useSyncRefresh } from "@/src/sync";
@@ -61,6 +62,7 @@ export default function BatchingForm() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string }>();
   const { selectedBranchId } = useAuth();
+  const { t } = useLanguage();
 
   const [activeTab, setActiveTab] = useState<"start" | "running">(
     params.tab === "running" ? "running" : "start"
@@ -466,16 +468,16 @@ export default function BatchingForm() {
         {/* Weight & Bags Stats Row */}
         <View style={styles.runningStatsGrid}>
           <View style={styles.runningStatBox}>
-            <Text style={styles.runningStatLabel}>ARRIVAL WEIGHT</Text>
+            <Text style={styles.runningStatLabel}>{t("processing.arrival_weight", "ARRIVAL WEIGHT")}</Text>
             <Text style={styles.runningStatVal}>{b.raw_weight} kg</Text>
           </View>
           <View style={styles.runningStatBox}>
-            <Text style={styles.runningStatLabel}>BAGS</Text>
+            <Text style={styles.runningStatLabel}>{t("processing.bags", "BAGS")}</Text>
             <Text style={styles.runningStatVal}>{b.bags || 1} Bags</Text>
           </View>
           <View style={styles.runningStatBox}>
-            <Text style={styles.runningStatLabel}>STATUS</Text>
-            <Text style={[styles.runningStatVal, { color: colors.warning }]}>Drying</Text>
+            <Text style={styles.runningStatLabel}>{t("processing.status", "STATUS")}</Text>
+            <Text style={[styles.runningStatVal, { color: colors.warning }]}>{t("processing.drying", "Drying")}</Text>
           </View>
         </View>
 
@@ -494,7 +496,7 @@ export default function BatchingForm() {
           activeOpacity={0.88}
         >
           <MaterialCommunityIcons name="check-circle-outline" size={18} color="#FFFFFF" />
-          <Text style={styles.completeActionBtnText}>Complete Processing</Text>
+          <Text style={styles.completeActionBtnText}>{t("processing.complete_processing", "Complete Processing")}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -515,7 +517,7 @@ export default function BatchingForm() {
             color={activeTab === "start" ? "#FFFFFF" : colors.textMuted}
           />
           <Text style={[styles.topTabText, activeTab === "start" && styles.topTabTextActive]}>
-            Start Drying
+            {t("processing.start_drying", "Start Drying")}
           </Text>
         </TouchableOpacity>
 
@@ -530,7 +532,7 @@ export default function BatchingForm() {
             color={activeTab === "running" ? "#FFFFFF" : colors.warning}
           />
           <Text style={[styles.topTabText, activeTab === "running" && styles.topTabTextActive]}>
-            Running Batches
+            {t("processing.running_batches", "Running Batches")}
           </Text>
           {runningBatches.length > 0 && (
             <View style={[styles.runningBadgePill, activeTab === "running" && styles.runningBadgePillActive]}>
@@ -555,16 +557,16 @@ export default function BatchingForm() {
               <View style={styles.emptyIconCircle}>
                 <MaterialCommunityIcons name="check-all" size={36} color={colors.primary} />
               </View>
-              <Text style={styles.emptyRunningTitle}>No Batches Currently Drying</Text>
+              <Text style={styles.emptyRunningTitle}>{t("processing.no_batches_drying", "No Batches Currently Drying")}</Text>
               <Text style={styles.emptyRunningSub}>
-                All dryers are idle. Select pending arrivals in "Start Drying" to launch a new batch run.
+                {t("processing.all_dryers_idle", "All dryers are idle. Select pending arrivals in \"Start Drying\" to launch a new batch run.")}
               </Text>
               <TouchableOpacity
                 style={styles.emptyActionBtn}
                 onPress={() => setActiveTab("start")}
               >
                 <MaterialCommunityIcons name="plus" size={16} color="#FFFFFF" />
-                <Text style={styles.emptyActionBtnText}>Start New Dryer Run</Text>
+                <Text style={styles.emptyActionBtnText}>{t("processing.start_new_run", "+ Start New Dryer Run")}</Text>
               </TouchableOpacity>
             </View>
           ) : (

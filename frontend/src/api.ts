@@ -2,15 +2,7 @@ import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 
 export const getBaseUrl = () => {
-  let url = process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (!url) {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-        return "http://localhost:8000";
-      }
-    }
-    url = "https://ecpu.onrender.com";
-  }
+  const url = process.env.EXPO_PUBLIC_BACKEND_URL || "https://ecpu.onrender.com";
   return url.replace(/\/+$/, "");
 };
 

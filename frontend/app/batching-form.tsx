@@ -109,9 +109,6 @@ export default function BatchingForm() {
     setLoading(true);
     try {
       const branchParam = selectedBranchId ? `?branch_id=${selectedBranchId}` : "";
-      const machs = await api<Machine[]>(`/machines${branchParam}`);
-      setMachines(machs.filter(m => m.status === "Available"));
-
       const pendingUrl = selectedBranchId 
         ? `/batches?status=Received&branch_id=${selectedBranchId}` 
         : "/batches?status=Received";
@@ -122,17 +119,19 @@ export default function BatchingForm() {
         ? `/batches?status=Loaded&branch_id=${selectedBranchId}` 
         : "/batches?status=Loaded";
 
-      const [pendingList, dryingList, loadedList] = await Promise.all([
-        api<Batch[]>(pendingUrl),
+      const [machs, pendingList, dryingList, loadedList] = await Promise.all([
+        api<Machine[]>(`/machines${branchParam}`).catch(() => [] as Machine[]),
+        api<Batch[]>(pendingUrl).catch(() => [] as Batch[]),
         api<Batch[]>(dryingUrl).catch(() => [] as Batch[]),
         api<Batch[]>(loadedUrl).catch(() => [] as Batch[]),
       ]);
 
-      setBatches(pendingList);
+      setMachines((machs || []).filter(m => m.status === "Available"));
+      setBatches(pendingList || []);
 
       // Deduplicate running batches by ID
       const rMap = new Map<string, Batch>();
-      [...dryingList, ...loadedList].forEach(b => rMap.set(b.id, b));
+      [...(dryingList || []), ...(loadedList || [])].forEach(b => rMap.set(b.id, b));
       setRunningBatches(Array.from(rMap.values()));
     } catch (err: any) {
       Alert.alert("Error", err.message || "Failed to load branch data");

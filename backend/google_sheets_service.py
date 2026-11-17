@@ -1,5 +1,7 @@
 import os
 import glob
+import json
+import base64
 import logging
 from typing import Dict, Any, List, Optional
 import gspread
@@ -117,24 +119,47 @@ def find_credentials_file() -> Optional[str]:
 
 
 def get_sheets_client(service_account_info: Optional[Dict[str, Any]] = None, sheet_id: Optional[str] = None) -> Optional[gspread.Spreadsheet]:
-    """Get authenticated gspread Spreadsheet instance."""
-    target_sheet_id = (sheet_id or os.getenv("GOOGLE_SHEET_ID", "")).strip()
+    """Get authenticated gspread Spreadsheet instance from dict, env, or credentials file."""
+    target_sheet_id = (sheet_id or os.getenv("GOOGLE_SHEET_ID", "1iEJ2YnB47crLOiOtRr3qowWCBeLV4BslRGg4JNDUC-E")).strip()
     if not target_sheet_id:
         logger.debug("GOOGLE_SHEET_ID not set")
         return None
 
     try:
+        # 1. Direct dictionary passed
         if service_account_info:
             gc = gspread.service_account_from_dict(service_account_info)
             return gc.open_by_key(target_sheet_id)
 
-        creds_path = find_credentials_file()
-        if not creds_path:
-            logger.debug("Google service account credentials JSON not found in backend")
-            return None
+        # 2. Raw JSON string in GOOGLE_SERVICE_ACCOUNT_JSON env var
+        env_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+        if env_json:
+            try:
+                info = json.loads(env_json)
+                gc = gspread.service_account_from_dict(info)
+                return gc.open_by_key(target_sheet_id)
+            except Exception as ex:
+                logger.warning(f"Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: {ex}")
 
-        gc = gspread.service_account(filename=creds_path)
-        return gc.open_by_key(target_sheet_id)
+        # 3. Base64-encoded JSON in GOOGLE_SERVICE_ACCOUNT_BASE64 env var
+        env_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_BASE64", "").strip()
+        if env_b64:
+            try:
+                decoded = base64.b64decode(env_b64).decode("utf-8")
+                info = json.loads(decoded)
+                gc = gspread.service_account_from_dict(info)
+                return gc.open_by_key(target_sheet_id)
+            except Exception as ex:
+                logger.warning(f"Failed to parse GOOGLE_SERVICE_ACCOUNT_BASE64: {ex}")
+
+        # 4. Search local credentials file on disk
+        creds_path = find_credentials_file()
+        if creds_path:
+            gc = gspread.service_account(filename=creds_path)
+            return gc.open_by_key(target_sheet_id)
+
+        logger.debug("Google service account credentials not found in env or file")
+        return None
     except Exception as e:
         logger.error(f"Failed to connect to Google Sheet {target_sheet_id}: {e}")
         return None

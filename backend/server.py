@@ -5649,7 +5649,7 @@ def generate_consolidated_daily_summary(summaries: list) -> dict:
     deliv_summary = f"{total_deliv_dry:,.1f} KG Dry{del_detail}"
     fin_summary = f"Billed: Rs. {total_deliv_billed:,.0f} | Recv: Rs. {total_collected:,.0f}"
 
-    # Build single-line branch breakdown for template parameter safety (no newlines)
+    # Build clean line-by-line branch breakdown
     breakdown_parts = []
     for s in summaries:
         b_name = s.get("branch_name", "Branch")
@@ -5670,7 +5670,7 @@ def generate_consolidated_daily_summary(summaries: list) -> dict:
     if inactive_branches:
         breakdown_parts.append(f"💤 Idle: {', '.join(inactive_branches)}")
 
-    branch_breakdown_line = " | ".join(breakdown_parts) if breakdown_parts else "(No branch activity recorded today)"
+    branch_breakdown_line = "\n".join(breakdown_parts) if breakdown_parts else "(No branch activity recorded today)"
 
     return {
         "branch_id": "all",

@@ -5754,6 +5754,23 @@ async def dispatch_daily_reports(
     admin_phones_str = admin_phones_override if admin_phones_override is not None else settings.get("admin_phones", "")
     admin_phones = [clean_phone_number(p.strip()) for p in admin_phones_str.replace(";", ",").split(",") if p.strip()]
 
+    # Map phone numbers to profile names
+    phone_to_name = {}
+    try:
+        prof_rows = await db.query("SELECT name, mobile FROM public.profiles WHERE mobile IS NOT NULL")
+        for pr in (prof_rows or []):
+            m = clean_phone_number(pr.get("mobile", ""))
+            if m:
+                phone_to_name[m] = pr.get("name")
+                if len(m) >= 10:
+                    phone_to_name[m[-10:]] = pr.get("name")
+    except Exception as e:
+        logger.warning(f"Could not build phone-to-name lookup: {e}")
+
+    def get_recipient_name(phone: str) -> str:
+        clean = clean_phone_number(phone)
+        return phone_to_name.get(clean) or phone_to_name.get(clean[-10:] if len(clean) >= 10 else clean) or "Director / Manager"
+
     # Case 1: Single specific branch requested
     if target_branch_id:
         b = await db.branches.find_one({"id": target_branch_id}, {"_id": 0})
@@ -5783,6 +5800,7 @@ async def dispatch_daily_reports(
 
         recipients = []
         for phone in phones:
+            user_name = get_recipient_name(phone)
             try:
                 res = await send_daily_summary_whatsapp(
                     to_phone=phone,
@@ -5792,11 +5810,12 @@ async def dispatch_daily_reports(
                     dryers_summary=dryers_summary,
                     deliv_summary=deliv_summary,
                     fin_summary=fin_summary,
-                    full_message_text=msg
+                    full_message_text=msg,
+                    recipient_name=user_name
                 )
-                recipients.append({"phone": phone, "result": res})
+                recipients.append({"phone": phone, "recipient_name": user_name, "result": res})
             except Exception as ex:
-                recipients.append({"phone": phone, "error": str(ex)})
+                recipients.append({"phone": phone, "recipient_name": user_name, "error": str(ex)})
         return [{"branch_id": target_branch_id, "branch_name": b.get("name"), "recipients": recipients}]
 
     # Case 2: Multi-branch / All branches dispatch
@@ -5838,6 +5857,7 @@ async def dispatch_daily_reports(
 
             recipients = []
             for phone in target_managers:
+                user_name = get_recipient_name(phone)
                 try:
                     res = await send_daily_summary_whatsapp(
                         to_phone=phone,
@@ -5847,11 +5867,12 @@ async def dispatch_daily_reports(
                         dryers_summary=dry_s,
                         deliv_summary=del_s,
                         fin_summary=fin_s,
-                        full_message_text=msg
+                        full_message_text=msg,
+                        recipient_name=user_name
                     )
-                    recipients.append({"phone": phone, "result": res})
+                    recipients.append({"phone": phone, "recipient_name": user_name, "result": res})
                 except Exception as ex:
-                    recipients.append({"phone": phone, "error": str(ex)})
+                    recipients.append({"phone": phone, "recipient_name": user_name, "error": str(ex)})
             results.append({"branch_id": bid, "branch_name": branch.get("name"), "type": "branch_manager", "recipients": recipients})
 
     # 2. For Owner / Executives: Send ONE SINGLE consolidated message combining all branches!

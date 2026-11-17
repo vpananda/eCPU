@@ -515,12 +515,13 @@ async def send_daily_summary_whatsapp(
     deliv_summary: str,
     fin_summary: str,
     full_message_text: str = "",
-    branch_breakdown: str = ""
+    branch_breakdown: str = "",
+    recipient_name: str = "Director / Manager"
 ) -> Dict[str, Any]:
     """
     Sends daily operational summary to a recipient.
     For All Branches (Executives/Directors): Uses approved 'e3_executive_summary_v1' with full branch breakdown.
-    For Individual Branches: Uses approved 'e3_daily_summary_v1'.
+    For Individual Branches: Uses approved 'e3_daily_summary_v1' personalized with recipient name.
     Falls back to direct freeform text if template fails.
     """
     clean_to = clean_phone_number(to_phone)
@@ -549,7 +550,7 @@ async def send_daily_summary_whatsapp(
                 to_phone=clean_to,
                 template_name="e3_daily_summary_v1",
                 parameters=[
-                    "Director / Manager",
+                    recipient_name or "Director / Manager",
                     branch_name,
                     date_display,
                     arr_summary,

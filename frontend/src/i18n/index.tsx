@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { storage } from "@/src/utils/storage";
+import { api, getToken } from "@/src/api";
 
 export type LanguageCode = "en" | "ta" | "ml" | "hi";
 
@@ -62,6 +63,53 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "common.loading": "Loading...",
     "common.search": "Search...",
 
+    // Greetings
+    "greeting.morning": "Good Morning",
+    "greeting.afternoon": "Good Afternoon",
+    "greeting.evening": "Good Evening",
+
+    // Bottom Navigation Tabs
+    "tabs.home": "Home",
+    "tabs.customers": "Customers",
+    "tabs.new_entry": "New",
+    "tabs.machines": "Dryers",
+    "tabs.more": "More",
+
+    // Date Presets
+    "date.today": "Today",
+    "date.yesterday": "Yesterday",
+    "date.this_week": "This Week",
+    "date.this_month": "This Month",
+    "date.all_time": "All Time",
+    "date.custom": "Custom",
+
+    // KPI Cards
+    "kpi.today_arrivals": "TODAY ARRIVALS",
+    "kpi.in_dryers": "IN DRYERS",
+    "kpi.completed_today": "COMPLETED TODAY",
+    "kpi.delivered_today": "DELIVERED TODAY",
+    "kpi.collections_today": "COLLECTIONS TODAY",
+    "kpi.outstanding_balance": "OUTSTANDING BALANCE",
+
+    // Dashboard Sections
+    "section.plant_operations": "Plant Operations",
+    "section.finance_trade": "Finance & Trade",
+    "section.live_dryers": "Live Dryers & Running Loads",
+    "section.recent_activity": "Recent Activity & Arrivals",
+    "section.all_batches": "All Batches",
+
+    // Quick Actions
+    "quick.arrival": "New Arrival",
+    "quick.arrival_sub": "Record new wet cardamom produce received from farmer",
+    "quick.processing": "Processing",
+    "quick.processing_sub": "Load arrivals into dryers & track running batches",
+    "quick.deliver": "Deliver",
+    "quick.deliver_sub": "Handover dried spice outturn to customer",
+    "quick.cash_book": "Cash Book",
+    "quick.cash_book_sub": "Record inflows, expenses & pending collections",
+    "quick.sale": "Record Sale",
+    "quick.sale_sub": "Create spice sales invoice & customer receipt",
+
     // Processing / Batching
     "processing.start_drying": "Start Drying",
     "processing.running_batches": "Running Batches",
@@ -78,13 +126,6 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "processing.drying": "Drying",
     "processing.loaded": "Loaded",
     "processing.completed": "Completed",
-
-    // Quick Actions
-    "quick.arrival": "New Arrival",
-    "quick.processing": "Processing",
-    "quick.deliver": "Deliver",
-    "quick.cash_book": "Cash Book",
-    "quick.sale": "Record Sale",
   },
 
   ta: {
@@ -131,6 +172,53 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "common.loading": "ஏற்றுகிறது...",
     "common.search": "தேடுக...",
 
+    // Greetings
+    "greeting.morning": "காலை வணக்கம்",
+    "greeting.afternoon": "மதிய வணக்கம்",
+    "greeting.evening": "மாலை வணக்கம்",
+
+    // Bottom Navigation Tabs
+    "tabs.home": "முகப்பு",
+    "tabs.customers": "வாடிக்கையாளர்",
+    "tabs.new_entry": "புதியது",
+    "tabs.machines": "டிரையர்கள்",
+    "tabs.more": "மேலும்",
+
+    // Date Presets
+    "date.today": "இன்று",
+    "date.yesterday": "நேற்று",
+    "date.this_week": "இந்த வாரம்",
+    "date.this_month": "இந்த மாதம்",
+    "date.all_time": "அனைத்து காலம்",
+    "date.custom": "விருப்ப தேதி",
+
+    // KPI Cards
+    "kpi.today_arrivals": "இன்றைய வரவு",
+    "kpi.in_dryers": "டிரையரில் உள்ளவை",
+    "kpi.completed_today": "இன்று முடிந்தது",
+    "kpi.delivered_today": "இன்று டெலிவரி",
+    "kpi.collections_today": "இன்றைய வசூல்",
+    "kpi.outstanding_balance": "நிலுவைத் தொகை",
+
+    // Dashboard Sections
+    "section.plant_operations": "ஆலை செயல்பாடுகள்",
+    "section.finance_trade": "நிதி & வர்த்தகம்",
+    "section.live_dryers": "இயங்கும் டிரையர்கள் & லோடுகள்",
+    "section.recent_activity": "சமீபத்திய வரவுகள்",
+    "section.all_batches": "அனைத்து பேட்ச்கள்",
+
+    // Quick Actions
+    "quick.arrival": "புதிய வரவு",
+    "quick.arrival_sub": "விவசாயியிடமிருந்து புதிய பச்சை ஏலக்காய் வரவு பதிவு செய்க",
+    "quick.processing": "உலர்த்தல்",
+    "quick.processing_sub": "டிரையரில் ஏற்றி உலர்த்தலை கண்காணிக்க",
+    "quick.deliver": "டெலிவரி",
+    "quick.deliver_sub": "உலர்ந்த ஏலக்காயை வாடிக்கையாளரிடம் ஒப்படைக்க",
+    "quick.cash_book": "பணப் பதிவேடு",
+    "quick.cash_book_sub": "வரவு, செலவு மற்றும் நிலுவை வசூல் பதிவு",
+    "quick.sale": "விற்பனை",
+    "quick.sale_sub": "ஏலக்காய் விற்பனை ரசீது உருவாக்க",
+
     // Processing / Batching
     "processing.start_drying": "உலர்த்தலைத் தொடங்கு",
     "processing.running_batches": "இயங்கும் பேட்ச்கள்",
@@ -147,13 +235,6 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "processing.drying": "உலர்த்தல்",
     "processing.loaded": "ஏற்றப்பட்டது",
     "processing.completed": "முடிந்தது",
-
-    // Quick Actions
-    "quick.arrival": "புதிய வரவு",
-    "quick.processing": "உலர்த்தல்",
-    "quick.deliver": "டெலிவரி",
-    "quick.cash_book": "பணப் பதிவேடு",
-    "quick.sale": "விற்பனை",
   },
 
   ml: {
@@ -200,6 +281,53 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "common.loading": "ലോഡ് ചെയ്യുന്നു...",
     "common.search": "തിരയുക...",
 
+    // Greetings
+    "greeting.morning": "സുപ്രഭാതം",
+    "greeting.afternoon": "ശുഭദിനം",
+    "greeting.evening": "ശുഭസായാഹ്നം",
+
+    // Bottom Navigation Tabs
+    "tabs.home": "ഹോം",
+    "tabs.customers": "ഉപഭോക്താക്കൾ",
+    "tabs.new_entry": "പുതിയത്",
+    "tabs.machines": "ഡ്രയറുകൾ",
+    "tabs.more": "കൂടുതൽ",
+
+    // Date Presets
+    "date.today": "ഇന്ന്",
+    "date.yesterday": "ഇന്നലെ",
+    "date.this_week": "ഈ ആഴ്ച",
+    "date.this_month": "ഈ മാസം",
+    "date.all_time": "എല്ലാ സമയവും",
+    "date.custom": "കസ്റ്റം",
+
+    // KPI Cards
+    "kpi.today_arrivals": "ഇന്നത്തെ വരവ്",
+    "kpi.in_dryers": "ഡ്രയറിലുള്ളവ",
+    "kpi.completed_today": "ഇന്ന് പൂർത്തിയായവ",
+    "kpi.delivered_today": "ഇന്ന് വിതരണം ചെയ്തവ",
+    "kpi.collections_today": "ഇന്നത്തെ വരുമാനം",
+    "kpi.outstanding_balance": "ബാക്കി തുക",
+
+    // Dashboard Sections
+    "section.plant_operations": "പ്ലാന്റ് പ്രവർത്തനങ്ങൾ",
+    "section.finance_trade": "ധനകാര്യവും വ്യാപാരവും",
+    "section.live_dryers": "പ്രവർത്തിക്കുന്ന ഡ്രയറുകൾ",
+    "section.recent_activity": "സമീപകാല പ്രവർത്തനങ്ങൾ",
+    "section.all_batches": "എല്ലാ ബാച്ചുകളും",
+
+    // Quick Actions
+    "quick.arrival": "പുതിയ വരവ്",
+    "quick.arrival_sub": "കർഷകരിൽ നിന്ന് പച്ച ഏലക്കായ വരവ് രേഖപ്പെടുത്തുക",
+    "quick.processing": "സംസ്കരണം",
+    "quick.processing_sub": "ഡ്രയറുകളിലേക്ക് കയറ്റി നിരീക്ഷിക്കുക",
+    "quick.deliver": "ഡെലിവറി",
+    "quick.deliver_sub": "ഉണങ്ങിയ ചരക്ക് ഉപഭോക്താവിന് കൈമാറുക",
+    "quick.cash_book": "കാഷ് ബുക്ക്",
+    "quick.cash_book_sub": "വരവ്, ചെലവ്, കളക്ഷനുകൾ രേഖപ്പെടുത്തുക",
+    "quick.sale": "വിൽപ്പന",
+    "quick.sale_sub": "വിൽപ്പന ഇൻവോയ്സും രസീതും തയ്യാറാക്കുക",
+
     // Processing / Batching
     "processing.start_drying": "ഡ്രയിംഗ് ആരംഭിക്കുക",
     "processing.running_batches": "പ്രവർത്തിക്കുന്ന ബാച്ചുകൾ",
@@ -216,13 +344,6 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "processing.drying": "ഡ്രയിംഗ്",
     "processing.loaded": "കയറ്റി",
     "processing.completed": "പൂർത്തിയായി",
-
-    // Quick Actions
-    "quick.arrival": "പുതിയ വരവ്",
-    "quick.processing": "സംസ്കരണം",
-    "quick.deliver": "ഡെലിവറി",
-    "quick.cash_book": "കാഷ് ബുക്ക്",
-    "quick.sale": "വിൽപ്പന",
   },
 
   hi: {
@@ -269,6 +390,53 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "common.loading": "लोड हो रहा है...",
     "common.search": "खोजें...",
 
+    // Greetings
+    "greeting.morning": "शुभ प्रभात",
+    "greeting.afternoon": "शुभ दोपहर",
+    "greeting.evening": "शुभ संध्या",
+
+    // Bottom Navigation Tabs
+    "tabs.home": "होम",
+    "tabs.customers": "ग्राहक",
+    "tabs.new_entry": "नया",
+    "tabs.machines": "ड्रायर",
+    "tabs.more": "अन्य",
+
+    // Date Presets
+    "date.today": "आज",
+    "date.yesterday": "कल (बीता हुआ)",
+    "date.this_week": "इस सप्ताह",
+    "date.this_month": "इस महीने",
+    "date.all_time": "सभी समय",
+    "date.custom": "कस्टम",
+
+    // KPI Cards
+    "kpi.today_arrivals": "आज की आवक",
+    "kpi.in_dryers": "ड्रायर में",
+    "kpi.completed_today": "आज पूर्ण हुए",
+    "kpi.delivered_today": "आज डिलीवर हुए",
+    "kpi.collections_today": "आज का संग्रह",
+    "kpi.outstanding_balance": "कुल बकाया",
+
+    // Dashboard Sections
+    "section.plant_operations": "प्लांट संचालन",
+    "section.finance_trade": "वित्त और व्यापार",
+    "section.live_dryers": "चालू ड्रायर और लोड",
+    "section.recent_activity": "हालिया गतिविधियाँ",
+    "section.all_batches": "सभी बैच",
+
+    // Quick Actions
+    "quick.arrival": "नई आवक",
+    "quick.arrival_sub": "किसान से प्राप्त नई हरी इलायची दर्ज करें",
+    "quick.processing": "प्रोसेसिंग",
+    "quick.processing_sub": "ड्रायर में लोड करें और चालू बैच ट्रैक करें",
+    "quick.deliver": "डिलीवरी",
+    "quick.deliver_sub": "सूखी इलायची ग्राहक को सौंपें",
+    "quick.cash_book": "कैश बुक",
+    "quick.cash_book_sub": "आय, व्यय और बकाया भुगतान दर्ज करें",
+    "quick.sale": "बिक्री",
+    "quick.sale_sub": "बिक्री बिल और रसीद बनाएं",
+
     // Processing / Batching
     "processing.start_drying": "सुखाना शुरू करें",
     "processing.running_batches": "चालू बैच",
@@ -285,13 +453,6 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     "processing.drying": "सूख रहा है",
     "processing.loaded": "लोड किया गया",
     "processing.completed": "पूर्ण हुआ",
-
-    // Quick Actions
-    "quick.arrival": "नई आवक",
-    "quick.processing": "प्रोसेसिंग",
-    "quick.deliver": "डिलीवरी",
-    "quick.cash_book": "कैश बुक",
-    "quick.sale": "बिक्री",
   },
 };
 
@@ -328,7 +489,17 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const setLanguage = useCallback(async (lang: LanguageCode) => {
     setLanguageState(lang);
     try {
+      // 1. Save locally in device storage (works offline & persistent)
       await storage.setItem(LANGUAGE_STORAGE_KEY, lang);
+
+      // 2. Sync to user profile in backend if authenticated
+      const token = await getToken();
+      if (token) {
+        api("/users/me", {
+          method: "PUT",
+          body: { preferred_language: lang }
+        }).catch(() => {});
+      }
     } catch {}
   }, []);
 

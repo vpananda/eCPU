@@ -12,6 +12,8 @@ import Calendar from "@/src/components/Calendar";
 import Loader from "@/src/components/Loader";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { storage } from "@/src/utils/storage";
+import { useLanguage } from "@/src/i18n";
+import { LanguagePickerModal } from "@/src/components/LanguagePickerModal";
 
 const { width } = Dimensions.get("window");
 
@@ -193,19 +195,23 @@ export default function Dashboard() {
   const [activePreset, setActivePreset] = useState("today");
   
   const [branchModalOpen, setBranchModalOpen] = useState(false);
+  const [langModalOpen, setLangModalOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(start);
   const [draftEnd, setDraftEnd] = useState(end);
 
+  const { language, setLanguage, t, languages } = useLanguage();
+  const currentLangObj = languages.find(l => l.code === language) || languages[0];
+
   const role = user?.role || "Store Incharge";
   const userBranchName = user?.branch_id
     ? branches.find(b => b.id === user.branch_id)?.name || "My Branch"
-    : "All Branches";
+    : t("common.all_branches", "All Branches");
 
   const activeBranchName = selectedBranchId
     ? branches.find(b => b.id === selectedBranchId)?.name || "Selected Branch"
-    : "All Branches";
+    : t("common.all_branches", "All Branches");
 
   const alertItems = React.useMemo(() => {
     const list: Array<{
@@ -401,9 +407,9 @@ export default function Dashboard() {
   // Greeting based on time of day
   const getGreeting = () => {
     const hrs = new Date().getHours();
-    if (hrs < 12) return "Good Morning";
-    if (hrs < 17) return "Good Afternoon";
-    return "Good Evening";
+    if (hrs < 12) return t("greeting.morning", "Good Morning");
+    if (hrs < 17) return t("greeting.afternoon", "Good Afternoon");
+    return t("greeting.evening", "Good Evening");
   };
 
   // SVG Chart 1 calculation: Daily Collection
@@ -468,6 +474,18 @@ export default function Dashboard() {
                 </View>
               )}
 
+              {/* Language Selector Pill */}
+              <TouchableOpacity
+                onPress={() => setLangModalOpen(true)}
+                style={styles.langSelectorPill}
+                activeOpacity={0.75}
+                accessibilityLabel="Switch Language"
+              >
+                <MaterialCommunityIcons name="translate" size={12} color="#6D28D9" />
+                <Text style={styles.langSelectorText}>{currentLangObj.flag} {currentLangObj.nativeName}</Text>
+                <MaterialCommunityIcons name="chevron-down" size={12} color="#6D28D9" />
+              </TouchableOpacity>
+
               <View style={styles.rolePill}>
                 <Text style={styles.rolePillText}>{role}</Text>
               </View>
@@ -530,7 +548,11 @@ export default function Dashboard() {
                   activeOpacity={0.75}
                 >
                   <Text style={[styles.datePillText, active && styles.datePillTextActive]}>
-                    {p.label}
+                    {p.key === "today" ? t("date.today", p.label) :
+                     p.key === "yesterday" ? t("date.yesterday", p.label) :
+                     p.key === "week" ? t("date.this_week", p.label) :
+                     p.key === "month" ? t("date.this_month", p.label) :
+                     p.key === "all" ? t("date.all_time", p.label) : p.label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -552,7 +574,7 @@ export default function Dashboard() {
                 style={{ marginRight: 5 }}
               />
               <Text style={[styles.datePillText, activePreset === "custom" && styles.datePillTextActive]}>
-                Custom Range
+                {t("date.custom", "Custom Range")}
               </Text>
             </TouchableOpacity>
           </ScrollView>
@@ -596,9 +618,9 @@ export default function Dashboard() {
           <View style={styles.dashboardContent}>
             {/* 3. Produce & Drying Operations Hub */}
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitleText}>PRODUCE SUMMARY</Text>
+              <Text style={styles.sectionTitleText}>{t("section.plant_operations", "PRODUCE SUMMARY")}</Text>
               <Text style={styles.sectionDateText}>
-                {activePreset === "all" ? "All Time" : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)}
+                {activePreset === "all" ? t("date.all_time", "All Time") : (start === end ? fmtDisplayDate(start) : `${fmtDisplayDate(start)} - ${fmtDisplayDate(end)}`)}
               </Text>
             </View>
 
@@ -619,7 +641,7 @@ export default function Dashboard() {
                           <MaterialCommunityIcons name="arrow-bottom-left" size={16} color="#2E7D32" />
                         </View>
                         <View style={{ flex: 1, minWidth: 0, justifyContent: "center" }}>
-                          <Text style={styles.hubMicroLabel} numberOfLines={1}>TOTAL RECEIVED</Text>
+                          <Text style={styles.hubMicroLabel} numberOfLines={1}>{t("kpi.today_arrivals", "TOTAL RECEIVED")}</Text>
                           <Text
                             numberOfLines={1}
                             adjustsFontSizeToFit
@@ -643,7 +665,7 @@ export default function Dashboard() {
                           <MaterialCommunityIcons name="arrow-top-right" size={16} color="#7B1FA2" />
                         </View>
                         <View style={{ flex: 1, minWidth: 0, justifyContent: "center" }}>
-                          <Text style={styles.hubMicroLabel} numberOfLines={1}>TOTAL DELIVERED</Text>
+                          <Text style={styles.hubMicroLabel} numberOfLines={1}>{t("kpi.delivered_today", "TOTAL DELIVERED")}</Text>
                           <Text
                             numberOfLines={1}
                             adjustsFontSizeToFit
@@ -989,34 +1011,34 @@ export default function Dashboard() {
             )}
 
             {/* 5. Quick Actions Section */}
-            <Text style={styles.sectionHeading}>Quick Actions</Text>
+            <Text style={styles.sectionHeading}>{t("tabs.new_entry", "Quick Actions")}</Text>
             <View style={styles.actionsContainer}>
               <TouchableOpacity style={styles.actionItem} onPress={() => router.push("/customer-form")}>
                 <View style={[styles.actionIconWrap, { backgroundColor: "#E8F5E9" }]}>
                   <MaterialCommunityIcons name="account-plus" size={24} color={colors.primary} />
                 </View>
-                <Text style={styles.actionText}>New Customer</Text>
+                <Text style={styles.actionText}>{t("title.customer_form", "New Customer")}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.actionItem} onPress={() => router.push("/arrival-form")}>
                 <View style={[styles.actionIconWrap, { backgroundColor: "#E3F2FD" }]}>
                   <MaterialCommunityIcons name="download" size={24} color="#1565C0" />
                 </View>
-                <Text style={styles.actionText}>Receive Stock</Text>
+                <Text style={styles.actionText}>{t("quick.arrival", "Receive Stock")}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.actionItem} onPress={() => router.push("/delivery-picker")}>
                 <View style={[styles.actionIconWrap, { backgroundColor: "#F3E5F5" }]}>
                   <MaterialCommunityIcons name="upload" size={24} color="#7B1FA2" />
                 </View>
-                <Text style={styles.actionText}>Deliver Stock</Text>
+                <Text style={styles.actionText}>{t("quick.deliver", "Deliver Stock")}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.actionItem} onPress={() => router.push("/payment-picker")}>
                 <View style={[styles.actionIconWrap, { backgroundColor: "#FFF3E0" }]}>
                   <MaterialCommunityIcons name="cash-plus" size={24} color="#F57C00" />
                 </View>
-                <Text style={styles.actionText}>Collect Payment</Text>
+                <Text style={styles.actionText}>{t("quick.cash_book", "Collect Payment")}</Text>
               </TouchableOpacity>
             </View>
 
@@ -1422,6 +1444,12 @@ export default function Dashboard() {
           </View>
         </Modal>
       )}
+
+      {/* Language Selection Modal */}
+      <LanguagePickerModal
+        visible={langModalOpen}
+        onClose={() => setLangModalOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1568,6 +1596,22 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#166534",
     maxWidth: 130,
+  },
+  langSelectorPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F3FF",
+    borderWidth: 1,
+    borderColor: "#DDD6FE",
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: radius.pill,
+    gap: 4,
+  },
+  langSelectorText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#6D28D9",
   },
   branchStaticPill: {
     flexDirection: "row",

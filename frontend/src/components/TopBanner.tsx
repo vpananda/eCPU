@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { useSync } from "@/src/sync";
 import { useLanguage, LanguageCode } from "@/src/i18n";
+import { LanguagePickerModal } from "@/src/components/LanguagePickerModal";
 import { colors, radius, spacing, shadow } from "@/src/theme";
 
 function getTitleKey(segments: string[]): string {
@@ -254,49 +255,10 @@ export function TopBanner() {
       </Modal>
 
       {/* Modal 2: Language Selection Modal */}
-      <Modal
+      <LanguagePickerModal
         visible={langModalOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setLangModalOpen(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setLangModalOpen(false)}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <MaterialCommunityIcons name="translate" size={18} color="#6D28D9" />
-                <Text style={styles.modalTitle}>{t("common.select_language", "Choose App Language")}</Text>
-              </View>
-              <TouchableOpacity onPress={() => setLangModalOpen(false)} hitSlop={8}>
-                <MaterialCommunityIcons name="close" size={22} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScroll} bounces={false}>
-              {languages.map(item => {
-                const isSelected = item.code === language;
-                return (
-                  <TouchableOpacity
-                    key={item.code}
-                    onPress={() => handleSelectLanguage(item.code)}
-                    style={[styles.modalItem, isSelected && styles.modalItemSelectedLang]}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                      <Text style={{ fontSize: 20 }}>{item.flag}</Text>
-                      <View>
-                        <Text style={[styles.modalItemText, isSelected && styles.modalItemTextSelectedLang]}>
-                          {item.nativeName}
-                        </Text>
-                        <Text style={styles.modalItemSub}>{item.label}</Text>
-                      </View>
-                    </View>
-                    {isSelected && <MaterialCommunityIcons name="check-circle" size={18} color="#6D28D9" />}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
+        onClose={() => setLangModalOpen(false)}
+      />
     </View>
   );
 }

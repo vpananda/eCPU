@@ -5,6 +5,7 @@ import { useRouter, useFocusEffect, useNavigation } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { useAuth } from "@/src/auth";
+import { useLanguage } from "@/src/i18n";
 
 interface ActionItem {
   key: string;
@@ -95,6 +96,7 @@ export default function NewEntrySheet() {
   const router = useRouter();
   const nav = useNavigation();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [visible, setVisible] = useState(false);
 
   // Open sheet whenever the tab is focused; close when navigating away
@@ -140,13 +142,13 @@ export default function NewEntrySheet() {
       {/* Main Content */}
       <View style={styles.actionBody}>
         <View style={styles.actionTopLine}>
-          <Text style={styles.actionTitle}>{item.label}</Text>
+          <Text style={styles.actionTitle}>{t(`quick.${item.key}`, item.label)}</Text>
           <View style={[styles.badge, { backgroundColor: item.badgeColor }]}>
             <Text style={[styles.badgeText, { color: item.badgeTextColor }]}>{item.badge}</Text>
           </View>
         </View>
         <Text style={styles.actionSubtitle} numberOfLines={2}>
-          {item.subtitle}
+          {t(`quick.${item.key}_sub`, item.subtitle)}
         </Text>
       </View>
 
@@ -183,7 +185,7 @@ export default function NewEntrySheet() {
               {/* 1. PLANT OPERATIONS SECTION */}
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionHeaderLine} />
-                <Text style={styles.sectionTitle}>PLANT OPERATIONS</Text>
+                <Text style={styles.sectionTitle}>{t("section.plant_operations", "PLANT OPERATIONS")}</Text>
                 <View style={styles.sectionHeaderLine} />
               </View>
 
@@ -194,7 +196,7 @@ export default function NewEntrySheet() {
               {/* 2. FINANCE & TRADE SECTION */}
               <View style={[styles.sectionHeader, { marginTop: spacing.md }]}>
                 <View style={styles.sectionHeaderLine} />
-                <Text style={styles.sectionTitle}>FINANCE & TRADE</Text>
+                <Text style={styles.sectionTitle}>{t("section.finance_trade", "FINANCE & TRADE")}</Text>
                 <View style={styles.sectionHeaderLine} />
               </View>
 
@@ -204,7 +206,7 @@ export default function NewEntrySheet() {
 
               {/* Cancel Dismiss Button */}
               <TouchableOpacity testID="quick-cancel" style={styles.cancelBtn} onPress={close} activeOpacity={0.8}>
-                <Text style={styles.cancelText}>Cancel</Text>
+                <Text style={styles.cancelText}>{t("common.cancel", "Cancel")}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>

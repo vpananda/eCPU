@@ -4,6 +4,7 @@ import { View, StyleSheet, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "@/src/theme";
+import { useLanguage } from "@/src/i18n";
 
 const ICONS: Record<string, any> = {
   dashboard: "home",
@@ -15,6 +16,7 @@ const ICONS: Record<string, any> = {
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { t } = useLanguage();
 
   return (
     <Tabs
@@ -42,8 +44,8 @@ export default function TabLayout() {
         },
       })}
     >
-      <Tabs.Screen name="dashboard" options={{ title: "Home" }} />
-      <Tabs.Screen name="customers" options={{ title: "Customers" }} />
+      <Tabs.Screen name="dashboard" options={{ title: t("tabs.home", "Home") }} />
+      <Tabs.Screen name="customers" options={{ title: t("tabs.customers", "Customers") }} />
       <Tabs.Screen
         name="new-entry"
         options={{
@@ -51,8 +53,8 @@ export default function TabLayout() {
           tabBarLabel: () => null,
         }}
       />
-      <Tabs.Screen name="machines" options={{ title: "Machines" }} />
-      <Tabs.Screen name="more" options={{ title: "More" }} />
+      <Tabs.Screen name="machines" options={{ title: t("tabs.machines", "Machines") }} />
+      <Tabs.Screen name="more" options={{ title: t("tabs.more", "More") }} />
     </Tabs>
   );
 }

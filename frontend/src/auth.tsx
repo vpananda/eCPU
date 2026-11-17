@@ -13,6 +13,7 @@ type User = {
   picture?: string;
   role: "Admin" | "Manager" | "Store Incharge";
   branch_id?: string;
+  preferred_language?: string;
 };
 
 type AuthCtx = {
@@ -34,6 +35,9 @@ export const useAuth = () => useContext(Ctx);
 async function persistSession(token: string, user: User, setUser: (u: User) => void) {
   await setToken(token);
   await storage.setItem("ethree_auth_user_json", JSON.stringify(user));
+  if (user.preferred_language) {
+    await storage.setItem("ethree_app_language", user.preferred_language);
+  }
   setUser(user);
 }
 

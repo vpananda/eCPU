@@ -1,10 +1,95 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Modal } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect, useNavigation } from "expo-router";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { useAuth } from "@/src/auth";
+
+interface ActionItem {
+  key: string;
+  label: string;
+  subtitle: string;
+  badge: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  iconColor: string;
+  badgeColor: string;
+  badgeTextColor: string;
+  cardBorder: string;
+  cardBg: string;
+  route: string;
+}
+
+const PLANT_OPERATIONS: ActionItem[] = [
+  {
+    key: "arrival",
+    label: "Arrival",
+    subtitle: "Record new wet cardamom produce received from farmer",
+    badge: "1 · INBOUND",
+    icon: "arrow-down-circle",
+    iconColor: "#15803D",
+    badgeColor: "#DCFCE7",
+    badgeTextColor: "#15803D",
+    cardBorder: "#DCFCE7",
+    cardBg: "#FAFCFA",
+    route: "/arrival-form",
+  },
+  {
+    key: "processing",
+    label: "Processing",
+    subtitle: "Load arrivals into dryers & track running batches",
+    badge: "2 · DRYING",
+    icon: "engine-outline",
+    iconColor: "#C2410C",
+    badgeColor: "#FFEDD5",
+    badgeTextColor: "#C2410C",
+    cardBorder: "#FFEDD5",
+    cardBg: "#FFFDFB",
+    route: "/batching-form",
+  },
+  {
+    key: "deliver",
+    label: "Deliver",
+    subtitle: "Handover dried spice outturn to customer",
+    badge: "3 · DISPATCH",
+    icon: "truck-fast",
+    iconColor: "#7C3AED",
+    badgeColor: "#F3E8FF",
+    badgeTextColor: "#7C3AED",
+    cardBorder: "#F3E8FF",
+    cardBg: "#FCFAFF",
+    route: "/delivery-picker",
+  },
+];
+
+const FINANCE_ACTIONS: ActionItem[] = [
+  {
+    key: "payment",
+    label: "Cash Book",
+    subtitle: "Record inflows, expenses & pending collections",
+    badge: "ACCOUNTS",
+    icon: "book-open-page-variant",
+    iconColor: "#0284C7",
+    badgeColor: "#E0F2FE",
+    badgeTextColor: "#0284C7",
+    cardBorder: "#E0F2FE",
+    cardBg: "#F8FAFC",
+    route: "/payments",
+  },
+  {
+    key: "sale",
+    label: "Sale",
+    subtitle: "Create spice sales invoice & customer receipt",
+    badge: "TRADE",
+    icon: "tag-outline",
+    iconColor: "#0D9488",
+    badgeColor: "#CCFBF1",
+    badgeTextColor: "#0D9488",
+    cardBorder: "#CCFBF1",
+    cardBg: "#F8FAFC",
+    route: "/sale-form",
+  },
+];
 
 export default function NewEntrySheet() {
   const router = useRouter();
@@ -33,6 +118,43 @@ export default function NewEntrySheet() {
     setTimeout(() => router.push(route), 100);
   };
 
+  const renderActionRow = (item: ActionItem) => (
+    <TouchableOpacity
+      key={item.key}
+      testID={`quick-${item.key}`}
+      style={[
+        styles.actionRow,
+        {
+          borderColor: item.cardBorder,
+          backgroundColor: item.cardBg,
+        },
+      ]}
+      activeOpacity={0.78}
+      onPress={() => go(item.route)}
+    >
+      {/* Icon Box */}
+      <View style={[styles.iconBox, { backgroundColor: item.badgeColor }]}>
+        <MaterialCommunityIcons name={item.icon} size={28} color={item.iconColor} />
+      </View>
+
+      {/* Main Content */}
+      <View style={styles.actionBody}>
+        <View style={styles.actionTopLine}>
+          <Text style={styles.actionTitle}>{item.label}</Text>
+          <View style={[styles.badge, { backgroundColor: item.badgeColor }]}>
+            <Text style={[styles.badgeText, { color: item.badgeTextColor }]}>{item.badge}</Text>
+          </View>
+        </View>
+        <Text style={styles.actionSubtitle} numberOfLines={2}>
+          {item.subtitle}
+        </Text>
+      </View>
+
+      {/* Navigation Arrow */}
+      <MaterialCommunityIcons name="chevron-right" size={24} color="#94A3B8" style={styles.chevron} />
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <Modal transparent visible={visible} animationType="fade" onRequestClose={close}>
@@ -53,121 +175,38 @@ export default function NewEntrySheet() {
               </TouchableOpacity>
             </View>
 
-            {/* 1. PLANT OPERATIONS SECTION (Arrival -> Processing -> Deliver) */}
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionHeaderLine} />
-              <Text style={styles.sectionTitle}>PLANT OPERATIONS</Text>
-              <View style={styles.sectionHeaderLine} />
-            </View>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scrollContent}
+              bounces={false}
+            >
+              {/* 1. PLANT OPERATIONS SECTION */}
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderLine} />
+                <Text style={styles.sectionTitle}>PLANT OPERATIONS</Text>
+                <View style={styles.sectionHeaderLine} />
+              </View>
 
-            <View style={styles.pipelineRow}>
-              {/* Step 1: Arrival */}
-              <TouchableOpacity
-                testID="quick-arrival"
-                style={[styles.pipelineCard, { borderColor: "#DCFCE7", backgroundColor: "#FAFCFA" }]}
-                activeOpacity={0.8}
-                onPress={() => go("/arrival-form")}
-              >
-                <View style={[styles.stepBadge, { backgroundColor: "#DCFCE7" }]}>
-                  <Text style={[styles.stepBadgeText, { color: "#15803D" }]}>1 · INBOUND</Text>
-                </View>
-                <View style={[styles.iconBoxCircle, { backgroundColor: "#DCFCE7" }]}>
-                  <MaterialCommunityIcons name="arrow-down-circle" size={30} color="#15803D" />
-                </View>
-                <Text style={styles.pipelineCardTitle}>Arrival</Text>
-                <Text style={styles.pipelineCardSub}>Wet produce</Text>
+              <View style={styles.groupRows}>
+                {PLANT_OPERATIONS.map(renderActionRow)}
+              </View>
+
+              {/* 2. FINANCE & TRADE SECTION */}
+              <View style={[styles.sectionHeader, { marginTop: spacing.md }]}>
+                <View style={styles.sectionHeaderLine} />
+                <Text style={styles.sectionTitle}>FINANCE & TRADE</Text>
+                <View style={styles.sectionHeaderLine} />
+              </View>
+
+              <View style={styles.groupRows}>
+                {FINANCE_ACTIONS.map(renderActionRow)}
+              </View>
+
+              {/* Cancel Dismiss Button */}
+              <TouchableOpacity testID="quick-cancel" style={styles.cancelBtn} onPress={close} activeOpacity={0.8}>
+                <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
-
-              {/* Step 2: Processing */}
-              <TouchableOpacity
-                testID="quick-processing"
-                style={[styles.pipelineCard, { borderColor: "#FFEDD5", backgroundColor: "#FFFDFB" }]}
-                activeOpacity={0.8}
-                onPress={() => go("/batching-form")}
-              >
-                <View style={[styles.stepBadge, { backgroundColor: "#FFEDD5" }]}>
-                  <Text style={[styles.stepBadgeText, { color: "#C2410C" }]}>2 · DRYING</Text>
-                </View>
-                <View style={[styles.iconBoxCircle, { backgroundColor: "#FFEDD5" }]}>
-                  <MaterialCommunityIcons name="engine-outline" size={30} color="#C2410C" />
-                </View>
-                <Text style={styles.pipelineCardTitle}>Processing</Text>
-                <Text style={styles.pipelineCardSub}>Load dryers</Text>
-              </TouchableOpacity>
-
-              {/* Step 3: Deliver */}
-              <TouchableOpacity
-                testID="quick-deliver"
-                style={[styles.pipelineCard, { borderColor: "#F3E8FF", backgroundColor: "#FCFAFF" }]}
-                activeOpacity={0.8}
-                onPress={() => go("/delivery-picker")}
-              >
-                <View style={[styles.stepBadge, { backgroundColor: "#F3E8FF" }]}>
-                  <Text style={[styles.stepBadgeText, { color: "#7C3AED" }]}>3 · DISPATCH</Text>
-                </View>
-                <View style={[styles.iconBoxCircle, { backgroundColor: "#F3E8FF" }]}>
-                  <MaterialCommunityIcons name="truck-fast" size={30} color="#7C3AED" />
-                </View>
-                <Text style={styles.pipelineCardTitle}>Deliver</Text>
-                <Text style={styles.pipelineCardSub}>Dry outturn</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* 2. FINANCE & COMMERCIAL SECTION */}
-            <View style={[styles.sectionHeader, { marginTop: spacing.lg }]}>
-              <View style={styles.sectionHeaderLine} />
-              <Text style={styles.sectionTitle}>FINANCE & COMMERCIAL</Text>
-              <View style={styles.sectionHeaderLine} />
-            </View>
-
-            <View style={styles.financeRow}>
-              {/* Cash Book */}
-              <TouchableOpacity
-                testID="quick-payment"
-                style={[styles.financeCard, { borderColor: "#E0F2FE", backgroundColor: "#F8FAFC" }]}
-                activeOpacity={0.8}
-                onPress={() => go("/payments")}
-              >
-                <View style={[styles.financeIconBox, { backgroundColor: "#E0F2FE" }]}>
-                  <MaterialCommunityIcons name="book-open-page-variant" size={28} color="#0284C7" />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
-                    <Text style={styles.financeTitle} numberOfLines={1}>Cash Book</Text>
-                    <View style={[styles.microTag, { backgroundColor: "#E0F2FE" }]}>
-                      <Text style={[styles.microTagText, { color: "#0284C7" }]}>ACCOUNTS</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.financeSub} numberOfLines={2}>Inflows, outflows & collections</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Product Sale */}
-              <TouchableOpacity
-                testID="quick-sale"
-                style={[styles.financeCard, { borderColor: "#CCFBF1", backgroundColor: "#F8FAFC" }]}
-                activeOpacity={0.8}
-                onPress={() => go("/sale-form")}
-              >
-                <View style={[styles.financeIconBox, { backgroundColor: "#CCFBF1" }]}>
-                  <MaterialCommunityIcons name="tag-outline" size={28} color="#0D9488" />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
-                    <Text style={styles.financeTitle} numberOfLines={1}>Sale</Text>
-                    <View style={[styles.microTag, { backgroundColor: "#CCFBF1" }]}>
-                      <Text style={[styles.microTagText, { color: "#0D9488" }]}>TRADE</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.financeSub} numberOfLines={2}>Product sale invoicing</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-
-            {/* Cancel Dismiss Button */}
-            <TouchableOpacity testID="quick-cancel" style={styles.cancelBtn} onPress={close} activeOpacity={0.8}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -185,7 +224,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 32,
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 32,
+    paddingBottom: 24,
+    maxHeight: "88%",
     ...shadow.card,
   },
   handle: {
@@ -194,13 +234,13 @@ const styles = StyleSheet.create({
     height: 5,
     borderRadius: 3,
     backgroundColor: "#E2E8F0",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 14,
   },
   title: {
     fontSize: 23,
@@ -209,9 +249,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   subtitle: {
-    fontSize: 13.5,
+    fontSize: 13,
     color: "#64748B",
-    marginTop: 3,
+    marginTop: 2,
     fontWeight: "500",
   },
   closeBtn: {
@@ -223,13 +263,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginLeft: spacing.sm,
   },
+  scrollContent: {
+    paddingBottom: spacing.lg,
+  },
 
   /* Section Header Dividers */
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   sectionHeaderLine: {
     flex: 1,
@@ -244,103 +287,69 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  /* 3-Column Pipeline Grid */
-  pipelineRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  pipelineCard: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 18,
-    paddingHorizontal: 8,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    ...shadow.sm,
-  },
-  stepBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  stepBadgeText: {
-    fontSize: 9.5,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-  },
-  iconBoxCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-  pipelineCardTitle: {
-    fontSize: 15.5,
-    fontWeight: "800",
-    color: "#0F172A",
-    letterSpacing: -0.2,
-    textAlign: "center",
-  },
-  pipelineCardSub: {
-    fontSize: 11.5,
-    color: "#64748B",
-    marginTop: 3,
-    fontWeight: "500",
-    textAlign: "center",
+  /* Row List Container */
+  groupRows: {
+    gap: 10,
   },
 
-  /* 2-Column Finance Grid */
-  financeRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  financeCard: {
-    flex: 1,
+  /* Action Row Card */
+  actionRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    padding: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1.5,
     ...shadow.sm,
   },
-  financeIconBox: {
+  iconBox: {
     width: 48,
     height: 48,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+    marginRight: 14,
   },
-  financeTitle: {
-    fontSize: 15,
+  actionBody: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  actionTopLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 3,
+  },
+  actionTitle: {
+    fontSize: 16.5,
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -0.2,
   },
-  microTag: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
+  badge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 6,
   },
-  microTagText: {
-    fontSize: 9,
+  badgeText: {
+    fontSize: 9.5,
     fontWeight: "800",
-    letterSpacing: 0.3,
+    letterSpacing: 0.4,
   },
-  financeSub: {
-    fontSize: 11.5,
+  actionSubtitle: {
+    fontSize: 12.5,
     color: "#64748B",
-    lineHeight: 16,
+    lineHeight: 17,
     fontWeight: "500",
+  },
+  chevron: {
+    marginLeft: 10,
   },
 
   /* Cancel Button */
   cancelBtn: {
-    marginTop: 20,
-    paddingVertical: 15,
+    marginTop: 18,
+    paddingVertical: 14,
     borderRadius: radius.pill,
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
@@ -348,7 +357,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cancelText: {
-    fontSize: 15.5,
+    fontSize: 15,
     fontWeight: "700",
     color: "#64748B",
   },

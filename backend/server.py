@@ -1049,7 +1049,7 @@ class ArrivalIn(BaseModel):
     photos: List[str] = []
     branch_id: Optional[str] = None
     received_from: Optional[str] = ""  # Who physically brought the produce
-    allow_duplicate: Optional[bool] = False
+    allow_duplicate: Optional[Any] = False
 
 
 class BatchIn(BaseModel):
@@ -1071,7 +1071,7 @@ class BatchIn(BaseModel):
     branch_id: Optional[str] = None
     arrival_date: Optional[str] = None
     received_from: Optional[str] = ""
-    allow_duplicate: Optional[bool] = False
+    allow_duplicate: Optional[Any] = False
 
 
 class BatchUpdate(BaseModel):
@@ -2689,7 +2689,8 @@ async def create_batch(body: BatchIn, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Cannot create in this branch")
 
     # Duplicate entry prevention
-    if not body.allow_duplicate:
+    is_allow_dup = (body.allow_duplicate is True) or (isinstance(body.allow_duplicate, str) and body.allow_duplicate.lower() in ("true", "1"))
+    if not is_allow_dup:
         check_date = (b.get("arrival_date") or now_utc().isoformat())[:10]
         dup_sql = """
             SELECT b.id, b.batch_no, b.receipt_no, b.raw_weight, b.arrival_date,
@@ -2852,7 +2853,8 @@ async def create_arrival(body: ArrivalIn, user: dict = Depends(get_current_user)
     arrival_date = body.arrival_date or created_at
 
     # Duplicate entry prevention
-    if not body.allow_duplicate:
+    is_allow_dup = (body.allow_duplicate is True) or (isinstance(body.allow_duplicate, str) and body.allow_duplicate.lower() in ("true", "1"))
+    if not is_allow_dup:
         check_date = arrival_date[:10]
         dup_sql = """
             SELECT b.id, b.batch_no, b.receipt_no, b.raw_weight, b.arrival_date,

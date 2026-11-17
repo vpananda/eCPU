@@ -182,7 +182,8 @@ export default function ArrivalForm() {
     }
   }, [selectedCustomer, receivedFromEdited]);
 
-  const submit = async (allowDuplicate = false) => {
+  const submit = async (allowDuplicate: any = false) => {
+    const isDuplicateAllowed = allowDuplicate === true;
     if (!customerId) return toast.show("Select customer", "error");
     if (!productId) return toast.show("Select product (type of spice)", "error");
     const w = parseFloat(rawWeight);
@@ -191,7 +192,7 @@ export default function ArrivalForm() {
     setSaving(true);
     try {
       // Pre-check for duplicate if not already confirmed
-      if (!allowDuplicate) {
+      if (!isDuplicateAllowed) {
         try {
           const qs = new URLSearchParams({
             customer_id: customerId,
@@ -236,7 +237,7 @@ export default function ArrivalForm() {
           branch_id: branchId,
           remarks,
           photos,
-          allow_duplicate: allowDuplicate,
+          allow_duplicate: isDuplicateAllowed,
         },
       });
 
@@ -250,10 +251,11 @@ export default function ArrivalForm() {
       setRemarks("");
       setPhotos([]);
     } catch (e: any) {
-      if (e.message && e.message.toLowerCase().includes("duplicate")) {
+      const errMsg = e?.message || "";
+      if (errMsg.toLowerCase().includes("duplicate arrival detected")) {
         const proceed = await confirm({
           title: "Duplicate Arrival Detected",
-          message: `${e.message}\n\nDo you want to save this arrival anyway?`,
+          message: `${errMsg}\n\nDo you want to save this arrival anyway?`,
           confirmText: "Yes, Save Anyway",
           cancelText: "Cancel (Avoid Duplicate)",
           variant: "warning",
@@ -263,7 +265,7 @@ export default function ArrivalForm() {
           await submit(true);
         }
       } else {
-        toast.show(e.message || "Failed to record arrival", "error");
+        toast.show(errMsg || "Failed to record arrival", "error");
       }
     } finally { setSaving(false); }
   };
@@ -379,7 +381,7 @@ export default function ArrivalForm() {
             <Input testID="arrival-remarks" label="Remarks" value={remarks} onChangeText={setRemarks} multiline placeholder="Optional notes" />
 
             <View style={{ height: spacing.md }} />
-            <Button testID="arrival-submit" title="Record Arrival" onPress={submit} loading={saving} />
+            <Button testID="arrival-submit" title="Record Arrival" onPress={() => submit(false)} loading={saving} />
           </ScrollView>
         )}
       </KeyboardAvoidingView>

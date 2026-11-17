@@ -5396,6 +5396,18 @@ class DailyReportSendNowReq(BaseModel):
     admin_phones: Optional[str] = None
     target_date: Optional[str] = None
 
+def _truncate_param_lines(lines: list, max_chars: int = 900) -> str:
+    res = []
+    curr_len = 0
+    for idx, item in enumerate(lines):
+        if curr_len + len(item) + 1 > max_chars:
+            remaining = len(lines) - idx
+            res.append(f"  • ...and {remaining} more")
+            break
+        res.append(item)
+        curr_len += len(item) + 1
+    return "\n".join(res)
+
 async def generate_branch_daily_summary(branch_id: str, target_date_str: Optional[str] = None) -> dict:
     """Calculates today's operational summary for a specific branch and builds a formatted WhatsApp message."""
     ist_tz = timezone(timedelta(hours=5, minutes=30))
@@ -5411,24 +5423,39 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
     start_utc = f"{cur_date_str}T00:00:00+05:30"
     end_utc = f"{cur_date_str}T23:59:59+05:30"
     
-    # 1. Arrivals Received Today
-    arrivals_sql = """
+    # 1. Arrivals Received Today (by Customer)
+    arrivals_customer_sql = """
         SELECT 
-            COALESCE(p.name, 'Produce') as product_name,
+            COALESCE(NULLIF(TRIM(c.name), ''), 'Unknown Customer') as customer_name,
             COUNT(b.id) as lot_count,
             COALESCE(SUM(b.raw_weight), 0) as total_weight,
             COALESCE(SUM(b.bags), 0) as total_bags
         FROM public.batches b
-        LEFT JOIN public.products p ON b.product_id = p.id
+        LEFT JOIN public.customers c ON b.customer_id = c.id
         WHERE b.branch_id = %s::uuid
           AND COALESCE(b.arrival_date::date, b.created_at::date) = %s::date
-        GROUP BY p.name
+        GROUP BY c.name
+        ORDER BY total_weight DESC
     """
-    arrival_rows = await db.query(arrivals_sql, [branch_id, cur_date_str])
+    arrival_customer_rows = await db.query(arrivals_customer_sql, [branch_id, cur_date_str])
     
-    total_arr_lots = sum(r.get("lot_count", 0) for r in arrival_rows)
-    total_arr_weight = sum(float(r.get("total_weight", 0)) for r in arrival_rows)
-    total_arr_bags = sum(int(r.get("total_bags", 0)) for r in arrival_rows)
+    total_arr_lots = sum(r.get("lot_count", 0) for r in arrival_customer_rows)
+    total_arr_weight = sum(float(r.get("total_weight", 0)) for r in arrival_customer_rows)
+    total_arr_bags = sum(int(r.get("total_bags", 0)) for r in arrival_customer_rows)
+
+    if total_arr_lots > 0:
+        arr_item_lines = [
+            f"  • {r.get('customer_name')}: {float(r.get('total_weight', 0)):,.1f} KG"
+            for r in arrival_customer_rows
+        ]
+        arr_summary = f"{total_arr_weight:,.1f} KG ({total_arr_lots} Lots)\n" + _truncate_param_lines(arr_item_lines, 900)
+        arr_breakdown = "\n".join([
+            f"   • {r.get('customer_name')}: {float(r.get('total_weight', 0)):,.2f} KG"
+            for r in arrival_customer_rows
+        ])
+    else:
+        arr_summary = "No arrival"
+        arr_breakdown = "   • No arrival"
     
     # 2. Dryer Processing Status
     running_sql = """
@@ -5475,26 +5502,46 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
     mach_row = mach_rows[0] if mach_rows else {}
     total_machines = mach_row.get("total_machines", 0)
     avail_machines = mach_row.get("available_machines", 0)
+
+    dryers_summary = f"{running_machines} Active ({comp_dry_weight:,.1f} KG Dry)"
     
-    # 3. Deliveries Today
-    deliv_sql = """
+    # 3. Deliveries Today (by Customer)
+    deliv_customer_sql = """
         SELECT 
-            COUNT(id) as delivered_lots,
-            COALESCE(SUM(actual_dry_weight), 0) as delivered_dry_weight,
-            COALESCE(SUM(bill_amount), 0) as delivered_billed
-        FROM public.batches
-        WHERE branch_id = %s::uuid
-          AND status = 'Delivered'
+            COALESCE(NULLIF(TRIM(c.name), ''), 'Unknown Customer') as customer_name,
+            COUNT(b.id) as lot_count,
+            COALESCE(SUM(b.actual_dry_weight), 0) as total_dry_weight,
+            COALESCE(SUM(b.bill_amount), 0) as total_billed
+        FROM public.batches b
+        LEFT JOIN public.customers c ON b.customer_id = c.id
+        WHERE b.branch_id = %s::uuid
+          AND b.status = 'Delivered'
           AND (
-            (delivered_at >= %s::timestamptz AND delivered_at <= %s::timestamptz)
-            OR (updated_at >= %s::timestamptz AND updated_at <= %s::timestamptz)
+            (b.delivered_at >= %s::timestamptz AND b.delivered_at <= %s::timestamptz)
+            OR (b.delivered_at IS NULL AND b.updated_at >= %s::timestamptz AND b.updated_at <= %s::timestamptz)
           )
+        GROUP BY c.name
+        ORDER BY total_dry_weight DESC
     """
-    deliv_rows = await db.query(deliv_sql, [branch_id, start_utc, end_utc, start_utc, end_utc])
-    deliv_row = deliv_rows[0] if deliv_rows else {}
-    deliv_lots = deliv_row.get("delivered_lots", 0)
-    deliv_dry_weight = float(deliv_row.get("delivered_dry_weight", 0.0))
-    deliv_billed = float(deliv_row.get("delivered_billed", 0.0))
+    deliv_customer_rows = await db.query(deliv_customer_sql, [branch_id, start_utc, end_utc, start_utc, end_utc])
+    
+    deliv_lots = sum(r.get("lot_count", 0) for r in deliv_customer_rows)
+    deliv_dry_weight = sum(float(r.get("total_dry_weight", 0)) for r in deliv_customer_rows)
+    deliv_billed = sum(float(r.get("total_billed", 0)) for r in deliv_customer_rows)
+
+    if deliv_lots > 0:
+        deliv_item_lines = [
+            f"  • {r.get('customer_name')}: {float(r.get('total_dry_weight', 0)):,.1f} KG Dry"
+            for r in deliv_customer_rows
+        ]
+        deliv_summary = f"{deliv_dry_weight:,.1f} KG Dry ({deliv_lots} Lots)\n" + _truncate_param_lines(deliv_item_lines, 900)
+        deliv_breakdown = "\n".join([
+            f"   • {r.get('customer_name')}: {float(r.get('total_dry_weight', 0)):,.2f} KG Dry"
+            for r in deliv_customer_rows
+        ])
+    else:
+        deliv_summary = "No delivery"
+        deliv_breakdown = "   • No delivery"
     
     # 4. Collections Today
     pay_sql = """
@@ -5517,10 +5564,7 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
     date_display = dt_obj.strftime("%d-%b-%Y")
     time_display = now_ist.strftime("%I:%M %p")
     
-    arr_lines = []
-    for r in arrival_rows:
-        arr_lines.append(f"   • {r.get('product_name')}: {float(r.get('total_weight', 0)):,.2f} KG ({r.get('lot_count')} Lots)")
-    arr_breakdown = "\n".join(arr_lines) if arr_lines else "   • _(No new arrivals recorded today)_"
+    fin_summary = f"Billed: Rs. {deliv_billed:,.0f} | Recv: Rs. {total_collected:,.0f}" if inc_fin else "Not included"
 
     financials_text = ""
     if inc_fin:
@@ -5546,6 +5590,7 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         f"📦 *3. DELIVERIES TODAY*\n"
         f"• Produce Delivered: *{deliv_lots} Batches*\n"
         f"• Dry Dispatched: *{deliv_dry_weight:,.2f} KG*\n"
+        f"{deliv_breakdown}\n"
         f"{financials_text}"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"_Auto-generated by E3 Agro_"
@@ -5557,11 +5602,16 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
         "date": cur_date_str,
         "total_arr_weight": total_arr_weight,
         "total_arr_lots": total_arr_lots,
+        "arr_summary": arr_summary,
         "running_machines": running_machines,
         "comp_dry_weight": comp_dry_weight,
+        "dryers_summary": dryers_summary,
         "deliv_dry_weight": deliv_dry_weight,
+        "deliv_lots": deliv_lots,
+        "deliv_summary": deliv_summary,
         "deliv_billed": deliv_billed,
         "total_collected": total_collected,
+        "fin_summary": fin_summary,
         "report_phones": branch.get("report_phones", ""),
         "message": message
     }
@@ -5726,10 +5776,10 @@ async def dispatch_daily_reports(
                     logger.warning(f"Could not fetch profile incharges: {e}")
             phones = list(dict.fromkeys([p for p in (b_phones + admin_phones) if p]))
 
-        arr_summary = f"{summary.get('total_arr_weight', 0):,.1f} KG ({summary.get('total_arr_lots', 0)} Lots)"
-        dryers_summary = f"{summary.get('running_machines', 0)} Active ({summary.get('comp_dry_weight', 0):,.1f} KG Dry)"
-        deliv_summary = f"{summary.get('deliv_dry_weight', 0):,.1f} KG Dry"
-        fin_summary = f"Billed: Rs. {summary.get('deliv_billed', 0):,.0f} | Recv: Rs. {summary.get('total_collected', 0):,.0f}"
+        arr_summary = summary.get("arr_summary") or f"{summary.get('total_arr_weight', 0):,.1f} KG ({summary.get('total_arr_lots', 0)} Lots)"
+        dryers_summary = summary.get("dryers_summary") or f"{summary.get('running_machines', 0)} Active ({summary.get('comp_dry_weight', 0):,.1f} KG Dry)"
+        deliv_summary = summary.get("deliv_summary") or f"{summary.get('deliv_dry_weight', 0):,.1f} KG Dry"
+        fin_summary = summary.get("fin_summary") or f"Billed: Rs. {summary.get('deliv_billed', 0):,.0f} | Recv: Rs. {summary.get('total_collected', 0):,.0f}"
 
         recipients = []
         for phone in phones:
@@ -5781,10 +5831,10 @@ async def dispatch_daily_reports(
         target_managers = list(dict.fromkeys([p for p in manager_phones if p and p not in admin_phones]))
         if target_managers:
             msg = summary.get("message", "")
-            arr_s = f"{summary.get('total_arr_weight', 0):,.1f} KG ({summary.get('total_arr_lots', 0)} Lots)"
-            dry_s = f"{summary.get('running_machines', 0)} Active ({summary.get('comp_dry_weight', 0):,.1f} KG Dry)"
-            del_s = f"{summary.get('deliv_dry_weight', 0):,.1f} KG Dry"
-            fin_s = f"Billed: Rs. {summary.get('deliv_billed', 0):,.0f} | Recv: Rs. {summary.get('total_collected', 0):,.0f}"
+            arr_s = summary.get("arr_summary") or f"{summary.get('total_arr_weight', 0):,.1f} KG ({summary.get('total_arr_lots', 0)} Lots)"
+            dry_s = summary.get("dryers_summary") or f"{summary.get('running_machines', 0)} Active ({summary.get('comp_dry_weight', 0):,.1f} KG Dry)"
+            del_s = summary.get("deliv_summary") or f"{summary.get('deliv_dry_weight', 0):,.1f} KG Dry"
+            fin_s = summary.get("fin_summary") or f"Billed: Rs. {summary.get('deliv_billed', 0):,.0f} | Recv: Rs. {summary.get('total_collected', 0):,.0f}"
 
             recipients = []
             for phone in target_managers:

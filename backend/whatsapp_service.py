@@ -35,6 +35,17 @@ def clean_phone_number(phone: str) -> str:
         return f"91{digits[1:]}"
     return digits
 
+def sanitize_template_param(val: Any) -> str:
+    """Sanitizes text for Meta WhatsApp template parameter: strips newlines, tabs, and trims multiple spaces to prevent Meta #132018 error."""
+    s = str(val if val is not None else "").strip()
+    # Replace newlines/tabs with bullet separator
+    s = re.sub(r"[\r\n\t]+", " • ", s)
+    # Collapse 4+ consecutive spaces
+    s = re.sub(r" {4,}", "   ", s)
+    # Clean up multiple bullets e.g. " • • " -> " • "
+    s = re.sub(r"(?:•\s*){2,}", "• ", s)
+    return s.strip(" •")
+
 async def send_whatsapp_template(
     to_phone: str,
     template_name: str,
@@ -63,7 +74,7 @@ async def send_whatsapp_template(
     if parameters:
         components.append({
             "type": "body",
-            "parameters": [{"type": "text", "text": str(p)} for p in parameters]
+            "parameters": [{"type": "text", "text": sanitize_template_param(p)} for p in parameters]
         })
 
     payload: Dict[str, Any] = {

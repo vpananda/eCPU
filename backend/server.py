@@ -5400,13 +5400,13 @@ def _truncate_param_lines(lines: list, max_chars: int = 900) -> str:
     res = []
     curr_len = 0
     for idx, item in enumerate(lines):
-        if curr_len + len(item) + 1 > max_chars:
+        if curr_len + len(item) + 3 > max_chars:
             remaining = len(lines) - idx
-            res.append(f"  • ...and {remaining} more")
+            res.append(f"...and {remaining} more")
             break
         res.append(item)
-        curr_len += len(item) + 1
-    return "\n".join(res)
+        curr_len += len(item) + 3
+    return " • ".join(res)
 
 async def generate_branch_daily_summary(branch_id: str, target_date_str: Optional[str] = None) -> dict:
     """Calculates today's operational summary for a specific branch and builds a formatted WhatsApp message."""
@@ -5445,10 +5445,10 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
 
     if total_arr_lots > 0:
         arr_item_lines = [
-            f"  • {r.get('customer_name')}: {float(r.get('total_weight', 0)):,.1f} KG"
+            f"{r.get('customer_name')}: {float(r.get('total_weight', 0)):,.1f} KG"
             for r in arrival_customer_rows
         ]
-        arr_summary = f"{total_arr_weight:,.1f} KG ({total_arr_lots} Lots)\n" + _truncate_param_lines(arr_item_lines, 900)
+        arr_summary = f"{total_arr_weight:,.1f} KG ({total_arr_lots} Lots): " + _truncate_param_lines(arr_item_lines, 900)
         arr_breakdown = "\n".join([
             f"   • {r.get('customer_name')}: {float(r.get('total_weight', 0)):,.2f} KG"
             for r in arrival_customer_rows
@@ -5531,10 +5531,10 @@ async def generate_branch_daily_summary(branch_id: str, target_date_str: Optiona
 
     if deliv_lots > 0:
         deliv_item_lines = [
-            f"  • {r.get('customer_name')}: {float(r.get('total_dry_weight', 0)):,.1f} KG Dry"
+            f"{r.get('customer_name')}: {float(r.get('total_dry_weight', 0)):,.1f} KG Dry"
             for r in deliv_customer_rows
         ]
-        deliv_summary = f"{deliv_dry_weight:,.1f} KG Dry ({deliv_lots} Lots)\n" + _truncate_param_lines(deliv_item_lines, 900)
+        deliv_summary = f"{deliv_dry_weight:,.1f} KG Dry ({deliv_lots} Lots): " + _truncate_param_lines(deliv_item_lines, 900)
         deliv_breakdown = "\n".join([
             f"   • {r.get('customer_name')}: {float(r.get('total_dry_weight', 0)):,.2f} KG Dry"
             for r in deliv_customer_rows
@@ -5720,7 +5720,7 @@ def generate_consolidated_daily_summary(summaries: list) -> dict:
     if inactive_branches:
         breakdown_parts.append(f"💤 Idle: {', '.join(inactive_branches)}")
 
-    branch_breakdown_line = "\n".join(breakdown_parts) if breakdown_parts else "(No branch activity recorded today)"
+    branch_breakdown_line = " | ".join(breakdown_parts) if breakdown_parts else "(No branch activity recorded today)"
 
     return {
         "branch_id": "all",

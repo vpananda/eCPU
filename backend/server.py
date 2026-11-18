@@ -5754,6 +5754,16 @@ async def dispatch_daily_reports(
     admin_phones_str = admin_phones_override if admin_phones_override is not None else settings.get("admin_phones", "")
     admin_phones = [clean_phone_number(p.strip()) for p in admin_phones_str.replace(";", ",").split(",") if p.strip()]
 
+    # Also automatically include active Admin profiles (e.g. JP, AV, Vinoth Kumar)
+    try:
+        admin_profs = await db.query("SELECT mobile FROM public.profiles WHERE role::text = 'Admin'")
+        for ap in (admin_profs or []):
+            cleaned = clean_phone_number(ap.get("mobile", ""))
+            if cleaned and len(set(cleaned[-10:])) > 1 and cleaned not in admin_phones:
+                admin_phones.append(cleaned)
+    except Exception as e:
+        logger.warning(f"Could not fetch admin profiles: {e}")
+
     # Map phone numbers to profile names
     phone_to_name = {}
     try:
@@ -5782,15 +5792,17 @@ async def dispatch_daily_reports(
             phones = [clean_phone_number(override_phone)]
         else:
             b_phones = [clean_phone_number(p.strip()) for p in (b.get("report_phones") or "").replace(";", ",").split(",") if p.strip()]
-            if not b_phones:
-                try:
-                    incharges = await db.query(
-                        "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role::text IN ('Store Incharge', 'Manager')",
-                        (target_branch_id,)
-                    )
-                    b_phones = [clean_phone_number(inc.get("mobile", "")) for inc in (incharges or []) if clean_phone_number(inc.get("mobile", ""))]
-                except Exception as e:
-                    logger.warning(f"Could not fetch profile incharges: {e}")
+            try:
+                incharges = await db.query(
+                    "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role::text IN ('Store Incharge', 'Manager')",
+                    (target_branch_id,)
+                )
+                for inc in (incharges or []):
+                    cleaned = clean_phone_number(inc.get("mobile", ""))
+                    if cleaned and len(set(cleaned[-10:])) > 1 and cleaned not in b_phones:
+                        b_phones.append(cleaned)
+            except Exception as e:
+                logger.warning(f"Could not fetch profile incharges: {e}")
             phones = list(dict.fromkeys([p for p in (b_phones + admin_phones) if p]))
 
         arr_summary = summary.get("arr_summary") or f"{summary.get('total_arr_weight', 0):,.1f} KG ({summary.get('total_arr_lots', 0)} Lots)"
@@ -5832,19 +5844,18 @@ async def dispatch_daily_reports(
         manager_phones_str = branch.get("report_phones", "") or ""
         manager_phones = [clean_phone_number(p.strip()) for p in manager_phones_str.replace(";", ",").split(",") if p.strip()]
 
-        # Auto-fallback: if report_phones is not configured on branch, lookup Store Incharge & Manager profiles
-        if not manager_phones:
-            try:
-                incharges = await db.query(
-                    "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role::text IN ('Store Incharge', 'Manager')",
-                    (bid,)
-                )
-                for inc in (incharges or []):
-                    cleaned = clean_phone_number(inc.get("mobile", ""))
-                    if cleaned and cleaned not in manager_phones:
-                        manager_phones.append(cleaned)
-            except Exception as e:
-                logger.warning(f"Could not fetch profile incharges for branch {bid}: {e}")
+        # Automatically include active Store Incharge & Manager profiles for this branch
+        try:
+            incharges = await db.query(
+                "SELECT mobile FROM public.profiles WHERE branch_id = %s AND role::text IN ('Store Incharge', 'Manager')",
+                (bid,)
+            )
+            for inc in (incharges or []):
+                cleaned = clean_phone_number(inc.get("mobile", ""))
+                if cleaned and len(set(cleaned[-10:])) > 1 and cleaned not in manager_phones:
+                    manager_phones.append(cleaned)
+        except Exception as e:
+            logger.warning(f"Could not fetch profile incharges for branch {bid}: {e}")
 
         # Deduplicate & avoid sending to admin phones (admins receive the executive summary)
         target_managers = list(dict.fromkeys([p for p in manager_phones if p and p not in admin_phones]))

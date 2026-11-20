@@ -1361,14 +1361,16 @@ async def daily_report_scheduler_worker():
             # Trigger if enabled, current time has reached or passed scheduled send_time, and not yet sent today
             if enabled and now_hm >= send_time and last_sent_date != today_str:
                 logger.info(f"Triggering scheduled daily WhatsApp status reports at {now_hm} IST for date {today_str} (configured send_time: {send_time})...")
-                # Immediately mark last_sent_date BEFORE dispatching to prevent duplicate triggers from concurrent workers/instances
-                settings["last_sent_date"] = today_str
-                await db.settings.update_one(
-                    {"key": "daily_report_settings"},
-                    {"$set": {"value": settings}}
-                )
-                await dispatch_daily_reports()
-                logger.info(f"Scheduled daily WhatsApp status reports dispatched successfully for date {today_str}.")
+                try:
+                    res = await dispatch_daily_reports()
+                    settings["last_sent_date"] = today_str
+                    await db.settings.update_one(
+                        {"key": "daily_report_settings"},
+                        {"$set": {"value": settings}}
+                    )
+                    logger.info(f"Scheduled daily WhatsApp status reports dispatched successfully for date {today_str}: {res}")
+                except Exception as ex:
+                    logger.error(f"Error during scheduled dispatch_daily_reports for date {today_str}: {ex}")
         except asyncio.CancelledError:
             break
         except Exception as e:

@@ -6010,6 +6010,52 @@ async def send_daily_whatsapp_now(body: DailyReportSendNowReq, user: dict = Depe
     return {"success": True, "results": results}
 
 
+@api.get("/cron/daily-report")
+@api.post("/cron/daily-report")
+async def trigger_daily_report_cron(
+    key: Optional[str] = None,
+    force: Optional[bool] = False,
+    target_date: Optional[str] = None
+):
+    """
+    Public webhook endpoint for external cron services (cron-job.org, Render Cron, EasyCron, curl).
+    Allows triggering the daily operational summary without requiring a user JWT login session.
+    """
+    configured_secret = os.getenv("CRON_SECRET", "").strip()
+    if configured_secret and key != configured_secret:
+        raise HTTPException(status_code=401, detail="Invalid cron key")
+
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(timezone.utc).astimezone(ist_tz)
+    today_str = target_date if target_date else now_ist.strftime("%Y-%m-%d")
+
+    d_doc = await db.settings.find_one({"key": "daily_report_settings"}, {"_id": 0})
+    settings = (d_doc or {}).get("value") or {}
+    last_sent = settings.get("last_sent_date", "")
+
+    if not force and last_sent == today_str and not target_date:
+        return {
+            "success": True,
+            "status": "already_sent_today",
+            "date": today_str,
+            "message": f"Daily report for {today_str} was already dispatched today. Pass ?force=true to resend."
+        }
+
+    results = await dispatch_daily_reports(target_date_str=today_str)
+    settings["last_sent_date"] = today_str
+    await db.settings.update_one(
+        {"key": "daily_report_settings"},
+        {"$set": {"value": settings}},
+        upsert=True
+    )
+    return {
+        "success": True,
+        "status": "dispatched",
+        "date": today_str,
+        "results": results
+    }
+
+
 class SendSmsReq(BaseModel):
     phone: str
     message: str

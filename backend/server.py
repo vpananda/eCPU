@@ -1127,6 +1127,20 @@ class DeliveryIn(BaseModel):
     delivery_date: Optional[str] = None
 
 
+class BulkDeliveryIn(BaseModel):
+    batch_ids: List[str]
+    actual_dry_weight: float
+    processed_bags: Optional[int] = 0
+    received_by: str
+    received_by_phone: Optional[str] = ""
+    rate_per_kg: Optional[float] = None
+    amount_received: Optional[float] = 0.0
+    payment_mode: Optional[str] = "Cash"
+    signature: Optional[str] = ""
+    remarks: Optional[str] = ""
+    delivery_date: Optional[str] = None
+
+
 class PaymentIn(BaseModel):
     batch_id: Optional[str] = None
     customer_id: Optional[str] = None
@@ -3273,6 +3287,207 @@ async def deliver_batch(bid: str, body: DeliveryIn,
 
     fast_cache.clear()
     return {"ok": True, "weight_loss": weight_loss, "bill_amount": totals["bill_amount"], "balance_amount": totals["balance_amount"]}
+
+
+@api.post("/batches/bulk-delivery")
+async def bulk_deliver_batches(body: BulkDeliveryIn, user: dict = Depends(get_current_user)):
+    if not body.batch_ids:
+        raise HTTPException(status_code=400, detail="No batches selected for delivery")
+    if body.actual_dry_weight <= 0:
+        raise HTTPException(status_code=400, detail="Dry weight must be > 0")
+    if not (body.received_by or "").strip():
+        raise HTTPException(status_code=400, detail="Receiver name is required")
+
+    # Fetch and validate all batches
+    batch_ids = list(dict.fromkeys(body.batch_ids))  # deduplicate
+    batches = []
+    for bid in batch_ids:
+        b = await db.batches.find_one({"id": bid}, {"_id": 0})
+        if not b:
+            raise HTTPException(status_code=404, detail=f"Batch {bid} not found")
+        if b.get("status") not in ("Completed", "Delivered"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Batch {b.get('batch_no')} is not Completed (currently {b.get('status')})"
+            )
+        batches.append(b)
+
+    deliv_time = body.delivery_date or now_utc().isoformat()
+    total_raw_weight = sum(float(b.get("raw_weight") or 0) for b in batches)
+    sum_existing_dry = sum(float(b.get("actual_dry_weight") or 0) for b in batches)
+    use_proportional = (abs(sum_existing_dry - body.actual_dry_weight) > 0.05) or (sum_existing_dry <= 0)
+
+    delivered_batch_nos = []
+    combined_bill = 0.0
+    combined_balance = 0.0
+    combined_delivered_weight = 0.0
+
+    customer_id = batches[0].get("customer_id")
+    branch_id = batches[0].get("branch_id")
+    product_id = batches[0].get("product_id")
+
+    for b in batches:
+        bid = b["id"]
+        b_raw = float(b.get("raw_weight") or 0)
+
+        if use_proportional:
+            if total_raw_weight > 0:
+                b_dry = round(body.actual_dry_weight * (b_raw / total_raw_weight), 2)
+            else:
+                b_dry = round(body.actual_dry_weight / len(batches), 2)
+        else:
+            b_dry = float(b.get("actual_dry_weight") or 0)
+            if b_dry <= 0:
+                b_dry = round(body.actual_dry_weight * (b_raw / max(total_raw_weight, 1)), 2)
+
+        combined_delivered_weight += b_dry
+        weight_loss = round(max(0.0, b_raw - b_dry), 2)
+
+        delivery_info = {
+            "actual_dry_weight": b_dry,
+            "processed_bags": body.processed_bags or 0,
+            "weight_loss": weight_loss,
+            "delivery_date": deliv_time,
+            "received_by": body.received_by.strip(),
+            "received_by_phone": (body.received_by_phone or "").strip(),
+            "signature": body.signature or "",
+            "remarks": body.remarks or "",
+        }
+
+        upd = {
+            "actual_dry_weight": b_dry,
+            "processed_bags": body.processed_bags or 0,
+            "weight_loss": weight_loss,
+            "status": "Delivered",
+            "delivered_at": delivery_info["delivery_date"],
+            "received_by": delivery_info["received_by"],
+            "received_by_phone": delivery_info["received_by_phone"],
+            "signature": delivery_info["signature"],
+            "delivery_remarks": delivery_info["remarks"],
+            "updated_at": now_utc().isoformat(),
+            "updated_by": user["id"],
+        }
+        if body.rate_per_kg and body.rate_per_kg > 0:
+            upd["rate_per_kg"] = body.rate_per_kg
+
+        tmp = {**b, **upd}
+        totals = await recompute_batch_totals(tmp)
+        upd.update(totals)
+
+        await db.batches.update_one({"id": bid}, {"$set": upd})
+
+        if b.get("machine_id"):
+            await db.machines.update_one(
+                {"id": b["machine_id"]},
+                {"$set": {"status": "Available", "current_batch_id": None}}
+            )
+
+        await audit("delivery", "batch", bid, user, None, delivery_info)
+
+        delivered_batch_nos.append(b.get("batch_no", ""))
+        combined_bill += float(totals.get("bill_amount") or 0)
+        combined_balance += float(totals.get("balance_amount") or 0)
+
+    # Inline payment recording (if amount_received > 0)
+    # If amount_received == 0, no payment record is created. Batches remain on credit / pending balance.
+    amount_to_allocate = float(body.amount_received or 0.0)
+    if amount_to_allocate > 0:
+        for b in batches:
+            if amount_to_allocate <= 0:
+                break
+            bid = b["id"]
+            b_curr = await db.batches.find_one({"id": bid}, {"_id": 0, "balance_amount": 1})
+            b_bal = float((b_curr or {}).get("balance_amount") or 0)
+            if b_bal <= 0:
+                continue
+            pay_for_batch = min(amount_to_allocate, b_bal)
+            pay = {
+                "id": str(uuid.uuid4()),
+                "batch_id": bid,
+                "amount": pay_for_batch,
+                "mode": body.payment_mode or "Cash",
+                "remarks": "Collected at bulk delivery",
+                "customer_id": customer_id,
+                "branch_id": branch_id,
+                "created_at": now_utc().isoformat(),
+                "created_by": user["id"],
+            }
+            await db.payments.insert_one(dict(pay))
+            upd_b = await db.batches.find_one({"id": bid}, {"_id": 0})
+            if upd_b:
+                new_totals = await recompute_batch_totals(upd_b)
+                await db.batches.update_one({"id": bid}, {"$set": new_totals})
+            amount_to_allocate = round(amount_to_allocate - pay_for_batch, 2)
+
+        combined_balance = max(0.0, round(combined_bill - float(body.amount_received or 0.0), 2))
+
+    # WhatsApp Delivery Statement
+    combined_batch_str = ", ".join(delivered_batch_nos)
+    if len(delivered_batch_nos) > 2:
+        combined_batch_str = f"{delivered_batch_nos[0]}..{delivered_batch_nos[-1]} ({len(delivered_batch_nos)} Lots)"
+
+    delivered_to_str = body.received_by.strip()
+    if body.received_by_phone and body.received_by_phone.strip():
+        delivered_to_str = f"{delivered_to_str} ({body.received_by_phone.strip()})"
+
+    try:
+        cust = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+        prod = await db.products.find_one({"id": product_id}, {"_id": 0})
+        br = await db.branches.find_one({"id": branch_id}, {"_id": 0})
+        branch_name = br.get("name", "Main Plant") if br else "Main Plant"
+
+        cust_batches = await db.batches.find(
+            {"customer_id": customer_id},
+            {"_id": 0, "balance_amount": 1}
+        ).to_list(1000)
+        overall_pending = sum(float(cb.get("balance_amount") or 0) for cb in cust_batches)
+
+        phone = (cust.get("mobile") or cust.get("phone")) if cust else None
+        if cust and phone and cust.get("whatsapp_enabled", True) is not False:
+            asyncio.create_task(
+                send_delivery_statement(
+                    to_phone=phone,
+                    customer_name=cust.get("name", "Valued Customer"),
+                    product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                    batch_no=combined_batch_str,
+                    delivered_weight=round(body.actual_dry_weight, 2),
+                    delivered_to=delivered_to_str,
+                    bill_amount=round(combined_bill, 2),
+                    amount_received=float(body.amount_received or 0),
+                    batch_pending=round(combined_balance, 2),
+                    overall_pending=round(float(overall_pending), 2),
+                    branch_name=branch_name,
+                    language_code=cust.get("preferred_language") or "en"
+                )
+            )
+            logger.info(f"Queued bulk WhatsApp delivery statement for {cust.get('name')} ({phone})")
+    except Exception as e:
+        logger.error(f"Failed to queue bulk WhatsApp delivery statement: {e}")
+
+    # Google Sheets Sync
+    for b in batches:
+        try:
+            b_fresh = await db.batches.find_one({"id": b["id"]}, {"_id": 0})
+            if b_fresh:
+                asyncio.create_task(
+                    sync_delivery_to_sheets(
+                        batch=b_fresh,
+                        branch_name=branch_name,
+                        customer=cust
+                    )
+                )
+        except Exception:
+            pass
+
+    fast_cache.clear()
+    return {
+        "ok": True,
+        "count": len(batches),
+        "delivered_weight": round(body.actual_dry_weight, 2),
+        "bill_amount": round(combined_bill, 2),
+        "amount_received": float(body.amount_received or 0),
+        "balance_amount": round(combined_balance, 2)
+    }
 
 
 @api.put("/batches/{bid}")
@@ -5722,7 +5937,7 @@ def generate_consolidated_daily_summary(summaries: list) -> dict:
     if inactive_branches:
         breakdown_parts.append(f"💤 Idle: {', '.join(inactive_branches)}")
 
-    branch_breakdown_line = " | ".join(breakdown_parts) if breakdown_parts else "(No branch activity recorded today)"
+    branch_breakdown_line = "\u2028".join(breakdown_parts) if breakdown_parts else "(No branch activity recorded today)"
 
     return {
         "branch_id": "all",

@@ -56,12 +56,26 @@ type CustomerGroup = {
   avgPadiWeight: number;
 };
 
+type DayGroup = {
+  dayKey: string;
+  displayDate: string;
+  batches: Batch[];
+  totalWet: number;
+  totalDry: number;
+};
+
 const PAYMENT_MODES = ["Cash", "UPI", "Bank", "Credit"];
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "-";
   const d = new Date(iso);
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
+}
+
+function fmtDateFull(iso?: string | null) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export default function DeliveryPicker() {
@@ -71,17 +85,20 @@ export default function DeliveryPicker() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [q, setQ] = useState("");
 
-  // Customer expansion state
-  const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
+  // Search queries
+  const [qCustomer, setQCustomer] = useState("");
+  const [qLot, setQLot] = useState("");
+
+  // Customer drilldown navigation (null = list of customers, object = dedicated customer lot picker)
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerGroup | null>(null);
 
   // Multi-selection: set of selected batch IDs
   const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
 
   // Delivery Modal State
   const [modalVisible, setModalVisible] = useState(false);
-  const [activeCustomer, setActiveCustomer] = useState<CustomerGroup | null>(null);
+  const [showLotsInspector, setShowLotsInspector] = useState(false);
   const [delivDryWeight, setDelivDryWeight] = useState("");
   const [delivBags, setDelivBags] = useState("");
   const [delivRate, setDelivRate] = useState("12");
@@ -170,49 +187,82 @@ export default function DeliveryPicker() {
     return Array.from(map.values()).sort((a, b) => a.customerName.localeCompare(b.customerName));
   }, [batches]);
 
-  // Filter groups by search query
-  const filteredGroups = useMemo(() => {
-    if (!q.trim()) return customerGroups;
-    const term = q.toLowerCase();
+  // Keep selectedCustomer in sync with refreshed data
+  const currentCustomer = useMemo(() => {
+    if (!selectedCustomer) return null;
+    return customerGroups.find(g => g.customerId === selectedCustomer.customerId) || null;
+  }, [selectedCustomer, customerGroups]);
+
+  // Filter groups by customer search query
+  const filteredCustomerGroups = useMemo(() => {
+    if (!qCustomer.trim()) return customerGroups;
+    const term = qCustomer.toLowerCase();
     return customerGroups.filter(g =>
       g.customerName.toLowerCase().includes(term) ||
       g.customerMobile.includes(term) ||
       g.customerCode.toLowerCase().includes(term) ||
       g.batches.some(b => b.batch_no?.toLowerCase().includes(term))
     );
-  }, [customerGroups, q]);
+  }, [customerGroups, qCustomer]);
 
-  // Handle toggling customer accordion
-  const toggleCustomer = (group: CustomerGroup) => {
-    if (expandedCustomerId === group.customerId) {
-      setExpandedCustomerId(null);
-    } else {
-      setExpandedCustomerId(group.customerId);
-      // If no batches selected yet, or selection is from a different customer, pre-select all for this customer
-      const currentSelectedFromThisGroup = group.batches.filter(b => selectedBatchIds.has(b.id));
-      if (currentSelectedFromThisGroup.length === 0) {
-        const newSet = new Set<string>();
-        group.batches.forEach(b => newSet.add(b.id));
-        setSelectedBatchIds(newSet);
-      }
+  // For the selected customer, group their lots by Arrival Day (scales gracefully to 50+ lots)
+  const customerDayGroups: DayGroup[] = useMemo(() => {
+    if (!currentCustomer) return [];
+
+    let customerBatches = currentCustomer.batches;
+    if (qLot.trim()) {
+      const term = qLot.toLowerCase();
+      customerBatches = customerBatches.filter(b =>
+        b.batch_no.toLowerCase().includes(term) ||
+        (b.arrival_date && b.arrival_date.includes(term)) ||
+        (b.padi_weight && String(b.padi_weight).includes(term))
+      );
     }
+
+    const dayMap = new Map<string, DayGroup>();
+    for (const b of customerBatches) {
+      const rawDate = b.arrival_date || b.created_at || "Unknown Date";
+      const dayKey = rawDate.slice(0, 10);
+      const displayDate = fmtDateFull(rawDate);
+
+      if (!dayMap.has(dayKey)) {
+        dayMap.set(dayKey, {
+          dayKey,
+          displayDate,
+          batches: [],
+          totalWet: 0,
+          totalDry: 0,
+        });
+      }
+      const dg = dayMap.get(dayKey)!;
+      dg.batches.push(b);
+      dg.totalWet += Number(b.raw_weight || 0);
+      dg.totalDry += Number(b.actual_dry_weight || 0);
+    }
+
+    return Array.from(dayMap.values()).sort((a, b) => b.dayKey.localeCompare(a.dayKey));
+  }, [currentCustomer, qLot]);
+
+  // Open customer lots selection
+  const openCustomerLots = (group: CustomerGroup) => {
+    setSelectedCustomer(group);
+    setQLot("");
+    // By default, select all completed lots for this customer for instant 1-click delivery
+    const newSet = new Set<string>();
+    group.batches.forEach(b => newSet.add(b.id));
+    setSelectedBatchIds(newSet);
+  };
+
+  // Back to customer list
+  const backToCustomerList = () => {
+    setSelectedCustomer(null);
+    setSelectedBatchIds(new Set());
+    setQLot("");
   };
 
   // Toggle single batch selection
-  const toggleBatchSelect = (batchId: string, group: CustomerGroup) => {
+  const toggleBatchSelect = (batchId: string) => {
     const next = new Set(selectedBatchIds);
-    // If selecting a batch from a different customer, clear previous customer selection
-    const belongsToGroup = group.batches.some(b => b.id === batchId);
-    if (!belongsToGroup) {
-      next.clear();
-    } else {
-      // Clear any selections from other customers to keep delivery customer-scoped
-      const groupBatchIds = new Set(group.batches.map(b => b.id));
-      for (const id of next) {
-        if (!groupBatchIds.has(id)) next.delete(id);
-      }
-    }
-
     if (next.has(batchId)) {
       next.delete(batchId);
     } else {
@@ -221,17 +271,31 @@ export default function DeliveryPicker() {
     setSelectedBatchIds(next);
   };
 
-  // Select all or Deselect all for a group
-  const toggleSelectAllGroup = (group: CustomerGroup) => {
-    const allSelected = group.batches.every(b => selectedBatchIds.has(b.id));
-    const next = new Set<string>();
-    if (!allSelected) {
-      group.batches.forEach(b => next.add(b.id));
+  // Toggle select entire day (huge productivity booster for 50+ lots)
+  const toggleSelectDay = (day: DayGroup) => {
+    const allDaySelected = day.batches.every(b => selectedBatchIds.has(b.id));
+    const next = new Set(selectedBatchIds);
+    if (allDaySelected) {
+      day.batches.forEach(b => next.delete(b.id));
+    } else {
+      day.batches.forEach(b => next.add(b.id));
     }
     setSelectedBatchIds(next);
   };
 
-  // Selected aggregates
+  // Toggle Select All for customer
+  const toggleSelectAllCustomer = () => {
+    if (!currentCustomer) return;
+    const allSelected = currentCustomer.batches.length > 0 &&
+      currentCustomer.batches.every(b => selectedBatchIds.has(b.id));
+    const next = new Set<string>();
+    if (!allSelected) {
+      currentCustomer.batches.forEach(b => next.add(b.id));
+    }
+    setSelectedBatchIds(next);
+  };
+
+  // Selected batches list & calculated aggregates
   const selectedBatches = useMemo(() => {
     return batches.filter(b => selectedBatchIds.has(b.id));
   }, [batches, selectedBatchIds]);
@@ -279,8 +343,7 @@ export default function DeliveryPicker() {
   const openDeliveryModal = () => {
     if (selectedBatches.length === 0) return;
     const first = selectedBatches[0];
-    const group = customerGroups.find(g => g.customerId === (first.customer?.id || first.customer_id));
-    setActiveCustomer(group || null);
+    const group = currentCustomer || customerGroups.find(g => g.customerId === (first.customer?.id || first.customer_id));
 
     setDelivDryWeight(selectedAggregates.totalDry > 0 ? String(selectedAggregates.totalDry) : "");
     setDelivBags(selectedAggregates.totalBags > 0 ? String(selectedAggregates.totalBags) : "");
@@ -291,6 +354,7 @@ export default function DeliveryPicker() {
     setDelivReceivedPhone(group?.customerMobile || first.customer?.mobile || "");
     setDelivDate(new Date().toISOString().slice(0, 10));
     setDelivRemarks("");
+    setShowLotsInspector(false);
     setModalVisible(true);
   };
 
@@ -313,7 +377,7 @@ export default function DeliveryPicker() {
     setSubmitting(true);
     try {
       const effectiveMode = numReceived <= 0 ? "Credit" : delivPaymentMode;
-      const res = await api<any>("/batches/bulk-delivery", {
+      await api<any>("/batches/bulk-delivery", {
         method: "POST",
         body: {
           batch_ids: Array.from(selectedBatchIds),
@@ -336,7 +400,7 @@ export default function DeliveryPicker() {
       );
       setModalVisible(false);
       setSelectedBatchIds(new Set());
-      setExpandedCustomerId(null);
+      setSelectedCustomer(null);
       load();
     } catch (e: any) {
       toast.show(e.message || "Failed to record delivery", "error");
@@ -347,86 +411,83 @@ export default function DeliveryPicker() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      {/* Search Header */}
-      <View style={styles.searchWrap}>
-        <MaterialCommunityIcons name="magnify" size={20} color={colors.textMuted} />
-        <TextInput
-          testID="delivery-picker-search"
-          style={styles.search}
-          placeholder="Search customer name, code, mobile or lot..."
-          placeholderTextColor={colors.textLight}
-          value={q}
-          onChangeText={setQ}
-        />
-        {q ? (
-          <TouchableOpacity onPress={() => setQ("")}>
-            <MaterialCommunityIcons name="close-circle" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Summary Bar */}
-      <View style={styles.summaryBar}>
-        <View style={styles.summaryCol}>
-          <Text style={styles.summaryLabel}>Completed Customers</Text>
-          <Text style={styles.summaryVal}>{filteredGroups.length}</Text>
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.summaryCol}>
-          <Text style={styles.summaryLabel}>Total Lots</Text>
-          <Text style={styles.summaryVal}>
-            {filteredGroups.reduce((acc, g) => acc + g.totalArrivalLots, 0)}
-          </Text>
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.summaryCol}>
-          <Text style={styles.summaryLabel}>Wet Weight</Text>
-          <Text style={styles.summaryVal}>
-            {filteredGroups.reduce((acc, g) => acc + g.totalWetWeight, 0).toLocaleString("en-IN", { maximumFractionDigits: 1 })} kg
-          </Text>
-        </View>
-      </View>
-
-      {loading ? (
-        <View style={styles.loaderWrap}>
-          <Loader size={76} />
-          <Text style={styles.loaderTitle}>Loading Completed Produce...</Text>
-          <Text style={styles.loaderSub}>Filtering by {activeBranchName}</Text>
-        </View>
-      ) : (
-        <ScrollView
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); load(); }}
-              colors={[colors.primary]}
-              tintColor={colors.primary}
+      {/* VIEW 1: CUSTOMER LIST VIEW */}
+      {!currentCustomer ? (
+        <>
+          {/* Search Header */}
+          <View style={styles.searchWrap}>
+            <MaterialCommunityIcons name="magnify" size={20} color={colors.textMuted} />
+            <TextInput
+              testID="delivery-picker-search"
+              style={styles.search}
+              placeholder="Search customer name, code, mobile..."
+              placeholderTextColor={colors.textLight}
+              value={qCustomer}
+              onChangeText={setQCustomer}
             />
-          }
-          contentContainerStyle={{ padding: spacing.md, gap: spacing.md, paddingBottom: 130 }}
-        >
-          {filteredGroups.length === 0 && (
-            <View style={styles.empty}>
-              <MaterialCommunityIcons name="check-circle-outline" size={48} color={colors.textLight} />
-              <Text style={styles.emptyText}>No completed produce ready in {activeBranchName}</Text>
-              <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: "center", marginTop: 4 }}>
-                Lots must have drying completed before they appear for customer delivery.
+            {qCustomer ? (
+              <TouchableOpacity onPress={() => setQCustomer("")}>
+                <MaterialCommunityIcons name="close-circle" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* Overall Summary Bar */}
+          <View style={styles.summaryBar}>
+            <View style={styles.summaryCol}>
+              <Text style={styles.summaryLabel}>Completed Customers</Text>
+              <Text style={styles.summaryVal}>{filteredCustomerGroups.length}</Text>
+            </View>
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryCol}>
+              <Text style={styles.summaryLabel}>Total Lots</Text>
+              <Text style={styles.summaryVal}>
+                {filteredCustomerGroups.reduce((acc, g) => acc + g.totalArrivalLots, 0)}
               </Text>
             </View>
-          )}
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryCol}>
+              <Text style={styles.summaryLabel}>Wet Weight</Text>
+              <Text style={styles.summaryVal}>
+                {filteredCustomerGroups.reduce((acc, g) => acc + g.totalWetWeight, 0).toLocaleString("en-IN", { maximumFractionDigits: 1 })} kg
+              </Text>
+            </View>
+          </View>
 
-          {filteredGroups.map(group => {
-            const isExpanded = expandedCustomerId === group.customerId;
-            const groupSelectedCount = group.batches.filter(b => selectedBatchIds.has(b.id)).length;
-            const allSelected = groupSelectedCount === group.batches.length && group.batches.length > 0;
+          {loading ? (
+            <View style={styles.loaderWrap}>
+              <Loader size={76} />
+              <Text style={styles.loaderTitle}>Loading Completed Produce...</Text>
+              <Text style={styles.loaderSub}>Filtering by {activeBranchName}</Text>
+            </View>
+          ) : (
+            <ScrollView
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => { setRefreshing(true); load(); }}
+                  colors={[colors.primary]}
+                  tintColor={colors.primary}
+                />
+              }
+              contentContainerStyle={{ padding: spacing.md, gap: spacing.md, paddingBottom: 60 }}
+            >
+              {filteredCustomerGroups.length === 0 && (
+                <View style={styles.empty}>
+                  <MaterialCommunityIcons name="check-circle-outline" size={48} color={colors.textLight} />
+                  <Text style={styles.emptyText}>No completed produce ready in {activeBranchName}</Text>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, textAlign: "center", marginTop: 4 }}>
+                    Lots must have drying completed before they appear for customer delivery.
+                  </Text>
+                </View>
+              )}
 
-            return (
-              <View key={group.customerId} style={styles.customerCard}>
-                {/* Level 1: Customer Summary Card */}
+              {filteredCustomerGroups.map(group => (
                 <TouchableOpacity
-                  activeOpacity={0.8}
-                  style={styles.customerHeader}
-                  onPress={() => toggleCustomer(group)}
+                  key={group.customerId}
+                  activeOpacity={0.85}
+                  style={styles.customerCard}
+                  onPress={() => openCustomerLots(group)}
                 >
                   <View style={styles.avatarWrap}>
                     <Text style={styles.avatarText}>
@@ -455,7 +516,7 @@ export default function DeliveryPicker() {
                       ) : null}
                     </View>
 
-                    {/* Metric Cards Row */}
+                    {/* Metrics Row */}
                     <View style={styles.metricsRow}>
                       <View style={styles.metricItem}>
                         <Text style={styles.metricLabel}>Total Wet</Text>
@@ -476,135 +537,241 @@ export default function DeliveryPicker() {
                     </View>
                   </View>
 
-                  <MaterialCommunityIcons
-                    name={isExpanded ? "chevron-up" : "chevron-down"}
-                    size={24}
-                    color={colors.primary}
-                    style={{ alignSelf: "center", marginLeft: 4 }}
-                  />
-                </TouchableOpacity>
-
-                {/* Level 2: Expanded Day-Wise / Lot-Wise Drilldown */}
-                {isExpanded && (
-                  <View style={styles.drilldownWrap}>
-                    <View style={styles.drilldownHeader}>
-                      <Text style={styles.drilldownTitle}>Day-Wise Completed Batches</Text>
-                      <TouchableOpacity
-                        style={styles.selectAllBtn}
-                        onPress={() => toggleSelectAllGroup(group)}
-                      >
-                        <MaterialCommunityIcons
-                          name={allSelected ? "checkbox-marked" : "checkbox-blank-outline"}
-                          size={18}
-                          color={colors.primary}
-                        />
-                        <Text style={styles.selectAllText}>
-                          {allSelected ? "Deselect All" : "Select All"}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    {group.batches.map(b => {
-                      const isSelected = selectedBatchIds.has(b.id);
-                      return (
-                        <TouchableOpacity
-                          key={b.id}
-                          activeOpacity={0.8}
-                          style={[styles.batchRow, isSelected && styles.batchRowSelected]}
-                          onPress={() => toggleBatchSelect(b.id, group)}
-                        >
-                          <View style={styles.checkboxWrap}>
-                            <MaterialCommunityIcons
-                              name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
-                              size={22}
-                              color={isSelected ? colors.primary : colors.textLight}
-                            />
-                          </View>
-
-                          <View style={{ flex: 1 }}>
-                            <View style={styles.batchTopRow}>
-                              <Text style={styles.batchNo}>{b.batch_no}</Text>
-                              <View style={styles.dateTag}>
-                                <MaterialCommunityIcons name="calendar-arrow-right" size={11} color="#065F46" />
-                                <Text style={styles.dateTagText}>
-                                  Arr: {fmtDate(b.arrival_date || b.created_at)}
-                                </Text>
-                              </View>
-                              {b.processing_ended_at ? (
-                                <View style={[styles.dateTag, { backgroundColor: "#F0FDF4", borderColor: "#86EFAC" }]}>
-                                  <MaterialCommunityIcons name="check" size={11} color="#15803D" />
-                                  <Text style={[styles.dateTagText, { color: "#15803D" }]}>
-                                    Dried: {fmtDate(b.processing_ended_at)}
-                                  </Text>
-                                </View>
-                              ) : null}
-                            </View>
-
-                            <View style={styles.batchStatsRow}>
-                              <Text style={styles.batchStat}>
-                                <Text style={styles.statLabel}>Wet: </Text>
-                                <Text style={styles.statVal}>{b.raw_weight} kg</Text>
-                              </Text>
-                              <Text style={styles.statDot}>•</Text>
-                              <Text style={styles.batchStat}>
-                                <Text style={styles.statLabel}>Dry: </Text>
-                                <Text style={styles.statVal}>
-                                  {b.actual_dry_weight ? `${b.actual_dry_weight} kg` : "Pending"}
-                                </Text>
-                              </Text>
-                              <Text style={styles.statDot}>•</Text>
-                              <Text style={styles.batchStat}>
-                                <Text style={styles.statLabel}>Padi: </Text>
-                                <Text style={[styles.statVal, { color: b.padi_weight ? colors.accent : colors.textMuted }]}>
-                                  {b.padi_weight ? `${b.padi_weight} g/L` : "-"}
-                                </Text>
-                              </Text>
-                            </View>
-                          </View>
-
-                          <TouchableOpacity
-                            onPress={() => router.push(`/delivery/${b.id}`)}
-                            style={styles.singleDeliverIconBtn}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <MaterialCommunityIcons name="arrow-top-right-thick" size={16} color={colors.textMuted} />
-                          </TouchableOpacity>
-                        </TouchableOpacity>
-                      );
-                    })}
+                  <View style={styles.arrowWrap}>
+                    <Text style={styles.arrowLabel}>Select</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={20} color={colors.primary} />
                   </View>
-                )}
-              </View>
-            );
-          })}
-        </ScrollView>
-      )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </>
+      ) : (
+        /* VIEW 2: DEDICATED CUSTOMER LOTS VIEW (Engineered for 50+ lots scale) */
+        <View style={{ flex: 1 }}>
+          {/* Top Customer Navigation Bar */}
+          <View style={styles.customerNavHeader}>
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={backToCustomerList}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <MaterialCommunityIcons name="arrow-left" size={24} color={colors.text} />
+            </TouchableOpacity>
 
-      {/* Floating Bottom Multi-Select Delivery Bar */}
-      {selectedBatchIds.size > 0 && (
-        <View style={styles.floatingActionBar}>
-          <View style={styles.floatingLeft}>
-            <View style={styles.floatingBadge}>
-              <Text style={styles.floatingBadgeText}>{selectedAggregates.count} Lots Selected</Text>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Text style={styles.customerNavTitle} numberOfLines={1}>
+                  {currentCustomer.customerName}
+                </Text>
+                {currentCustomer.customerCode ? (
+                  <View style={styles.codeTag}>
+                    <Text style={styles.codeTagText}>{currentCustomer.customerCode}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={styles.customerNavSub}>
+                {currentCustomer.customerMobile || "No phone"} • {currentCustomer.totalArrivalLots} Completed Lots
+              </Text>
             </View>
-            <Text style={styles.floatingSub}>
-              {selectedAggregates.totalWet.toFixed(1)} kg Wet • {selectedAggregates.totalDry.toFixed(1)} kg Dry
-              {selectedAggregates.avgPadi > 0 ? ` • ${selectedAggregates.avgPadi} g/L` : ""}
-            </Text>
+
+            {/* Select All Toggle for 50+ Lots */}
+            <TouchableOpacity
+              style={[
+                styles.selectAllCustomerBtn,
+                currentCustomer.batches.length > 0 &&
+                currentCustomer.batches.every(b => selectedBatchIds.has(b.id)) &&
+                styles.selectAllCustomerBtnActive,
+              ]}
+              onPress={toggleSelectAllCustomer}
+            >
+              <MaterialCommunityIcons
+                name={
+                  currentCustomer.batches.length > 0 &&
+                  currentCustomer.batches.every(b => selectedBatchIds.has(b.id))
+                    ? "checkbox-marked"
+                    : "checkbox-blank-outline"
+                }
+                size={18}
+                color={
+                  currentCustomer.batches.length > 0 &&
+                  currentCustomer.batches.every(b => selectedBatchIds.has(b.id))
+                    ? "#fff"
+                    : colors.primary
+                }
+              />
+              <Text
+                style={[
+                  styles.selectAllCustomerText,
+                  currentCustomer.batches.length > 0 &&
+                  currentCustomer.batches.every(b => selectedBatchIds.has(b.id)) &&
+                  { color: "#fff" },
+                ]}
+              >
+                {currentCustomer.batches.every(b => selectedBatchIds.has(b.id))
+                  ? "All Selected"
+                  : `Select All (${currentCustomer.totalArrivalLots})`}
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={styles.floatingBtn}
-            activeOpacity={0.85}
-            onPress={openDeliveryModal}
+          {/* Quick Lot Filter Bar */}
+          <View style={styles.lotSearchWrap}>
+            <MaterialCommunityIcons name="magnify" size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.lotSearch}
+              placeholder="Filter by batch number, date, or padi..."
+              placeholderTextColor={colors.textLight}
+              value={qLot}
+              onChangeText={setQLot}
+            />
+            {qLot ? (
+              <TouchableOpacity onPress={() => setQLot("")}>
+                <MaterialCommunityIcons name="close-circle" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* High-Density Day-Grouped Lots Table */}
+          <ScrollView
+            contentContainerStyle={{ paddingHorizontal: spacing.md, paddingBottom: 110, gap: spacing.md }}
           >
-            <Text style={styles.floatingBtnText}>Deliver ({selectedBatchIds.size})</Text>
-            <MaterialCommunityIcons name="arrow-right" size={18} color="#fff" />
-          </TouchableOpacity>
+            {customerDayGroups.length === 0 && (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>No matching lots found</Text>
+              </View>
+            )}
+
+            {customerDayGroups.map(day => {
+              const allDaySelected = day.batches.every(b => selectedBatchIds.has(b.id));
+              const someDaySelected = day.batches.some(b => selectedBatchIds.has(b.id));
+
+              return (
+                <View key={day.dayKey} style={styles.daySectionCard}>
+                  {/* Day Header with 1-Click Day Selector */}
+                  <TouchableOpacity
+                    style={styles.daySectionHeader}
+                    activeOpacity={0.8}
+                    onPress={() => toggleSelectDay(day)}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+                      <MaterialCommunityIcons name="calendar-month" size={16} color="#065F46" />
+                      <Text style={styles.daySectionTitle}>{day.displayDate}</Text>
+                      <View style={styles.dayLotCountPill}>
+                        <Text style={styles.dayLotCountText}>{day.batches.length} Lots</Text>
+                      </View>
+                      <Text style={styles.daySummaryText}>
+                        {day.totalWet.toFixed(1)} kg wet
+                      </Text>
+                    </View>
+
+                    <View style={styles.daySelectCheckWrap}>
+                      <MaterialCommunityIcons
+                        name={
+                          allDaySelected
+                            ? "checkbox-marked"
+                            : someDaySelected
+                            ? "minus-box"
+                            : "checkbox-blank-outline"
+                        }
+                        size={20}
+                        color={allDaySelected || someDaySelected ? colors.primary : colors.textLight}
+                      />
+                      <Text style={styles.daySelectLabel}>
+                        {allDaySelected ? "Day Selected" : "Select Day"}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Density Table Header */}
+                  <View style={styles.tableHeadRow}>
+                    <Text style={[styles.tableHeadCell, { width: 34, textAlign: "center" }]}>#</Text>
+                    <Text style={[styles.tableHeadCell, { width: 90 }]}>Batch No</Text>
+                    <Text style={[styles.tableHeadCell, { flex: 1, textAlign: "right" }]}>Wet (kg)</Text>
+                    <Text style={[styles.tableHeadCell, { flex: 1, textAlign: "right" }]}>Dry (kg)</Text>
+                    <Text style={[styles.tableHeadCell, { flex: 1, textAlign: "right" }]}>Padi (g/L)</Text>
+                  </View>
+
+                  {/* Density Table Rows */}
+                  {day.batches.map((b, idx) => {
+                    const isSelected = selectedBatchIds.has(b.id);
+                    return (
+                      <TouchableOpacity
+                        key={b.id}
+                        activeOpacity={0.7}
+                        style={[
+                          styles.tableDataRow,
+                          idx % 2 === 1 && styles.tableDataRowAlt,
+                          isSelected && styles.tableDataRowSelected,
+                        ]}
+                        onPress={() => toggleBatchSelect(b.id)}
+                      >
+                        <View style={{ width: 34, alignItems: "center" }}>
+                          <MaterialCommunityIcons
+                            name={isSelected ? "checkbox-marked" : "checkbox-blank-outline"}
+                            size={18}
+                            color={isSelected ? colors.primary : colors.textLight}
+                          />
+                        </View>
+                        <Text style={[styles.tableCellBatchNo, { width: 90 }]}>
+                          {b.batch_no}
+                        </Text>
+                        <Text style={[styles.tableCellData, { flex: 1, textAlign: "right" }]}>
+                          {b.raw_weight.toFixed(1)}
+                        </Text>
+                        <Text style={[styles.tableCellData, { flex: 1, textAlign: "right", color: "#15803D" }]}>
+                          {b.actual_dry_weight ? b.actual_dry_weight.toFixed(1) : "-"}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.tableCellData,
+                            {
+                              flex: 1,
+                              textAlign: "right",
+                              color: b.padi_weight ? colors.accent : colors.textMuted,
+                              fontWeight: b.padi_weight ? "700" : "500",
+                            },
+                          ]}
+                        >
+                          {b.padi_weight ? String(b.padi_weight) : "-"}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          {/* Floating Action Bar */}
+          {selectedBatchIds.size > 0 && (
+            <View style={styles.floatingActionBar}>
+              <View style={styles.floatingLeft}>
+                <View style={styles.floatingBadge}>
+                  <Text style={styles.floatingBadgeText}>
+                    {selectedAggregates.count} / {currentCustomer.totalArrivalLots} Lots Selected
+                  </Text>
+                </View>
+                <Text style={styles.floatingSub}>
+                  {selectedAggregates.totalWet.toFixed(1)} kg Wet • {selectedAggregates.totalDry.toFixed(1)} kg Dry
+                  {selectedAggregates.avgPadi > 0 ? ` • ${selectedAggregates.avgPadi} g/L Padi` : ""}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.floatingBtn}
+                activeOpacity={0.85}
+                onPress={openDeliveryModal}
+              >
+                <Text style={styles.floatingBtnText}>Deliver ({selectedBatchIds.size})</Text>
+                <MaterialCommunityIcons name="arrow-right" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
 
-      {/* Comprehensive Delivery Capture Modal */}
+      {/* COMPREHENSIVE DELIVERY CAPTURE MODAL (Scalable for 50+ lots) */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -617,10 +784,10 @@ export default function DeliveryPicker() {
         >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>Capture Delivery</Text>
-                <Text style={styles.modalSubtitle}>
-                  {activeCustomer?.customerName} ({selectedBatchIds.size} Lots)
+                <Text style={styles.modalSubtitle} numberOfLines={1}>
+                  {currentCustomer?.customerName || selectedBatches[0]?.customer?.name} ({selectedBatchIds.size} Lots Selected)
                 </Text>
               </View>
               <TouchableOpacity
@@ -628,7 +795,7 @@ export default function DeliveryPicker() {
                 onPress={() => setModalVisible(false)}
                 style={styles.modalCloseBtn}
               >
-                <MaterialCommunityIcons name="close" size={20} color={colors.text} />
+                <MaterialCommunityIcons name="close" size={22} color={colors.text} />
               </TouchableOpacity>
             </View>
 
@@ -636,39 +803,72 @@ export default function DeliveryPicker() {
               contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Lots Chips - Bigger and with Remove Option */}
-              <View>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <Text style={styles.inputLabel}>
-                    Selected Lots ({selectedBatches.length})
-                  </Text>
-                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
-                    Tap ✕ to remove any lot
-                  </Text>
+              {/* Scalable Lots Summary Card with Collapsible Inspector */}
+              <View style={styles.modalLotsSummaryCard}>
+                <View style={styles.modalLotsSummaryRow}>
+                  <View style={styles.modalSummaryCol}>
+                    <Text style={styles.modalSummaryLabel}>Selected Lots</Text>
+                    <Text style={styles.modalSummaryVal}>{selectedAggregates.count} Lots</Text>
+                  </View>
+                  <View style={styles.modalSummaryCol}>
+                    <Text style={styles.modalSummaryLabel}>Total Arrival Wet</Text>
+                    <Text style={[styles.modalSummaryVal, { color: "#065F46" }]}>
+                      {selectedAggregates.totalWet.toFixed(1)} kg
+                    </Text>
+                  </View>
+                  <View style={styles.modalSummaryCol}>
+                    <Text style={styles.modalSummaryLabel}>Est. Dry Done</Text>
+                    <Text style={styles.modalSummaryVal}>
+                      {selectedAggregates.totalDry.toFixed(1)} kg
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.chipRow}>
-                  {selectedBatches.map(b => (
-                    <View key={b.id} style={styles.lotChipBig}>
-                      <View style={styles.lotChipContent}>
-                        <Text style={styles.lotChipBatchNo}>{b.batch_no}</Text>
-                        <View style={styles.lotChipWeightBadge}>
-                          <Text style={styles.lotChipWeightText}>{b.raw_weight} kg</Text>
+
+                {/* Toggle to view/remove individual lots */}
+                <TouchableOpacity
+                  style={styles.toggleInspectorBtn}
+                  onPress={() => setShowLotsInspector(!showLotsInspector)}
+                >
+                  <MaterialCommunityIcons
+                    name={showLotsInspector ? "chevron-up" : "format-list-bulleted"}
+                    size={16}
+                    color={colors.primary}
+                  />
+                  <Text style={styles.toggleInspectorText}>
+                    {showLotsInspector ? "Hide Lots Breakdown" : `Inspect / Remove Lots (${selectedAggregates.count})`}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Collapsible Lots Inspector with Direct Remove Button */}
+                {showLotsInspector && (
+                  <View style={styles.inspectorWrap}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 6 }}>
+                      Tap ✕ to remove any specific lot:
+                    </Text>
+                    <View style={styles.chipRow}>
+                      {selectedBatches.map(b => (
+                        <View key={b.id} style={styles.lotChipBig}>
+                          <View style={styles.lotChipContent}>
+                            <Text style={styles.lotChipBatchNo}>{b.batch_no}</Text>
+                            <View style={styles.lotChipWeightBadge}>
+                              <Text style={styles.lotChipWeightText}>{b.raw_weight} kg</Text>
+                            </View>
+                          </View>
+                          <TouchableOpacity
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            onPress={() => handleRemoveBatchFromModal(b.id)}
+                            style={styles.lotChipRemoveBtn}
+                          >
+                            <MaterialCommunityIcons name="close-circle" size={18} color="#EF4444" />
+                          </TouchableOpacity>
                         </View>
-                      </View>
-                      <TouchableOpacity
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        onPress={() => handleRemoveBatchFromModal(b.id)}
-                        style={styles.lotChipRemoveBtn}
-                        testID={`remove-batch-${b.id}`}
-                      >
-                        <MaterialCommunityIcons name="close-circle" size={19} color="#EF4444" />
-                      </TouchableOpacity>
+                      ))}
                     </View>
-                  ))}
-                </View>
+                  </View>
+                )}
               </View>
 
-              {/* Produce Weights */}
+              {/* Section 1: Produce Output */}
               <View style={styles.formSection}>
                 <Text style={styles.sectionHeader}>1. Produce Output</Text>
                 <View style={styles.twoCol}>
@@ -696,9 +896,9 @@ export default function DeliveryPicker() {
 
                 <View style={styles.weightRefBox}>
                   <Text style={styles.weightRefText}>
-                    Arrival Wet Weight: <Text style={{ fontWeight: "700" }}>{selectedAggregates.totalWet.toFixed(1)} kg</Text>
+                    Arrival Wet Weight: <Text style={{ fontWeight: "800" }}>{selectedAggregates.totalWet.toFixed(1)} kg</Text>
                     {numDry > 0 && selectedAggregates.totalWet > 0 ? (
-                      <Text style={{ color: colors.primary, fontWeight: "700" }}>
+                      <Text style={{ color: colors.primary, fontWeight: "800" }}>
                         {" "}• Yield: {((numDry / selectedAggregates.totalWet) * 100).toFixed(1)}%
                       </Text>
                     ) : null}
@@ -706,7 +906,7 @@ export default function DeliveryPicker() {
                 </View>
               </View>
 
-              {/* Pricing & Billing with Total Arrival KG */}
+              {/* Section 2: Drying Charges & Rate with Total Arrival Display */}
               <View style={styles.formSection}>
                 <Text style={styles.sectionHeader}>2. Drying Charges & Rate</Text>
 
@@ -750,7 +950,7 @@ export default function DeliveryPicker() {
                 </View>
               </View>
 
-              {/* Payment Section - Optional / Credit Allowed */}
+              {/* Section 3: Payment Collection (Optional / Credit Allowed) */}
               <View style={styles.formSection}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                   <Text style={styles.sectionHeader}>3. Payment Collection</Text>
@@ -813,7 +1013,7 @@ export default function DeliveryPicker() {
                   ))}
                 </View>
 
-                {/* Financial Status Summary Notice */}
+                {/* Notice Box */}
                 <View style={[styles.noticeBox, numReceived === 0 ? styles.noticeBoxCredit : styles.noticeBoxPaid]}>
                   <MaterialCommunityIcons
                     name={numReceived === 0 ? "information-outline" : "check-circle-outline"}
@@ -832,7 +1032,7 @@ export default function DeliveryPicker() {
                 </View>
               </View>
 
-              {/* Receiver Info */}
+              {/* Section 4: Receiver Details */}
               <View style={styles.formSection}>
                 <Text style={styles.sectionHeader}>4. Delivered To</Text>
                 <View style={styles.twoCol}>
@@ -874,7 +1074,7 @@ export default function DeliveryPicker() {
                 />
               </View>
 
-              {/* Submit Buttons */}
+              {/* Submit Button */}
               <TouchableOpacity
                 style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
                 disabled={submitting}
@@ -886,7 +1086,7 @@ export default function DeliveryPicker() {
                   <>
                     <MaterialCommunityIcons name="truck-delivery" size={20} color="#fff" />
                     <Text style={styles.submitBtnText}>
-                      Confirm Delivery & Send WhatsApp
+                      Confirm Delivery ({selectedBatchIds.size} Lots) & Send WhatsApp
                     </Text>
                   </>
                 )}
@@ -901,6 +1101,8 @@ export default function DeliveryPicker() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
+
+  // Search Header
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
@@ -914,6 +1116,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   search: { flex: 1, paddingVertical: 10, fontSize: 14, color: colors.text },
+
+  // Summary Bar
   summaryBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -931,18 +1135,17 @@ const styles = StyleSheet.create({
   summaryVal: { fontSize: 14, fontWeight: "800", color: colors.primary, marginTop: 1 },
   summaryDivider: { width: 1, height: 24, backgroundColor: colors.border },
 
+  // Customer Card View 1
   customerCard: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.card,
     borderRadius: radius.xl,
-    overflow: "hidden",
+    padding: spacing.md,
+    gap: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
-  },
-  customerHeader: {
-    flexDirection: "row",
-    padding: spacing.md,
-    gap: spacing.md,
   },
   avatarWrap: { alignItems: "center", minWidth: 44 },
   avatarText: {
@@ -981,7 +1184,6 @@ const styles = StyleSheet.create({
   subInfoRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
   phoneText: { fontSize: 11.5, color: colors.textLight },
   branchText: { fontSize: 11.5, color: colors.primary, fontWeight: "600" },
-
   metricsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -996,61 +1198,110 @@ const styles = StyleSheet.create({
   metricLabel: { fontSize: 9.5, color: colors.textMuted, fontWeight: "600" },
   metricVal: { fontSize: 12, fontWeight: "800", color: colors.text, marginTop: 1 },
   metricDivider: { width: 1, height: 20, backgroundColor: colors.border },
+  arrowWrap: { alignItems: "center", justifyContent: "center", gap: 2, marginLeft: 2 },
+  arrowLabel: { fontSize: 11, fontWeight: "700", color: colors.primary },
 
-  drilldownWrap: {
-    backgroundColor: "#F9FAFB",
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    padding: spacing.sm,
-    gap: 6,
-  },
-  drilldownHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-  },
-  drilldownTitle: { fontSize: 12, fontWeight: "700", color: colors.textMuted },
-  selectAllBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  selectAllText: { fontSize: 12, fontWeight: "700", color: colors.primary },
-
-  batchRow: {
+  // VIEW 2: Dedicated Customer Lots Header
+  customerNavHeader: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.card,
-    borderRadius: radius.md,
-    padding: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.sm,
   },
-  batchRowSelected: {
-    borderColor: colors.primary,
-    backgroundColor: "#F0FDF4",
-  },
-  checkboxWrap: { padding: 2 },
-  batchTopRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  batchNo: { fontSize: 13, fontWeight: "800", color: colors.text },
-  dateTag: {
+  backBtn: { padding: 4 },
+  customerNavTitle: { fontSize: 16, fontWeight: "800", color: colors.text },
+  customerNavSub: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  selectAllCustomerBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary50,
+    borderWidth: 1,
+    borderColor: colors.primary + "40",
+  },
+  selectAllCustomerBtnActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  selectAllCustomerText: { fontSize: 11.5, fontWeight: "800", color: colors.primary },
+
+  lotSearchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  lotSearch: { flex: 1, paddingVertical: 8, fontSize: 13, color: colors.text },
+
+  // Day Section Table (Engineered for 50+ lots density)
+  daySectionCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
+    ...shadow.sm,
+  },
+  daySectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     backgroundColor: "#F3F4F6",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  daySectionTitle: { fontSize: 13, fontWeight: "800", color: colors.text },
+  dayLotCountPill: {
+    backgroundColor: "#E5E7EB",
     paddingHorizontal: 6,
     paddingVertical: 1.5,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderRadius: radius.pill,
   },
-  dateTagText: { fontSize: 10, fontWeight: "700", color: "#374151" },
-  batchStatsRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
-  batchStat: { fontSize: 11 },
-  statLabel: { color: colors.textMuted },
-  statVal: { fontWeight: "700", color: colors.text },
-  statDot: { color: colors.textLight, fontSize: 10 },
-  singleDeliverIconBtn: { padding: 4 },
+  dayLotCountText: { fontSize: 10, fontWeight: "800", color: "#374151" },
+  daySummaryText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
+  daySelectCheckWrap: { flexDirection: "row", alignItems: "center", gap: 4 },
+  daySelectLabel: { fontSize: 11, fontWeight: "700", color: colors.primary },
 
+  tableHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FAFAFA",
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  tableHeadCell: { fontSize: 10.5, fontWeight: "800", color: colors.textMuted },
+
+  tableDataRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  tableDataRowAlt: { backgroundColor: "#FCFCFD" },
+  tableDataRowSelected: { backgroundColor: "#F0FDF4" },
+  tableCellBatchNo: { fontSize: 12.5, fontWeight: "800", color: colors.text },
+  tableCellData: { fontSize: 12, fontWeight: "600", color: colors.text },
+
+  // Floating Action Bar
   floatingActionBar: {
     position: "absolute",
     bottom: 20,
@@ -1062,7 +1313,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.primary,
     ...shadow.card,
     elevation: 8,
@@ -1088,6 +1339,7 @@ const styles = StyleSheet.create({
   },
   floatingBtnText: { color: "#fff", fontSize: 14, fontWeight: "800" },
 
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -1110,17 +1362,41 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: "800", color: colors.text },
   modalSubtitle: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  modalCloseBtn: { padding: 6 },
+  modalCloseBtn: { padding: 4 },
+
+  modalLotsSummaryCard: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 8,
+  },
+  modalLotsSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  modalSummaryCol: { alignItems: "center" },
+  modalSummaryLabel: { fontSize: 10, color: colors.textMuted, fontWeight: "700" },
+  modalSummaryVal: { fontSize: 14, fontWeight: "800", color: colors.text, marginTop: 2 },
+  toggleInspectorBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    marginTop: 4,
+  },
+  toggleInspectorText: { fontSize: 11.5, fontWeight: "700", color: colors.primary },
+  inspectorWrap: {
+    marginTop: 4,
+    maxHeight: 180,
+  },
 
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  lotChip: {
-    backgroundColor: colors.primary50,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-  },
-  lotChipText: { fontSize: 11, fontWeight: "700", color: colors.primary },
-
   lotChipBig: {
     flexDirection: "row",
     alignItems: "center",
@@ -1128,10 +1404,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: "#86EFAC",
     borderRadius: radius.lg,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    gap: 8,
-    ...shadow.sm,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    gap: 6,
   },
   lotChipContent: {
     flexDirection: "row",
@@ -1139,24 +1414,22 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   lotChipBatchNo: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "800",
     color: colors.text,
-    letterSpacing: 0.3,
   },
   lotChipWeightBadge: {
     backgroundColor: "#DCFCE7",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 4,
   },
   lotChipWeightText: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     fontWeight: "800",
     color: "#166534",
   },
   lotChipRemoveBtn: {
-    marginLeft: 2,
     padding: 2,
     alignItems: "center",
     justifyContent: "center",
@@ -1204,6 +1477,18 @@ const styles = StyleSheet.create({
     textAlign: "center",
     minHeight: 42,
   },
+  calcBillBox: {
+    backgroundColor: colors.primary50,
+    borderWidth: 1,
+    borderColor: colors.primary + "40",
+    borderRadius: radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 42,
+  },
+  calcBillText: { fontSize: 16, fontWeight: "800", color: colors.primary },
   formulaBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -1221,6 +1506,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#047857",
   },
+
   inputLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, marginBottom: 4 },
   input: {
     backgroundColor: colors.card,
@@ -1241,17 +1527,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   weightRefText: { fontSize: 11.5, color: "#065F46" },
-  calcBillBox: {
-    backgroundColor: colors.primary50,
-    borderWidth: 1,
-    borderColor: colors.primary + "40",
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  calcBillText: { fontSize: 16, fontWeight: "800", color: colors.primary },
 
   quickFillRow: { flexDirection: "row", gap: 8, marginTop: 4 },
   quickFillBtn: {

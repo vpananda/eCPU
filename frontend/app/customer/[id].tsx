@@ -8,6 +8,7 @@ import { useAuth } from "@/src/auth";
 import { useToast } from "@/src/components/Toast";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { StatusPill } from "@/src/components/ui";
+import CustomerWeeklyStatementModal from "@/src/components/CustomerWeeklyStatementModal";
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "-";
@@ -50,6 +51,7 @@ export default function CustomerDetail() {
   const [editDate, setEditDate] = useState("");
   const [editRemarks, setEditRemarks] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [statementModalOpen, setStatementModalOpen] = useState(false);
 
   const openEditPayment = (p: any) => {
     setEditingPayment(p);
@@ -246,6 +248,15 @@ export default function CustomerDetail() {
         </TouchableOpacity>
         <Text style={styles.title}>Customer</Text>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
+          {/* Send Weekly Statement / WhatsApp Report Button */}
+          <TouchableOpacity
+            onPress={() => setStatementModalOpen(true)}
+            testID="customer-weekly-statement-header"
+            style={{ marginRight: 14 }}
+            accessibilityLabel="Weekly Statement & WhatsApp Report"
+          >
+            <MaterialCommunityIcons name="whatsapp" size={23} color="#25D366" />
+          </TouchableOpacity>
           {(user?.role === "Admin" || user?.role === "Manager" || user?.role === "Store Incharge") && (
             <TouchableOpacity
               onPress={() => router.push({ pathname: "/customer-form", params: { id } })}
@@ -295,6 +306,25 @@ export default function CustomerDetail() {
           <Stat label="Total Billed" value={`₹${(s.total_revenue || 0).toLocaleString("en-IN")}`} icon="currency-inr" />
           <Stat label="Pending Bal" value={`₹${(s.pending_balance || 0).toLocaleString("en-IN")}`} icon="clock-alert-outline" danger={(s.pending_balance || 0) > 0} />
         </View>
+
+        {/* Weekly Status & WhatsApp Report Action Button */}
+        <TouchableOpacity
+          style={styles.weeklyReportBtn}
+          onPress={() => setStatementModalOpen(true)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.weeklyReportIconBox}>
+            <MaterialCommunityIcons name="table-large" size={20} color="#065F46" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.weeklyReportTitle}>Weekly Status & Ledger Statement</Text>
+            <Text style={styles.weeklyReportSub}>View lot table (Arrival, Processed, Padi, Amount) & send WhatsApp</Text>
+          </View>
+          <View style={styles.weeklyReportWaBadge}>
+            <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
+            <Text style={styles.weeklyReportWaText}>Report</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Customer Sub-tabs: Arrivals | Khata Ledger | Payments */}
         <View style={styles.customerSubTabs}>
@@ -898,6 +928,17 @@ export default function CustomerDetail() {
           </View>
         </View>
       </Modal>
+
+      {/* Customer Weekly Statement Modal */}
+      <CustomerWeeklyStatementModal
+        visible={statementModalOpen}
+        onClose={() => setStatementModalOpen(false)}
+        customerId={id}
+        customerName={data.name}
+        customerMobile={data.mobile}
+        branchId={data.branch_id}
+        branchName={data.branch_name}
+      />
     </SafeAreaView>
   );
 }
@@ -1462,4 +1503,37 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 0.3,
   },
+  weeklyReportBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
+    borderRadius: radius.xl,
+    padding: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    gap: spacing.md,
+    ...shadow.sm,
+  },
+  weeklyReportIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#D1FAE5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  weeklyReportTitle: { fontSize: 13, fontWeight: "800", color: "#065F46" },
+  weeklyReportSub: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  weeklyReportWaBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#25D366",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.md,
+  },
+  weeklyReportWaText: { fontSize: 12, fontWeight: "800", color: "#fff" },
 });

@@ -169,9 +169,11 @@ export default function Reports() {
         filename = `E3_Operations_Summary_${branchSlug}_${dateSlug}.csv`;
         csvContent = [
           "Metric,Value",
+          `Overall Wet Arrival (kg),${summaryData?.total_wet_arrival || 0}`,
+          `Processed Dry (kg),${summaryData?.total_processed_dry || 0}`,
+          `Delivered Dry (kg),${summaryData?.total_delivered_dry || 0}`,
           `Total Collection,${summaryData?.total_collection || 0}`,
           `Total Expenses,${summaryData?.total_expense || 0}`,
-          `Net Profit,${summaryData?.profit || 0}`,
           `Pending Customer Payments,${summaryData?.pending_payments || 0}`,
           `Pending Deliveries,${summaryData?.pending_deliveries || 0}`,
           `Total Batches Processed,${summaryData?.total_batches || 0}`,
@@ -370,18 +372,46 @@ export default function Reports() {
           {/* ==================== TAB 1: SUMMARY / OVERVIEW ==================== */}
           {activeTab === "summary" && summaryData && (
             <View style={{ gap: spacing.md, paddingHorizontal: spacing.md }}>
-              {/* Profit Hero Card */}
-              <View style={styles.hero}>
-                <Text style={styles.heroLabel}>Net Operational Profit</Text>
-                <Text style={styles.heroValue}>₹{Number(summaryData.profit || 0).toLocaleString("en-IN")}</Text>
-                <View style={styles.heroRow}>
-                  <View style={styles.heroStat}>
-                    <Text style={styles.heroStatLabel}>Total Collection</Text>
-                    <Text style={styles.heroStatValue}>₹{Number(summaryData.total_collection || 0).toLocaleString("en-IN")}</Text>
+              {/* Overall Produce Summary Card: Wet Arrival, Processed, Delivered */}
+              <View style={styles.produceHero}>
+                <View style={styles.produceHeroHeader}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <MaterialCommunityIcons name="scale" size={18} color="#065F46" />
+                    <Text style={styles.produceHeroTitle}>Plant Produce Operations</Text>
                   </View>
-                  <View style={styles.heroStat}>
-                    <Text style={styles.heroStatLabel}>Total Expenses</Text>
-                    <Text style={styles.heroStatValue}>₹{Number(summaryData.total_expense || 0).toLocaleString("en-IN")}</Text>
+                  <Text style={styles.produceHeroSub}>{summaryData.total_batches || 0} Total Lots</Text>
+                </View>
+
+                <View style={styles.produceHeroGrid}>
+                  <View style={styles.produceHeroCol}>
+                    <Text style={styles.produceHeroLabel}>Wet Arrival</Text>
+                    <Text style={styles.produceHeroVal}>
+                      {Number(summaryData.total_wet_arrival || 0).toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                      <Text style={styles.produceHeroUnit}> kg</Text>
+                    </Text>
+                    <Text style={styles.produceHeroSubText}>Raw Received</Text>
+                  </View>
+
+                  <View style={styles.produceHeroDivider} />
+
+                  <View style={styles.produceHeroCol}>
+                    <Text style={styles.produceHeroLabel}>Processed</Text>
+                    <Text style={[styles.produceHeroVal, { color: colors.primary }]}>
+                      {Number(summaryData.total_processed_dry || 0).toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                      <Text style={styles.produceHeroUnit}> kg</Text>
+                    </Text>
+                    <Text style={styles.produceHeroSubText}>Dry Output</Text>
+                  </View>
+
+                  <View style={styles.produceHeroDivider} />
+
+                  <View style={styles.produceHeroCol}>
+                    <Text style={styles.produceHeroLabel}>Delivered</Text>
+                    <Text style={[styles.produceHeroVal, { color: "#15803D" }]}>
+                      {Number(summaryData.total_delivered_dry || 0).toLocaleString("en-IN", { maximumFractionDigits: 1 })}
+                      <Text style={styles.produceHeroUnit}> kg</Text>
+                    </Text>
+                    <Text style={styles.produceHeroSubText}>Dispatched</Text>
                   </View>
                 </View>
               </View>
@@ -985,18 +1015,37 @@ const styles = StyleSheet.create({
   loaderWrap: { paddingTop: 80, alignItems: "center", justifyContent: "center" },
   loaderText: { fontSize: 14, color: colors.textMuted, marginTop: 10, fontWeight: "600" },
 
-  hero: {
-    backgroundColor: colors.primary,
+  produceHero: {
+    backgroundColor: colors.card,
     borderRadius: radius.xl,
-    padding: spacing.lg,
+    padding: spacing.md,
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
     ...shadow.card,
   },
-  heroLabel: { color: "#B9F6CA", fontSize: 11, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
-  heroValue: { color: "#fff", fontSize: 30, fontWeight: "800", marginTop: 4 },
-  heroRow: { flexDirection: "row", marginTop: spacing.md, gap: spacing.md },
-  heroStat: { flex: 1 },
-  heroStatLabel: { color: "#E8F5E9", fontSize: 10.5, fontWeight: "600" },
-  heroStatValue: { color: "#fff", fontSize: 15, fontWeight: "800", marginTop: 2 },
+  produceHeroHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  produceHeroTitle: { fontSize: 13, fontWeight: "800", color: "#065F46" },
+  produceHeroSub: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
+  produceHeroGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 2,
+  },
+  produceHeroCol: { flex: 1, alignItems: "center" },
+  produceHeroLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
+  produceHeroVal: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 3 },
+  produceHeroUnit: { fontSize: 11, fontWeight: "600", color: colors.textMuted },
+  produceHeroSubText: { fontSize: 10, color: colors.textLight, marginTop: 2 },
+  produceHeroDivider: { width: 1, height: 36, backgroundColor: colors.border },
 
   alertGrid: { flexDirection: "row", gap: spacing.md },
   alert: { flex: 1, padding: spacing.md, borderRadius: radius.lg, gap: 4 },

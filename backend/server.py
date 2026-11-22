@@ -5176,7 +5176,10 @@ async def reports_summary(
         SELECT 
             COALESCE(SUM(bill_amount), 0) as total_billed,
             COALESCE(SUM(CASE WHEN status != 'Delivered' THEN 1 ELSE 0 END), 0) as pending_deliveries,
-            COUNT(*) as total_batches
+            COUNT(*) as total_batches,
+            COALESCE(SUM(raw_weight), 0) as total_wet_arrival,
+            COALESCE(SUM(CASE WHEN status IN ('Completed', 'Delivered') THEN actual_dry_weight ELSE 0 END), 0) as total_processed_dry,
+            COALESCE(SUM(CASE WHEN status = 'Delivered' THEN actual_dry_weight ELSE 0 END), 0) as total_delivered_dry
         FROM public.batches
         {b_where}
     """, b_params)
@@ -5212,6 +5215,9 @@ async def reports_summary(
     total_billed = round(float(b_res[0]["total_billed"] if b_res else 0), 2)
     pending_deliveries = int(b_res[0]["pending_deliveries"] if b_res else 0)
     total_batches = int(b_res[0]["total_batches"] if b_res else 0)
+    total_wet_arrival = round(float(b_res[0]["total_wet_arrival"] if b_res else 0), 1)
+    total_processed_dry = round(float(b_res[0]["total_processed_dry"] if b_res else 0), 1)
+    total_delivered_dry = round(float(b_res[0]["total_delivered_dry"] if b_res else 0), 1)
     total_collection = round(float(p_res[0]["total_collection"] if p_res else 0), 2)
     pending_payments = max(0.00, round(total_billed - total_collection, 2))
 
@@ -5303,6 +5309,9 @@ async def reports_summary(
     }
 
     return {
+        "total_wet_arrival": total_wet_arrival,
+        "total_processed_dry": total_processed_dry,
+        "total_delivered_dry": total_delivered_dry,
         "total_collection": total_collection,
         "total_expense": total_expense,
         "profit": round(total_collection - total_expense, 2),

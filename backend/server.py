@@ -5532,7 +5532,7 @@ async def reports_summary(
     util = []
     for m in (machines or []):
         cnt = machine_batch_counts.get(m["id"], 0)
-        util.append({"name": m["name"], "batches": cnt, "status": m["status"]})
+        util.append({"id": m.get("id"), "name": m["name"], "batches": cnt, "status": m["status"]})
 
     # Outsourced processing summary
     out_machines = [m for m in (machines or []) if m.get("is_outsourced")]

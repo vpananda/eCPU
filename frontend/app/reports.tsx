@@ -474,8 +474,8 @@ export default function Reports() {
               {/* Machine Utilization */}
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>Machine Utilization</Text>
-                {(summaryData.machine_utilization || []).map((m: any) => (
-                  <View key={m.name} style={styles.utilRow}>
+                {(summaryData.machine_utilization || []).map((m: any, idx: number) => (
+                  <View key={m.id || `${m.name}-${idx}`} style={styles.utilRow}>
                     <MaterialCommunityIcons name="cog" size={18} color={colors.primary} />
                     <Text style={styles.utilName}>{m.name}</Text>
                     <View style={styles.utilBar}>

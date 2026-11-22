@@ -5315,6 +5315,270 @@ async def reports_summary(
     }
 
 
+@api.get("/reports/machine-wise")
+async def reports_machine_wise(
+    branch_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id
+    if target_branch:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != target_branch:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        if user.get("role") != "Admin":
+            target_branch = user.get("branch_id")
+
+    where_clauses = ["1=1"]
+    params = []
+    if target_branch:
+        where_clauses.append("m.branch_id = %s::uuid")
+        params.append(target_branch)
+
+    sql = f"""
+        SELECT 
+            m.id::text as machine_id, m.name as machine_name, m.capacity, m.status, 
+            m.is_outsourced, m.vendor_name, m.vendor_phone, m.vendor_rate_per_kg,
+            m.branch_id::text, br.name as branch_name,
+            COUNT(b.id) as total_batches,
+            COUNT(CASE WHEN b.status = 'Drying' THEN 1 END) as active_batches,
+            COUNT(CASE WHEN b.status IN ('Completed', 'Delivered') THEN 1 END) as completed_batches,
+            COALESCE(SUM(b.raw_weight), 0) as total_wet_weight,
+            COALESCE(SUM(b.actual_dry_weight), 0) as total_dry_weight
+        FROM public.machines m
+        LEFT JOIN public.branches br ON m.branch_id = br.id
+        LEFT JOIN public.batches b ON b.machine_id = m.id
+        WHERE {" AND ".join(where_clauses)}
+        GROUP BY m.id, m.name, m.capacity, m.status, m.is_outsourced, 
+                 m.vendor_name, m.vendor_phone, m.vendor_rate_per_kg,
+                 m.branch_id, br.name
+        ORDER BY m.is_outsourced ASC, m.name ASC
+    """
+    rows = await db.query(sql, params)
+
+    exp_sql = """
+        SELECT machine_id::text, COALESCE(SUM(amount), 0) as paid_amount
+        FROM public.expenses
+        WHERE machine_id IS NOT NULL
+        GROUP BY machine_id
+    """
+    exp_rows = await db.query(exp_sql, [])
+    exp_map = {r["machine_id"]: float(r["paid_amount"]) for r in exp_rows if r.get("machine_id")}
+
+    res = []
+    for r in rows:
+        d = dict(r)
+        d["capacity"] = float(d.get("capacity") or 0)
+        d["total_batches"] = int(d.get("total_batches") or 0)
+        d["active_batches"] = int(d.get("active_batches") or 0)
+        d["completed_batches"] = int(d.get("completed_batches") or 0)
+        wet = float(d.get("total_wet_weight") or 0)
+        dry = float(d.get("total_dry_weight") or 0)
+        d["total_wet_weight"] = round(wet, 1)
+        d["total_dry_weight"] = round(dry, 1)
+        d["yield_pct"] = round((dry / wet * 100), 1) if wet > 0 and dry > 0 else 0.0
+        d["vendor_rate_per_kg"] = float(d.get("vendor_rate_per_kg") or 0)
+
+        if d.get("is_outsourced"):
+            cost = round(wet * d["vendor_rate_per_kg"], 2)
+            paid = round(exp_map.get(d["machine_id"], 0.0), 2)
+            d["total_cost"] = cost
+            d["total_paid"] = paid
+            d["balance_payable"] = max(0.0, round(cost - paid, 2))
+        else:
+            d["total_cost"] = 0.0
+            d["total_paid"] = 0.0
+            d["balance_payable"] = 0.0
+
+        res.append(d)
+
+    return res
+
+
+@api.get("/reports/customer-wise")
+async def reports_customer_wise(
+    branch_id: Optional[str] = None,
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id
+    if target_branch:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != target_branch:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        if user.get("role") != "Admin":
+            target_branch = user.get("branch_id")
+
+    where_clauses = ["1=1"]
+    params = []
+    if target_branch:
+        where_clauses.append("c.branch_id = %s::uuid")
+        params.append(target_branch)
+
+    if q:
+        where_clauses.append("(c.name ILIKE %s OR c.code ILIKE %s OR c.mobile ILIKE %s)")
+        q_like = f"%{q}%"
+        params.extend([q_like, q_like, q_like])
+
+    sql = f"""
+        SELECT 
+            c.id::text as customer_id, c.name as customer_name, c.code as customer_code, 
+            c.mobile as customer_mobile, c.address as customer_address, 
+            c.branch_id::text, br.name as branch_name,
+            COUNT(b.id) as total_batches,
+            COALESCE(SUM(b.raw_weight), 0) as total_wet_weight,
+            COALESCE(SUM(CASE WHEN b.status IN ('Completed', 'Delivered') THEN b.actual_dry_weight ELSE 0 END), 0) as total_dry_weight,
+            COALESCE(AVG(NULLIF(b.padi_weight, 0)), 0) as avg_padi_weight,
+            COALESCE(SUM(b.bill_amount), 0) as total_billed,
+            COALESCE(SUM(b.total_paid), 0) as total_paid,
+            COALESCE(SUM(b.balance_amount), 0) as balance_amount
+        FROM public.customers c
+        LEFT JOIN public.branches br ON c.branch_id = br.id
+        LEFT JOIN public.batches b ON b.customer_id = c.id
+        WHERE {" AND ".join(where_clauses)}
+        GROUP BY c.id, c.name, c.code, c.mobile, c.address, c.branch_id, br.name
+        HAVING COUNT(b.id) > 0
+        ORDER BY total_wet_weight DESC, c.name ASC
+    """
+    rows = await db.query(sql, params)
+    res = []
+    for r in rows:
+        d = dict(r)
+        d["total_batches"] = int(d.get("total_batches") or 0)
+        d["total_wet_weight"] = round(float(d.get("total_wet_weight") or 0), 1)
+        d["total_dry_weight"] = round(float(d.get("total_dry_weight") or 0), 1)
+        d["avg_padi_weight"] = round(float(d.get("avg_padi_weight") or 0), 1)
+        d["total_billed"] = round(float(d.get("total_billed") or 0), 2)
+        d["total_paid"] = round(float(d.get("total_paid") or 0), 2)
+        d["balance_amount"] = round(float(d.get("balance_amount") or 0), 2)
+        res.append(d)
+    return res
+
+
+@api.get("/reports/payments")
+async def reports_payments(
+    branch_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id
+    if target_branch:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != target_branch:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        if user.get("role") != "Admin":
+            target_branch = user.get("branch_id")
+
+    where_clauses = ["1=1"]
+    params = []
+    if target_branch:
+        where_clauses.append("p.branch_id = %s::uuid")
+        params.append(target_branch)
+
+    if start_date:
+        where_clauses.append("p.created_at::date >= %s::date")
+        params.append(start_date)
+    if end_date:
+        where_clauses.append("p.created_at::date <= %s::date")
+        params.append(end_date)
+
+    if q:
+        where_clauses.append("(c.name ILIKE %s OR c.code ILIKE %s OR b.batch_no ILIKE %s OR p.remarks ILIKE %s)")
+        q_like = f"%{q}%"
+        params.extend([q_like, q_like, q_like, q_like])
+
+    sql = f"""
+        SELECT 
+            p.id::text, p.created_at, p.amount, p.mode, p.remarks,
+            c.name as customer_name, c.code as customer_code, c.mobile as customer_mobile,
+            b.batch_no,
+            br.name as branch_name,
+            u.name as created_by_name
+        FROM public.payments p
+        LEFT JOIN public.customers c ON p.customer_id = c.id
+        LEFT JOIN public.batches b ON p.batch_id = b.id
+        LEFT JOIN public.branches br ON p.branch_id = br.id
+        LEFT JOIN public.users u ON p.created_by = u.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY p.created_at DESC
+        LIMIT 2000
+    """
+    rows = await db.query(sql, params)
+    res = []
+    for r in rows:
+        d = dict(r)
+        d["amount"] = round(float(d.get("amount") or 0), 2)
+        if d.get("created_at"):
+            d["created_at"] = str(d["created_at"])
+        res.append(d)
+    return res
+
+
+@api.get("/reports/expenses")
+async def reports_expenses(
+    branch_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    target_branch = branch_id
+    if target_branch:
+        if user.get("role") != "Admin" and user.get("branch_id") and user.get("branch_id") != target_branch:
+            raise HTTPException(status_code=403, detail="Forbidden")
+    else:
+        if user.get("role") != "Admin":
+            target_branch = user.get("branch_id")
+
+    where_clauses = ["1=1"]
+    params = []
+    if target_branch:
+        where_clauses.append("e.branch_id = %s::uuid")
+        params.append(target_branch)
+
+    if start_date:
+        where_clauses.append("e.expense_date >= %s::date")
+        params.append(start_date)
+    if end_date:
+        where_clauses.append("e.expense_date <= %s::date")
+        params.append(end_date)
+    if category:
+        where_clauses.append("e.category = %s")
+        params.append(category)
+
+    if q:
+        where_clauses.append("(e.vendor ILIKE %s OR e.remarks ILIKE %s OR m.name ILIKE %s)")
+        q_like = f"%{q}%"
+        params.extend([q_like, q_like, q_like])
+
+    sql = f"""
+        SELECT 
+            e.id::text, e.expense_date, e.category, e.amount, e.vendor, e.remarks, e.payment_mode,
+            e.bill_photo, e.bill_photos,
+            m.name as machine_name,
+            br.name as branch_name,
+            u.name as created_by_name
+        FROM public.expenses e
+        LEFT JOIN public.branches br ON e.branch_id = br.id
+        LEFT JOIN public.machines m ON e.machine_id = m.id
+        LEFT JOIN public.users u ON e.created_by = u.id
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY e.expense_date DESC, e.created_at DESC
+        LIMIT 2000
+    """
+    rows = await db.query(sql, params)
+    res = []
+    for r in rows:
+        d = dict(r)
+        d["amount"] = round(float(d.get("amount") or 0), 2)
+        if d.get("expense_date"):
+            d["expense_date"] = str(d["expense_date"])
+        res.append(d)
+    return res
+
+
 # ---------------------------- SEARCH ----------------------------
 @api.get("/search")
 async def search(q: str, user: dict = Depends(get_current_user)):

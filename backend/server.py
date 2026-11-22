@@ -6020,40 +6020,69 @@ async def trigger_daily_report_cron(
     """
     Public webhook endpoint for external cron services (cron-job.org, Render Cron, EasyCron, curl).
     Allows triggering the daily operational summary without requiring a user JWT login session.
+    Also acts as a server keepalive monitor when pinged periodically (e.g. every 15-30 mins).
     """
     configured_secret = os.getenv("CRON_SECRET", "").strip()
     if configured_secret and key != configured_secret:
         raise HTTPException(status_code=401, detail="Invalid cron key")
 
-    ist_tz = timezone(timedelta(hours=5, minutes=30))
-    now_ist = datetime.now(timezone.utc).astimezone(ist_tz)
-    today_str = target_date if target_date else now_ist.strftime("%Y-%m-%d")
+    try:
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(timezone.utc).astimezone(ist_tz)
+        now_hm = now_ist.strftime("%H:%M")
+        today_str = target_date if target_date else now_ist.strftime("%Y-%m-%d")
 
-    d_doc = await db.settings.find_one({"key": "daily_report_settings"}, {"_id": 0})
-    settings = (d_doc or {}).get("value") or {}
-    last_sent = settings.get("last_sent_date", "")
+        d_doc = await db.settings.find_one({"key": "daily_report_settings"}, {"_id": 0})
+        settings = (d_doc or {}).get("value") or {}
+        enabled = settings.get("enabled", True)
+        send_time = settings.get("send_time", "21:00")
+        last_sent = settings.get("last_sent_date", "")
 
-    if not force and last_sent == today_str and not target_date:
+        # 1. If already sent today (and not forced)
+        if not force and last_sent == today_str and not target_date:
+            return {
+                "success": True,
+                "status": "already_sent_today",
+                "date": today_str,
+                "server_time_ist": now_hm,
+                "message": f"Daily report for {today_str} was already dispatched today. Server keepalive active."
+            }
+
+        # 2. If scheduled send_time has not yet arrived today (and not forced)
+        # Allows periodic keepalive cron jobs (e.g. every 30 mins) without triggering early in the morning
+        if not force and not target_date and now_hm < send_time:
+            return {
+                "success": True,
+                "status": "waiting_for_scheduled_time",
+                "date": today_str,
+                "server_time_ist": now_hm,
+                "scheduled_time": send_time,
+                "message": f"Server keepalive ping successful. Daily report is scheduled for {send_time} IST (current time: {now_hm} IST). It will dispatch automatically once {send_time} is reached."
+            }
+
+        # 3. Dispatched!
+        results = await dispatch_daily_reports(target_date_str=today_str)
+        settings["last_sent_date"] = today_str
+        await db.settings.update_one(
+            {"key": "daily_report_settings"},
+            {"$set": {"value": settings}},
+            upsert=True
+        )
         return {
             "success": True,
-            "status": "already_sent_today",
+            "status": "dispatched",
             "date": today_str,
-            "message": f"Daily report for {today_str} was already dispatched today. Pass ?force=true to resend."
+            "server_time_ist": now_hm,
+            "results": results
         }
-
-    results = await dispatch_daily_reports(target_date_str=today_str)
-    settings["last_sent_date"] = today_str
-    await db.settings.update_one(
-        {"key": "daily_report_settings"},
-        {"$set": {"value": settings}},
-        upsert=True
-    )
-    return {
-        "success": True,
-        "status": "dispatched",
-        "date": today_str,
-        "results": results
-    }
+    except Exception as ex:
+        logger.error(f"Error in trigger_daily_report_cron: {ex}", exc_info=True)
+        return {
+            "success": False,
+            "status": "error",
+            "error": str(ex),
+            "message": "Encountered an error while processing daily report cron trigger."
+        }
 
 
 class SendSmsReq(BaseModel):

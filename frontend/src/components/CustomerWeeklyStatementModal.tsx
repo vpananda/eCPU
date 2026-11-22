@@ -63,6 +63,7 @@ export default function CustomerWeeklyStatementModal({
 }: CustomerWeeklyStatementModalProps) {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [sendingServer, setSendingServer] = useState(false);
   const [filterMode, setFilterMode] = useState<"pending" | "all">("pending");
   const [data, setData] = useState<{
@@ -76,6 +77,7 @@ export default function CustomerWeeklyStatementModal({
     if (!customerId) return;
     try {
       setLoading(true);
+      setError(null);
       const qs = new URLSearchParams();
       if (branchId) qs.set("branch_id", branchId);
       qs.set("only_pending", filterMode === "pending" ? "true" : "false");
@@ -84,6 +86,7 @@ export default function CustomerWeeklyStatementModal({
       const res = await api<any>(`/customers/${customerId}/weekly-statement?${qs.toString()}`);
       setData(res);
     } catch (e: any) {
+      setError(e?.message || "Failed to load customer statement");
       toast.show(e?.message || "Failed to load statement", "error");
     } finally {
       setLoading(false);
@@ -195,6 +198,15 @@ export default function CustomerWeeklyStatementModal({
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="large" color={colors.primary} />
               <Text style={styles.loadingText}>Generating customer ledger statement...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorWrap}>
+              <MaterialCommunityIcons name="alert-circle-outline" size={42} color={colors.danger} />
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={loadStatement}>
+                <MaterialCommunityIcons name="refresh" size={16} color="#fff" />
+                <Text style={styles.retryBtnText}>Retry Loading</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <ScrollView style={styles.bodyScroll} contentContainerStyle={{ paddingBottom: 24 }}>
@@ -404,6 +416,20 @@ const styles = StyleSheet.create({
 
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 },
   loadingText: { fontSize: 13, color: colors.textMuted, marginTop: 10, fontWeight: "600" },
+
+  errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 50, paddingHorizontal: 20 },
+  errorText: { fontSize: 13, color: colors.danger, marginTop: 10, textAlign: "center", fontWeight: "600" },
+  retryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radius.md,
+    marginTop: 14,
+  },
+  retryBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
 
   bodyScroll: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
 

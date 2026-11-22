@@ -4431,7 +4431,7 @@ def _format_whatsapp_weekly_statement(customer_name: str, branch_name: str, batc
     lines.append(f"👤 Customer: *{customer_name}*")
     if phone:
         lines.append(f"📱 Phone: {phone}")
-    today_str = datetime.date.today().strftime("%d-%b-%Y")
+    today_str = date.today().strftime("%d-%b-%Y")
     lines.append(f"📅 Statement Date: {today_str}")
     lines.append("")
     lines.append("```")
@@ -4535,7 +4535,7 @@ async def get_customer_weekly_statement(
     params = [customer_id]
 
     if only_pending:
-        where_clauses.append("b.status != 'Delivered'")
+        where_clauses.append("b.status::text != 'Delivered'")
 
     if days and days > 0 and not only_pending:
         where_clauses.append("COALESCE(b.arrival_date, b.created_at) >= NOW() - make_interval(days => %s)")

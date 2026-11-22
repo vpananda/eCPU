@@ -194,3 +194,127 @@ export function buildStatementReminderMessage(p: StatementReminderParams): strin
     `\n_Kindly review and clear any pending balance at your earliest convenience. For queries, please contact our factory incharge. Thank you!_`
   );
 }
+
+export interface WeeklyStatementBatchItem {
+  sl_no?: number;
+  batch_no: string;
+  date_str: string; // "DD.MM.YY"
+  raw_weight: number;
+  actual_dry_weight?: number | null;
+  padi_weight?: number | null;
+  bill_amount: number;
+  status: string;
+}
+
+export interface WeeklyStatementParams {
+  companyName?: string;
+  branchName?: string;
+  customerName: string;
+  customerCode?: string;
+  customerMobile?: string;
+  date?: string;
+  batches: WeeklyStatementBatchItem[];
+  totalPaid?: number;
+  customNote?: string;
+}
+
+export function buildWeeklyStatementTableMessage(p: WeeklyStatementParams): string {
+  const branch = p.branchName ? `📍 Branch: ${p.branchName}\n` : "";
+  const codeText = p.customerCode ? ` (${p.customerCode})` : "";
+  const dateStr = p.date || new Date().toISOString().slice(0, 10);
+  const note = p.customNote ? `\n📝 Note: ${p.customNote}\n` : "";
+
+  const lines: string[] = [
+    `*${p.companyName || "E3 AGRO"} - WEEKLY STATEMENT*`,
+  ];
+  if (branch) lines.push(branch.trim());
+  lines.push(`👤 Customer: *${p.customerName}*${codeText}`);
+  if (p.customerMobile) lines.push(`📱 Phone: ${p.customerMobile}`);
+  lines.push(`📅 Date: ${dateStr}`);
+  lines.push("");
+  lines.push("```");
+  lines.push("Sl|Date    |Arrival|Proc  |Padi|Amount ");
+  lines.push("--+--------+-------+------+----+-------");
+
+  let totWet = 0;
+  let totDry = 0;
+  let totBilled = 0;
+  let padiSum = 0;
+  let padiCount = 0;
+  let dryingCount = 0;
+  let readyCount = 0;
+  let deliveredCount = 0;
+
+  (p.batches || []).forEach((b, idx) => {
+    const sl = String(b.sl_no || idx + 1).padStart(2, "0");
+    const dStr = (b.date_str || " - ").slice(0, 8).padEnd(8, " ");
+    const raw = Number(b.raw_weight || 0);
+    totWet += raw;
+    const rawStr = (raw < 1000 ? `${Math.round(raw)}k` : `${Math.round(raw)}`).padStart(5, " ") + " ";
+
+    let procStr = "  -   ";
+    if (b.status === "In Queue" || b.status === "Drying") {
+      procStr = "Drying";
+      dryingCount += 1;
+    } else if (b.actual_dry_weight && Number(b.actual_dry_weight) > 0) {
+      const dryVal = Number(b.actual_dry_weight);
+      totDry += dryVal;
+      procStr = dryVal.toFixed(1).padStart(6, " ");
+      if (b.status === "Delivered") {
+        deliveredCount += 1;
+      } else {
+        readyCount += 1;
+      }
+    }
+
+    let padiStr = "  - ";
+    const padi = Number(b.padi_weight || 0);
+    if (padi > 0) {
+      padiStr = String(Math.round(padi)).padStart(4, " ");
+      padiSum += padi;
+      padiCount += 1;
+    }
+
+    const amt = Number(b.bill_amount || 0);
+    totBilled += amt;
+    const amtStr = amt > 0 ? `₹${Math.round(amt).toLocaleString("en-IN")}`.padStart(7, " ") : "   -   ";
+
+    lines.push(`${sl}|${dStr}|${rawStr}|${procStr}|${padiStr}|${amtStr}`);
+  });
+
+  lines.push("```");
+
+  const totalPaid = Number(p.totalPaid || 0);
+  const balDue = Math.max(0, totBilled - totalPaid);
+  const avgPadi = padiCount > 0 ? (padiSum / padiCount).toFixed(0) : null;
+
+  lines.push("--------------------------------");
+  lines.push("📊 *SUMMARY TOTALS*");
+  lines.push(`• Total Arrival Wet : *${totWet.toLocaleString("en-IN", { maximumFractionDigits: 1 })} kg*`);
+  lines.push(`• Processed Dry     : *${totDry.toLocaleString("en-IN", { maximumFractionDigits: 1 })} kg*`);
+  if (avgPadi) {
+    lines.push(`• Average Padi Wt   : *${avgPadi} g/L*`);
+  }
+  if (readyCount > 0) {
+    lines.push(`• Ready for Delivery: *${readyCount} Lots*`);
+  }
+  if (dryingCount > 0) {
+    lines.push(`• In Drying Process : *${dryingCount} Lots*`);
+  }
+  if (deliveredCount > 0) {
+    lines.push(`• Delivered Lots    : *${deliveredCount} Lots*`);
+  }
+  lines.push(`• Total Bill Amount : *₹${totBilled.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*`);
+  lines.push(`• Total Paid        : *₹${totalPaid.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*`);
+  if (balDue > 0) {
+    lines.push(`• 🔴 *Pending Balance: ₹${balDue.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*`);
+  } else {
+    lines.push(`• 🟢 *Balance Due: Fully Settled*`);
+  }
+  lines.push("--------------------------------");
+  if (note) lines.push(note.trim());
+  lines.push("_Kindly verify your lot weights and settle pending balance. For assistance, contact branch factory._");
+
+  return lines.join("\n");
+}
+

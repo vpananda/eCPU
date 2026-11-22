@@ -4314,6 +4314,7 @@ async def copy_reminder_config_to_all(
 async def get_reminder_statements(
     branch_id: Optional[str] = None,
     only_pending: bool = True,
+    filter_type: Optional[str] = "pending_all",  # pending_all, pending_processing, pending_delivery, pending_payment, all
     min_balance: float = 0.0,
     user: dict = Depends(get_current_user)
 ):
@@ -4324,42 +4325,37 @@ async def get_reminder_statements(
         cust_query["branch_id"] = target_branch
     customers = await db.customers.find(cust_query, {"_id": 0}).sort("name", 1).to_list(1000)
     
-    if target_branch:
-        batch_stats = await db.query("""
-            SELECT 
-                customer_id::text,
-                COALESCE(SUM(bill_amount), 0)::float as total_billed
-            FROM public.batches
-            WHERE branch_id::text = %s
-            GROUP BY customer_id
-        """, [target_branch])
+    b_filter = "WHERE branch_id::text = %s" if target_branch else ""
+    b_params = [target_branch] if target_branch else []
+    
+    batch_stats = await db.query(f"""
+        SELECT 
+            customer_id::text,
+            COALESCE(SUM(bill_amount), 0)::float as total_billed,
+            COALESCE(SUM(raw_weight), 0)::float as total_wet_arrival,
+            COALESCE(SUM(CASE WHEN status::text IN ('Completed', 'Delivered') THEN actual_dry_weight ELSE 0 END), 0)::float as total_dry_weight,
+            COALESCE(SUM(CASE WHEN status::text IN ('Received', 'Loaded', 'Drying') THEN 1 ELSE 0 END), 0)::int as pending_processing,
+            COALESCE(SUM(CASE WHEN status::text = 'Completed' THEN 1 ELSE 0 END), 0)::int as pending_delivery,
+            COALESCE(SUM(CASE WHEN status::text = 'Delivered' THEN 1 ELSE 0 END), 0)::int as delivered_count,
+            COUNT(id)::int as total_batches
+        FROM public.batches
+        {b_filter}
+        GROUP BY customer_id
+    """, b_params)
+
+    p_filter = "WHERE branch_id::text = %s" if target_branch else ""
+    p_params = [target_branch] if target_branch else []
+
+    payment_stats = await db.query(f"""
+        SELECT 
+            customer_id::text,
+            COALESCE(SUM(amount), 0)::float as total_payments
+        FROM public.payments
+        {p_filter}
+        GROUP BY customer_id
+    """, p_params)
         
-        payment_stats = await db.query("""
-            SELECT 
-                customer_id::text,
-                COALESCE(SUM(amount), 0)::float as total_payments
-            FROM public.payments
-            WHERE branch_id::text = %s
-            GROUP BY customer_id
-        """, [target_branch])
-    else:
-        batch_stats = await db.query("""
-            SELECT 
-                customer_id::text,
-                COALESCE(SUM(bill_amount), 0)::float as total_billed
-            FROM public.batches
-            GROUP BY customer_id
-        """)
-        
-        payment_stats = await db.query("""
-            SELECT 
-                customer_id::text,
-                COALESCE(SUM(amount), 0)::float as total_payments
-            FROM public.payments
-            GROUP BY customer_id
-        """)
-        
-    b_map = {row["customer_id"]: float(row["total_billed"]) for row in batch_stats}
+    b_map = {row["customer_id"]: row for row in batch_stats}
     p_map = {row["customer_id"]: float(row["total_payments"]) for row in payment_stats}
     
     branches = {b["id"]: b["name"] for b in await db.branches.find({}, {"_id": 0}).to_list(100)}
@@ -4367,12 +4363,39 @@ async def get_reminder_statements(
     result = []
     for c in customers:
         cid = str(c["id"])
-        billed = b_map.get(cid, 0.0)
+        b_info = b_map.get(cid, {})
+        billed = float(b_info.get("total_billed", 0.0))
         paid = p_map.get(cid, 0.0)
         balance = round(billed - paid, 2)
+        proc_cnt = int(b_info.get("pending_processing", 0))
+        deliv_cnt = int(b_info.get("pending_delivery", 0))
+        done_cnt = int(b_info.get("delivered_count", 0))
+        tot_batches = int(b_info.get("total_batches", 0))
+        tot_wet = round(float(b_info.get("total_wet_arrival", 0.0)), 1)
+        tot_dry = round(float(b_info.get("total_dry_weight", 0.0)), 1)
         
-        if only_pending and balance <= min_balance:
-            continue
+        has_pending = (proc_cnt > 0 or deliv_cnt > 0 or balance > min_balance)
+
+        # Apply filtering
+        if filter_type == "pending_all":
+            if not has_pending and tot_batches == 0:
+                continue
+            if only_pending and not has_pending:
+                continue
+        elif filter_type == "pending_processing":
+            if proc_cnt <= 0:
+                continue
+        elif filter_type == "pending_delivery":
+            if deliv_cnt <= 0:
+                continue
+        elif filter_type == "pending_payment":
+            if balance <= min_balance:
+                continue
+        elif filter_type == "all":
+            pass
+        else:
+            if only_pending and not has_pending:
+                continue
             
         c_branch = branches.get(c.get("branch_id"), "Factory")
         
@@ -4387,10 +4410,285 @@ async def get_reminder_statements(
             "total_billed": round(billed, 2),
             "total_received": round(paid, 2),
             "balance_due": balance,
+            "pending_processing": proc_cnt,
+            "pending_delivery": deliv_cnt,
+            "delivered_count": done_cnt,
+            "total_batches": tot_batches,
+            "total_wet_arrival": tot_wet,
+            "total_dry_weight": tot_dry,
+            "has_pending": has_pending,
         })
         
-    result.sort(key=lambda x: x["balance_due"], reverse=True)
+    result.sort(key=lambda x: (x["pending_delivery"] + x["pending_processing"], x["balance_due"]), reverse=True)
     return result
+
+
+def _format_whatsapp_weekly_statement(customer_name: str, branch_name: str, batches: list, total_paid: float = 0.0, phone: str = "") -> str:
+    lines = []
+    lines.append("*E3 AGRO - WEEKLY STATEMENT*")
+    if branch_name:
+        lines.append(f"📍 Branch: {branch_name}")
+    lines.append(f"👤 Customer: *{customer_name}*")
+    if phone:
+        lines.append(f"📱 Phone: {phone}")
+    today_str = datetime.date.today().strftime("%d-%b-%Y")
+    lines.append(f"📅 Statement Date: {today_str}")
+    lines.append("")
+    lines.append("```")
+    lines.append("Sl|Date    |Arrival|Proc  |Padi|Amount ")
+    lines.append("--+--------+-------+------+----+-------")
+    
+    tot_arr = 0.0
+    tot_proc = 0.0
+    tot_amt = 0.0
+    padi_sum = 0.0
+    padi_cnt = 0
+    drying_cnt = 0
+    ready_cnt = 0
+    deliv_cnt = 0
+    
+    for i, b in enumerate(batches, start=1):
+        sl = f"{i:02d}"
+        d_str = str(b.get("date_str") or " - ")[:8].ljust(8)
+        raw = float(b.get("raw_weight") or 0)
+        tot_arr += raw
+        raw_str = (f"{int(raw)}k" if raw < 1000 else f"{int(raw)}").rjust(5) + " "
+        
+        status = str(b.get("status") or "")
+        dry = b.get("actual_dry_weight")
+        if status in ("In Queue", "Drying", "Received", "Loaded"):
+            proc_str = "Drying"
+            drying_cnt += 1
+        elif dry is not None and float(dry) > 0:
+            val = float(dry)
+            tot_proc += val
+            proc_str = f"{val:6.1f}"
+            if status == "Delivered":
+                deliv_cnt += 1
+            else:
+                ready_cnt += 1
+        else:
+            proc_str = "  -   "
+            
+        padi = float(b.get("padi_weight") or 0)
+        if padi > 0:
+            padi_str = f"{int(padi):4d}"
+            padi_sum += padi
+            padi_cnt += 1
+        else:
+            padi_str = "  - "
+            
+        amt = float(b.get("bill_amount") or 0)
+        tot_amt += amt
+        amt_str = f"₹{int(amt):,}".rjust(7) if amt > 0 else "   -   "
+        
+        lines.append(f"{sl}|{d_str}|{raw_str}|{proc_str}|{padi_str}|{amt_str}")
+    lines.append("```")
+    
+    bal = max(0.0, round(tot_amt - total_paid, 2))
+    avg_padi = round(padi_sum / padi_cnt, 1) if padi_cnt > 0 else 0
+    
+    lines.append("--------------------------------")
+    lines.append("📊 *SUMMARY TOTALS*")
+    lines.append(f"• Total Arrival Wet : *{tot_arr:,.1f} kg*")
+    lines.append(f"• Processed Dry     : *{tot_proc:,.1f} kg*")
+    if avg_padi > 0:
+        lines.append(f"• Average Padi Wt   : *{avg_padi} g/L*")
+    if ready_cnt > 0:
+        lines.append(f"• Ready for Delivery: *{ready_cnt} Lots*")
+    if drying_cnt > 0:
+        lines.append(f"• In Drying Process : *{drying_cnt} Lots*")
+    if deliv_cnt > 0:
+        lines.append(f"• Delivered Lots    : *{deliv_cnt} Lots*")
+    lines.append(f"• Total Bill Amount : *₹{tot_amt:,.2f}*")
+    lines.append(f"• Total Paid        : *₹{total_paid:,.2f}*")
+    if bal > 0:
+        lines.append(f"• 🔴 *Pending Balance: ₹{bal:,.2f}*")
+    else:
+        lines.append("• 🟢 *Balance Due: Fully Settled*")
+    lines.append("--------------------------------")
+    lines.append("_Kindly verify your lot weights and settle pending balance. For queries, contact branch factory._")
+    
+    return "\n".join(lines)
+
+
+@api.get("/customers/{customer_id}/weekly-statement")
+async def get_customer_weekly_statement(
+    customer_id: str,
+    branch_id: Optional[str] = None,
+    only_pending: bool = False,
+    days: Optional[int] = 30,
+    user: dict = Depends(get_current_user)
+):
+    c = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    target_branch = branch_id or c.get("branch_id")
+    br_name = "Factory"
+    if target_branch:
+        br = await db.branches.find_one({"id": target_branch}, {"_id": 0, "name": 1})
+        if br:
+            br_name = br.get("name", "Factory")
+
+    where_clauses = ["b.customer_id = %s::uuid"]
+    params = [customer_id]
+
+    if only_pending:
+        where_clauses.append("b.status != 'Delivered'")
+
+    if days and days > 0 and not only_pending:
+        where_clauses.append("COALESCE(b.arrival_date, b.created_at) >= NOW() - make_interval(days => %s)")
+        params.append(days)
+
+    where_sql = " AND ".join(where_clauses)
+    sql = f"""
+        SELECT 
+            b.id::text as batch_id,
+            b.batch_no,
+            to_char(COALESCE(b.arrival_date, b.created_at), 'DD.MM.YY') as date_str,
+            COALESCE(b.arrival_date, b.created_at)::text as arrival_date,
+            COALESCE(b.raw_weight, 0)::float as raw_weight,
+            COALESCE(b.actual_dry_weight, 0)::float as actual_dry_weight,
+            COALESCE(b.padi_weight, 0)::float as padi_weight,
+            COALESCE(b.rate_per_kg, 0)::float as rate_per_kg,
+            COALESCE(b.bill_amount, 0)::float as bill_amount,
+            COALESCE(b.total_paid, 0)::float as total_paid,
+            COALESCE(b.balance_amount, 0)::float as balance_amount,
+            b.status
+        FROM public.batches b
+        WHERE {where_sql}
+        ORDER BY COALESCE(b.arrival_date, b.created_at) ASC, b.batch_no ASC
+    """
+    rows = await db.query(sql, params)
+
+    # Get payments for this customer
+    p_sql = "SELECT COALESCE(SUM(amount), 0)::float as total_paid FROM public.payments WHERE customer_id = %s::uuid"
+    p_res = await db.query(p_sql, [customer_id])
+    total_paid = float(p_res[0]["total_paid"]) if p_res else 0.0
+
+    batches = []
+    tot_wet = 0.0
+    tot_dry = 0.0
+    tot_billed = 0.0
+    padi_sum = 0.0
+    padi_count = 0
+    drying_count = 0
+    ready_count = 0
+    delivered_count = 0
+
+    for i, r in enumerate(rows, start=1):
+        raw = float(r.get("raw_weight") or 0)
+        dry = float(r.get("actual_dry_weight") or 0)
+        padi = float(r.get("padi_weight") or 0)
+        amt = float(r.get("bill_amount") or 0)
+        status = r.get("status")
+
+        tot_wet += raw
+        tot_billed += amt
+        if status in ("In Queue", "Drying", "Received", "Loaded"):
+            drying_count += 1
+        elif dry > 0:
+            tot_dry += dry
+            if status == "Delivered":
+                delivered_count += 1
+            else:
+                ready_count += 1
+
+        if padi > 0:
+            padi_sum += padi
+            padi_count += 1
+
+        batches.append({
+            "sl_no": i,
+            "batch_id": r.get("batch_id"),
+            "batch_no": r.get("batch_no"),
+            "date_str": r.get("date_str"),
+            "arrival_date": r.get("arrival_date"),
+            "raw_weight": raw,
+            "actual_dry_weight": dry if dry > 0 else None,
+            "padi_weight": padi if padi > 0 else None,
+            "rate_per_kg": float(r.get("rate_per_kg") or 0),
+            "bill_amount": amt,
+            "status": status,
+        })
+
+    balance_due = max(0.0, round(tot_billed - total_paid, 2))
+    avg_padi = round(padi_sum / padi_count, 1) if padi_count > 0 else 0.0
+
+    # Build formatted WhatsApp text
+    wa_msg = _format_whatsapp_weekly_statement(
+        customer_name=c.get("name", "Customer"),
+        branch_name=br_name,
+        batches=batches,
+        total_paid=total_paid,
+        phone=c.get("mobile", "")
+    )
+
+    return {
+        "customer": {
+            "id": customer_id,
+            "name": c.get("name", "Customer"),
+            "code": c.get("code", ""),
+            "mobile": c.get("mobile", ""),
+            "village": c.get("village", ""),
+            "branch_id": target_branch,
+            "branch_name": br_name,
+        },
+        "batches": batches,
+        "summary": {
+            "total_lots": len(batches),
+            "total_wet_arrival": round(tot_wet, 1),
+            "total_processed_dry": round(tot_dry, 1),
+            "avg_padi_weight": avg_padi,
+            "drying_count": drying_count,
+            "ready_count": ready_count,
+            "delivered_count": delivered_count,
+            "total_billed": round(tot_billed, 2),
+            "total_paid": round(total_paid, 2),
+            "balance_due": balance_due,
+        },
+        "whatsapp_message": wa_msg,
+    }
+
+
+@api.post("/customers/{customer_id}/send-weekly-statement")
+async def send_customer_weekly_statement(
+    customer_id: str,
+    user: dict = Depends(get_current_user)
+):
+    stmt = await get_customer_weekly_statement(customer_id=customer_id, user=user)
+    cust = stmt.get("customer", {})
+    phone = cust.get("mobile", "")
+    wa_msg = stmt.get("whatsapp_message", "")
+
+    if not phone:
+        raise HTTPException(status_code=400, detail="Customer has no mobile number registered")
+
+    send_res = {"success": False, "sent_via": "none"}
+    try:
+        from whatsapp_service import send_whatsapp_text
+        api_res = await send_whatsapp_text(to_phone=phone, message_text=wa_msg)
+        if api_res.get("success"):
+            send_res = {"success": True, "sent_via": "whatsapp_cloud_api"}
+    except Exception as e:
+        logger.warning(f"Could not send whatsapp via Cloud API: {e}")
+
+    await audit("send_weekly_statement", "customer", customer_id, user, None, {
+        "mobile": phone,
+        "lots": len(stmt.get("batches", [])),
+        "balance_due": stmt.get("summary", {}).get("balance_due", 0),
+        "sent_via": send_res.get("sent_via"),
+    })
+
+    return {
+        "success": True,
+        "customer_name": cust.get("name"),
+        "mobile": phone,
+        "whatsapp_message": wa_msg,
+        "sent_via": send_res.get("sent_via"),
+    }
+
 
 
 # ---------------------------- MAINTENANCE ----------------------------

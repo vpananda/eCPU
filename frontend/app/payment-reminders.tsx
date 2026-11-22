@@ -23,7 +23,9 @@ import {
   openWhatsApp,
   openSMS,
   buildStatementReminderMessage,
+  buildWeeklyStatementTableMessage,
 } from "@/src/utils/notifications";
+import CustomerWeeklyStatementModal from "@/src/components/CustomerWeeklyStatementModal";
 
 const FREQUENCIES = [
   { key: "daily", label: "Daily", sub: "Every Day" },
@@ -64,7 +66,16 @@ interface CustomerStatement {
   total_billed: number;
   total_received: number;
   balance_due: number;
+  pending_processing?: number;
+  pending_delivery?: number;
+  delivered_count?: number;
+  total_batches?: number;
+  total_wet_arrival?: number;
+  total_dry_weight?: number;
+  has_pending?: boolean;
 }
+
+type FilterType = "pending_all" | "pending_payment" | "pending_delivery" | "pending_processing" | "all";
 
 export default function PaymentRemindersScreen() {
   const router = useRouter();
@@ -100,6 +111,8 @@ export default function PaymentRemindersScreen() {
   const [savingConfig, setSavingConfig] = useState(false);
   const [search, setSearch] = useState("");
   const [configExpanded, setConfigExpanded] = useState(true);
+  const [selectedFilter, setSelectedFilter] = useState<FilterType>("pending_all");
+  const [statementModalCustomer, setStatementModalCustomer] = useState<CustomerStatement | null>(null);
 
   // Initialize active branch if unset
   useEffect(() => {
@@ -149,7 +162,7 @@ export default function PaymentRemindersScreen() {
   }, [activeBranchId]);
 
   // Load statements for active branch
-  const loadStatements = useCallback(async (bId?: string) => {
+  const loadStatements = useCallback(async (bId?: string, fType = selectedFilter) => {
     const targetBranch = bId || activeBranchId;
     if (!targetBranch) return;
     try {
@@ -157,7 +170,7 @@ export default function PaymentRemindersScreen() {
       const minVal = parseFloat(minBalanceText) || 0;
       const qs = new URLSearchParams();
       qs.set("branch_id", targetBranch);
-      qs.set("only_pending", config.only_pending ? "true" : "false");
+      qs.set("filter_type", fType);
       qs.set("min_balance", String(minVal));
 
       const data = await api<CustomerStatement[]>(`/reminders/statements?${qs.toString()}`);
@@ -167,14 +180,14 @@ export default function PaymentRemindersScreen() {
     } finally {
       setLoadingStatements(false);
     }
-  }, [activeBranchId, config.only_pending, minBalanceText, toast]);
+  }, [activeBranchId, selectedFilter, minBalanceText, toast]);
 
   useEffect(() => {
     if (activeBranchId) {
       loadConfig(activeBranchId);
-      loadStatements(activeBranchId);
+      loadStatements(activeBranchId, selectedFilter);
     }
-  }, [activeBranchId, loadConfig, loadStatements]);
+  }, [activeBranchId, selectedFilter, loadConfig, loadStatements]);
 
   const saveConfig = async () => {
     if (!activeBranchId) {
@@ -263,6 +276,17 @@ export default function PaymentRemindersScreen() {
   }, [statements]);
 
   const handleSendWhatsApp = async (s: CustomerStatement) => {
+    try {
+      toast.show("Generating weekly statement table...", "info");
+      const stmt = await api<any>(`/customers/${s.customer_id}/weekly-statement?branch_id=${activeBranchId}&only_pending=true`);
+      if (stmt?.whatsapp_message) {
+        await openWhatsApp(s.mobile, stmt.whatsapp_message);
+        return;
+      }
+    } catch {
+      // fallback
+    }
+
     const freqObj = FREQUENCIES.find(f => f.key === config.frequency);
     const msg = buildStatementReminderMessage({
       companyName: "E3 SPICE PROCESSORS",
@@ -613,13 +637,45 @@ export default function PaymentRemindersScreen() {
           )}
         </View>
 
+        {/* Scope Filter Tabs */}
+        <View style={styles.scopeFilterWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scopeFilterScroll}>
+            {[
+              { id: "pending_all", label: "All Pending (Lots/Due)", icon: "alert-circle-outline" },
+              { id: "pending_payment", label: "Pending Payment", icon: "cash-multiple" },
+              { id: "pending_delivery", label: "Pending Delivery", icon: "package-variant-closed" },
+              { id: "pending_processing", label: "In Drying", icon: "timer-sand" },
+              { id: "all", label: "All Customers", icon: "account-group" },
+            ].map(tab => {
+              const active = selectedFilter === tab.id;
+              return (
+                <TouchableOpacity
+                  key={tab.id}
+                  style={[styles.scopeChip, active && styles.scopeChipActive]}
+                  onPress={() => setSelectedFilter(tab.id as FilterType)}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons
+                    name={tab.icon as any}
+                    size={14}
+                    color={active ? "#fff" : colors.textMuted}
+                  />
+                  <Text style={[styles.scopeChipText, active && styles.scopeChipTextActive]}>
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+
         {/* Customer Statements List */}
         <View style={styles.listHeaderRow}>
           <Text style={styles.sectionTitle}>
             {currentBranchName} Customer Statements ({filteredStatements.length})
           </Text>
           <Text style={styles.sectionSubtitle}>
-            Sorted by highest outstanding balance · 1-Tap Statement Dispatch
+            Tabular Weekly Statement · Pending Processing, Deliveries & Payments
           </Text>
         </View>
 
@@ -628,14 +684,14 @@ export default function PaymentRemindersScreen() {
         ) : filteredStatements.length === 0 ? (
           <View style={styles.emptyContainer}>
             <MaterialCommunityIcons name="check-all" size={48} color={colors.primaryLight} />
-            <Text style={styles.emptyTitle}>No Pending Reminders</Text>
+            <Text style={styles.emptyTitle}>No Customers Found</Text>
             <Text style={styles.emptySub}>
-              All customers in {currentBranchName} are fully settled or no records matched the search.
+              All customers in {currentBranchName} are settled or no records matched the selected filter.
             </Text>
           </View>
         ) : (
           filteredStatements.map(item => {
-            const hasPending = item.balance_due > 0;
+            const hasPending = item.balance_due > 0 || (item.pending_delivery || 0) > 0 || (item.pending_processing || 0) > 0;
             return (
               <View key={item.customer_id} style={styles.customerCard}>
                 <View style={styles.customerTopRow}>
@@ -676,36 +732,78 @@ export default function PaymentRemindersScreen() {
                     <Text
                       style={[
                         styles.balAmount,
-                        { color: hasPending ? colors.danger : colors.primary },
+                        { color: item.balance_due > 0 ? colors.danger : colors.primary },
                       ]}
                     >
                       ₹{item.balance_due.toLocaleString("en-IN", { minimumFractionDigits: 0 })}
                     </Text>
                     <Text style={styles.balLabel}>
-                      {hasPending ? "Balance Due" : "Settled ✓"}
+                      {item.balance_due > 0 ? "Balance Due" : "Settled ✓"}
                     </Text>
                   </View>
                 </View>
 
-                {/* Financials Strip */}
-                <View style={styles.financialsStrip}>
-                  <Text style={styles.stripText}>
-                    Billed: <Text style={styles.stripBold}>₹{item.total_billed.toLocaleString()}</Text>
+                {/* Pending Lot & Payment Status Badges */}
+                <View style={styles.badgeRow}>
+                  {(item.pending_processing || 0) > 0 && (
+                    <View style={styles.badgeAmber}>
+                      <MaterialCommunityIcons name="timer-sand" size={11} color="#D97706" />
+                      <Text style={styles.badgeAmberText}>{item.pending_processing} In Drying</Text>
+                    </View>
+                  )}
+                  {(item.pending_delivery || 0) > 0 && (
+                    <View style={styles.badgeEmerald}>
+                      <MaterialCommunityIcons name="package-variant-closed" size={11} color="#059669" />
+                      <Text style={styles.badgeEmeraldText}>{item.pending_delivery} Ready to Deliver</Text>
+                    </View>
+                  )}
+                  {item.balance_due > 0 && (
+                    <View style={styles.badgeRed}>
+                      <MaterialCommunityIcons name="cash-multiple" size={11} color="#DC2626" />
+                      <Text style={styles.badgeRedText}>₹{Math.round(item.balance_due).toLocaleString("en-IN")} Due</Text>
+                    </View>
+                  )}
+                  {!(item.pending_processing || 0) && !(item.pending_delivery || 0) && item.balance_due <= 0 && (
+                    <View style={styles.badgeGreen}>
+                      <MaterialCommunityIcons name="check-circle" size={11} color="#16A34A" />
+                      <Text style={styles.badgeGreenText}>All Settled & Delivered</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Produce Operations Strip: Arrival kg, Processed kg, Lots */}
+                <View style={styles.produceStrip}>
+                  <Text style={styles.produceStripText}>
+                    Arrival: <Text style={styles.stripBold}>{item.total_wet_arrival || 0} kg</Text>
                   </Text>
-                  <Text style={styles.stripText}>
-                    Received: <Text style={styles.stripBold}>₹{item.total_received.toLocaleString()}</Text>
+                  <Text style={styles.metaDot}>·</Text>
+                  <Text style={styles.produceStripText}>
+                    Dry: <Text style={[styles.stripBold, { color: colors.primary }]}>{item.total_dry_weight || 0} kg</Text>
+                  </Text>
+                  <Text style={styles.metaDot}>·</Text>
+                  <Text style={styles.produceStripText}>
+                    Lots: <Text style={styles.stripBold}>{item.total_batches || 0}</Text>
                   </Text>
                 </View>
 
                 {/* 1-Tap Action Buttons */}
                 <View style={styles.actionsRow}>
                   <TouchableOpacity
+                    style={styles.tableBtn}
+                    onPress={() => setStatementModalCustomer(item)}
+                    activeOpacity={0.8}
+                  >
+                    <MaterialCommunityIcons name="table-large" size={15} color={colors.primary} />
+                    <Text style={styles.tableBtnText}>Weekly Statement</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
                     style={styles.whatsAppBtn}
                     onPress={() => handleSendWhatsApp(item)}
                     activeOpacity={0.8}
                   >
-                    <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
-                    <Text style={styles.whatsAppBtnText}>Send WhatsApp</Text>
+                    <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
+                    <Text style={styles.whatsAppBtnText}>WhatsApp</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -713,7 +811,7 @@ export default function PaymentRemindersScreen() {
                     onPress={() => handleSendSMS(item)}
                     activeOpacity={0.8}
                   >
-                    <MaterialCommunityIcons name="message-text-outline" size={15} color="#1565C0" />
+                    <MaterialCommunityIcons name="message-text-outline" size={14} color="#1565C0" />
                     <Text style={styles.smsBtnText}>SMS</Text>
                   </TouchableOpacity>
                 </View>
@@ -722,6 +820,17 @@ export default function PaymentRemindersScreen() {
           })
         )}
       </ScrollView>
+
+      {/* Customer Weekly Statement Table Modal */}
+      <CustomerWeeklyStatementModal
+        visible={!!statementModalCustomer}
+        onClose={() => setStatementModalCustomer(null)}
+        customerId={statementModalCustomer?.customer_id || null}
+        customerName={statementModalCustomer?.name}
+        customerMobile={statementModalCustomer?.mobile}
+        branchId={statementModalCustomer?.branch_id || activeBranchId}
+        branchName={statementModalCustomer?.branch_name || currentBranchName}
+      />
     </SafeAreaView>
   );
 }
@@ -996,13 +1105,26 @@ const styles = StyleSheet.create({
   stripText: { fontSize: 11, color: colors.textMuted },
   stripBold: { fontWeight: "700", color: colors.text },
 
-  actionsRow: { flexDirection: "row", gap: spacing.sm },
-  whatsAppBtn: {
-    flex: 2,
+  actionsRow: { flexDirection: "row", gap: spacing.sm, marginTop: 8 },
+  tableBtn: {
+    flex: 2.2,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 4,
+    backgroundColor: colors.primary50,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    paddingVertical: 8,
+    borderRadius: radius.md,
+  },
+  tableBtnText: { color: colors.primaryDark, fontSize: 12, fontWeight: "800" },
+  whatsAppBtn: {
+    flex: 1.8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
     backgroundColor: "#25D366",
     paddingVertical: 8,
     borderRadius: radius.md,
@@ -1019,6 +1141,77 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   smsBtnText: { color: "#1565C0", fontSize: 12, fontWeight: "700" },
+
+  scopeFilterWrap: { marginBottom: spacing.md },
+  scopeFilterScroll: { gap: 6, paddingVertical: 2 },
+  scopeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.pill,
+  },
+  scopeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  scopeChipText: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
+  scopeChipTextActive: { color: "#fff" },
+
+  badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 },
+  badgeAmber: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  badgeAmberText: { fontSize: 10.5, fontWeight: "700", color: "#B45309" },
+  badgeEmerald: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#D1FAE5",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  badgeEmeraldText: { fontSize: 10.5, fontWeight: "700", color: "#065F46" },
+  badgeRed: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#FEE2E2",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  badgeRedText: { fontSize: 10.5, fontWeight: "700", color: "#991B1B" },
+  badgeGreen: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+  },
+  badgeGreenText: { fontSize: 10.5, fontWeight: "700", color: "#166534" },
+
+  produceStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.md,
+    marginTop: 6,
+    gap: 6,
+  },
+  produceStripText: { fontSize: 11, color: colors.textMuted },
 
   emptyContainer: { alignItems: "center", justifyContent: "center", paddingVertical: 40 },
   emptyTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: spacing.md },

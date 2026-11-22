@@ -19,6 +19,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { useToast } from "@/src/components/Toast";
+import CustomerWeeklyStatementModal from "@/src/components/CustomerWeeklyStatementModal";
 
 type ReportTab = "summary" | "machines" | "customers" | "payments" | "expenses" | "outsourced";
 
@@ -52,6 +53,7 @@ export default function Reports() {
 
   // Search filter
   const [q, setQ] = useState("");
+  const [selectedStatementCustomer, setSelectedStatementCustomer] = useState<any | null>(null);
 
   const isTab = (segments as string[]).includes("(tabs)");
   const activeBranchName = selectedBranchId
@@ -731,6 +733,16 @@ export default function Reports() {
                       </Text>
                     </View>
                   </View>
+
+                  <TouchableOpacity
+                    style={styles.customerStmtBtn}
+                    onPress={() => setSelectedStatementCustomer(c)}
+                    activeOpacity={0.8}
+                  >
+                    <MaterialCommunityIcons name="table-large" size={15} color={colors.primary} />
+                    <Text style={styles.customerStmtBtnText}>Weekly Statement & WhatsApp Ledger</Text>
+                    <MaterialCommunityIcons name="chevron-right" size={16} color={colors.primary} />
+                  </TouchableOpacity>
                 </View>
               ))}
             </View>
@@ -957,6 +969,17 @@ export default function Reports() {
           )}
         </ScrollView>
       )}
+
+      {/* Customer Weekly Statement Table Modal */}
+      <CustomerWeeklyStatementModal
+        visible={!!selectedStatementCustomer}
+        onClose={() => setSelectedStatementCustomer(null)}
+        customerId={selectedStatementCustomer?.customer_id || null}
+        customerName={selectedStatementCustomer?.customer_name}
+        customerMobile={selectedStatementCustomer?.customer_mobile}
+        branchId={selectedStatementCustomer?.branch_id || selectedBranchId}
+        branchName={selectedStatementCustomer?.branch_name}
+      />
     </SafeAreaView>
   );
 }
@@ -1180,4 +1203,22 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: "center", paddingVertical: 40, gap: 6 },
   emptyText: { fontSize: 13, color: colors.textMuted, fontWeight: "600" },
+
+  customerStmtBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.primary50,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.md,
+    marginTop: 6,
+  },
+  customerStmtBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.primaryDark,
+  },
 });

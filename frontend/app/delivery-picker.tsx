@@ -256,6 +256,25 @@ export default function DeliveryPicker() {
     return { count, totalWet, totalDry, totalBags, avgPadi, defaultRate };
   }, [selectedBatches]);
 
+  // Remove batch directly from inside delivery modal
+  const handleRemoveBatchFromModal = (batchId: string) => {
+    const next = new Set(selectedBatchIds);
+    next.delete(batchId);
+    setSelectedBatchIds(next);
+
+    if (next.size === 0) {
+      setModalVisible(false);
+      toast.show("All lots removed from delivery", "info");
+      return;
+    }
+
+    const remaining = batches.filter(b => next.has(b.id));
+    const newDryTotal = remaining.reduce((acc, b) => acc + Number(b.actual_dry_weight || 0), 0);
+    const newBagsTotal = remaining.reduce((acc, b) => acc + Number(b.processed_bags || 0), 0);
+    if (newDryTotal > 0) setDelivDryWeight(String(newDryTotal));
+    if (newBagsTotal > 0) setDelivBags(String(newBagsTotal));
+  };
+
   // Open delivery modal
   const openDeliveryModal = () => {
     if (selectedBatches.length === 0) return;
@@ -617,15 +636,36 @@ export default function DeliveryPicker() {
               contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
               keyboardShouldPersistTaps="handled"
             >
-              {/* Lots Chips */}
-              <View style={styles.chipRow}>
-                {selectedBatches.map(b => (
-                  <View key={b.id} style={styles.lotChip}>
-                    <Text style={styles.lotChipText}>
-                      {b.batch_no} ({b.raw_weight}kg)
-                    </Text>
-                  </View>
-                ))}
+              {/* Lots Chips - Bigger and with Remove Option */}
+              <View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <Text style={styles.inputLabel}>
+                    Selected Lots ({selectedBatches.length})
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                    Tap ✕ to remove any lot
+                  </Text>
+                </View>
+                <View style={styles.chipRow}>
+                  {selectedBatches.map(b => (
+                    <View key={b.id} style={styles.lotChipBig}>
+                      <View style={styles.lotChipContent}>
+                        <Text style={styles.lotChipBatchNo}>{b.batch_no}</Text>
+                        <View style={styles.lotChipWeightBadge}>
+                          <Text style={styles.lotChipWeightText}>{b.raw_weight} kg</Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        onPress={() => handleRemoveBatchFromModal(b.id)}
+                        style={styles.lotChipRemoveBtn}
+                        testID={`remove-batch-${b.id}`}
+                      >
+                        <MaterialCommunityIcons name="close-circle" size={19} color="#EF4444" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
               </View>
 
               {/* Produce Weights */}
@@ -666,26 +706,47 @@ export default function DeliveryPicker() {
                 </View>
               </View>
 
-              {/* Pricing & Billing */}
+              {/* Pricing & Billing with Total Arrival KG */}
               <View style={styles.formSection}>
                 <Text style={styles.sectionHeader}>2. Drying Charges & Rate</Text>
-                <View style={styles.twoCol}>
-                  <View style={{ flex: 1 }}>
+
+                {/* 3-Column Breakdown: Total Arrival (Wet), Rate / kg, Calculated Bill */}
+                <View style={styles.threeCol}>
+                  <View style={{ flex: 1.1 }}>
+                    <Text style={styles.inputLabel}>Total Arrival (Wet)</Text>
+                    <View style={styles.arrivalBox}>
+                      <MaterialCommunityIcons name="scale" size={16} color="#065F46" />
+                      <Text style={styles.arrivalBoxText}>
+                        {selectedAggregates.totalWet.toFixed(1)} <Text style={{ fontSize: 11, fontWeight: "600" }}>kg</Text>
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flex: 0.9 }}>
                     <Text style={styles.inputLabel}>Rate / kg (₹)</Text>
                     <TextInput
-                      style={styles.input}
+                      style={styles.rateInput}
                       keyboardType="numeric"
                       value={delivRate}
                       onChangeText={setDelivRate}
                       placeholder="12"
                     />
                   </View>
-                  <View style={{ flex: 1 }}>
+
+                  <View style={{ flex: 1.2 }}>
                     <Text style={styles.inputLabel}>Calculated Bill</Text>
                     <View style={styles.calcBillBox}>
                       <Text style={styles.calcBillText}>₹{totalBillAmount.toLocaleString("en-IN")}</Text>
                     </View>
                   </View>
+                </View>
+
+                {/* Formula Equation Bar */}
+                <View style={styles.formulaBar}>
+                  <MaterialCommunityIcons name="calculator-variant" size={15} color="#047857" />
+                  <Text style={styles.formulaText}>
+                    {selectedAggregates.totalWet.toFixed(1)} kg arrival × ₹{numRate || 0}/kg = ₹{totalBillAmount.toLocaleString("en-IN")}
+                  </Text>
                 </View>
               </View>
 
@@ -1051,7 +1112,7 @@ const styles = StyleSheet.create({
   modalSubtitle: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   modalCloseBtn: { padding: 6 },
 
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   lotChip: {
     backgroundColor: colors.primary50,
     paddingHorizontal: 8,
@@ -1059,6 +1120,47 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   lotChipText: { fontSize: 11, fontWeight: "700", color: colors.primary },
+
+  lotChipBig: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1.5,
+    borderColor: "#86EFAC",
+    borderRadius: radius.lg,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    gap: 8,
+    ...shadow.sm,
+  },
+  lotChipContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  lotChipBatchNo: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+    letterSpacing: 0.3,
+  },
+  lotChipWeightBadge: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  lotChipWeightText: {
+    fontSize: 12.5,
+    fontWeight: "800",
+    color: "#166534",
+  },
+  lotChipRemoveBtn: {
+    marginLeft: 2,
+    padding: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   formSection: {
     backgroundColor: "#F9FAFB",
@@ -1071,6 +1173,54 @@ const styles = StyleSheet.create({
   sectionHeader: { fontSize: 13, fontWeight: "800", color: colors.text },
   optionalTag: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },
   twoCol: { flexDirection: "row", gap: spacing.md },
+  threeCol: { flexDirection: "row", gap: 8, alignItems: "flex-end" },
+  arrivalBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#ECFDF5",
+    borderWidth: 1.5,
+    borderColor: "#A7F3D0",
+    borderRadius: radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    minHeight: 42,
+  },
+  arrivalBoxText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#065F46",
+  },
+  rateInput: {
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.text,
+    textAlign: "center",
+    minHeight: 42,
+  },
+  formulaBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#ECFDF5",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    marginTop: 4,
+  },
+  formulaText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#047857",
+  },
   inputLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, marginBottom: 4 },
   input: {
     backgroundColor: colors.card,

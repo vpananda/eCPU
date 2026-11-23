@@ -642,7 +642,6 @@ class PostgresDBWrapper:
             max_idle=300.0,
             max_lifetime=1800.0,
             timeout=20.0,
-            check=AsyncConnectionPool.check_connection,
             kwargs={"row_factory": dict_row}
         )
         await self.pool.open()

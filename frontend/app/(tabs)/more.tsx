@@ -8,6 +8,7 @@ import { useToast } from "@/src/components/Toast";
 import { useSync } from "@/src/sync";
 import { ConnectionBadge } from "@/src/components/ConnectionBadge";
 import { colors, radius, shadow, spacing } from "@/src/theme";
+import { BASE } from "@/src/api";
 
 const LOGO = require("../../assets/images/e3logo.png");
 
@@ -189,7 +190,7 @@ export default function MoreScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 14, fontWeight: "700", color: colors.text }}>Server Connection</Text>
-                  <Text style={{ fontSize: 11, color: colors.textMuted }} numberOfLines={1}>https://ecpu.onrender.com</Text>
+                  <Text style={{ fontSize: 11, color: colors.textMuted }} numberOfLines={1}>{BASE}</Text>
                 </View>
               </View>
               <ConnectionBadge />

@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 
 export const getBaseUrl = () => {
-  const url = process.env.EXPO_PUBLIC_BACKEND_URL || "https://ecpu.onrender.com";
+  const url = process.env.EXPO_PUBLIC_BACKEND_URL || "https://ecpu-1.onrender.com";
   return url.replace(/\/+$/, "");
 };
 

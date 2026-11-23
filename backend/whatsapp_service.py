@@ -236,7 +236,25 @@ async def send_arrival_receipt(
     branch_label = clean_branch_label(branch_name)
     lang = language_code or "en"
 
-    # 1. Try v5 (Thanks,\n{{7}} only - without Branch and with multi-language: en, ta, ml, kn, te, hi)
+    # 1. Try v6 (With Store In-charge Disclaimer, multilingual: en, ta, ml, kn, te, hi)
+    res_v6 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_arrival_receipt_v6",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            formatted_time,
+            f"{raw_weight:,.1f}",
+            str(bags),
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v6.get("success"):
+        return res_v6
+
+    # 2. Try v5 (Thanks,\n{{7}} only - without Branch and with multi-language: en, ta, ml, kn, te, hi)
     res_v5 = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_arrival_receipt_v5",
@@ -322,7 +340,24 @@ async def send_drying_completed(
     lang = language_code or "en"
     padi_val = float(padi_weight or 0)
 
-    # 1. Try v5 (with explicit Padi Weight line)
+    # 1. Try v6 (with Store In-charge Disclaimer and explicit Padi Weight line)
+    res_v6 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_drying_completed_v6",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            f"{dry_weight:,.2f}",
+            f"{padi_val:,.2f}",
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v6.get("success"):
+        return res_v6
+
+    # 2. Try v5 (with explicit Padi Weight line)
     res_v5 = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_drying_completed_v5",

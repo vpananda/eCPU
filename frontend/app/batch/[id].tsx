@@ -221,8 +221,12 @@ export default function BatchDetail() {
           send_whatsapp: withWhatsApp,
         }
       });
-      if (withWhatsApp && res?.whatsapp_sent) {
-        toast.show("Arrival updated & WhatsApp receipt sent!");
+      if (withWhatsApp) {
+        if (res?.whatsapp_sent) {
+          toast.show("Arrival updated & WhatsApp receipt sent!");
+        } else {
+          toast.show(res?.whatsapp_error || "Arrival updated, but WhatsApp message failed to deliver", "error");
+        }
       } else {
         toast.show("Arrival & dryer details updated successfully");
       }

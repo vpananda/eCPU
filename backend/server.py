@@ -3601,6 +3601,7 @@ async def update_batch_fields(
     await audit("update_batch", "batch", bid, user, b, upd)
 
     wa_dispatched = False
+    wa_error = None
     if body.send_whatsapp:
         try:
             cust_id = upd.get("customer_id") or b.get("customer_id")
@@ -3611,24 +3612,32 @@ async def update_batch_fields(
                     prod_id = upd.get("product_id") or b.get("product_id")
                     prod = await db.products.find_one({"id": prod_id}, {"_id": 0})
                     br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
-                    asyncio.create_task(
-                        send_arrival_receipt(
-                            to_phone=phone,
-                            customer_name=cust.get("name", "Valued Customer"),
-                            product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
-                            branch_name=br.get("name", "Main Plant") if br else "Main Plant",
-                            batch_no=b["batch_no"],
-                            raw_weight=float(upd.get("raw_weight", b.get("raw_weight", 0))),
-                            bags=int(upd.get("bags", b.get("bags") or 0)),
-                            arrival_time=upd.get("arrival_date") or b.get("arrival_date") or b.get("created_at"),
-                            language_code=cust.get("preferred_language") or "en"
-                        )
+                    res = await send_arrival_receipt(
+                        to_phone=phone,
+                        customer_name=cust.get("name", "Valued Customer"),
+                        product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                        branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                        batch_no=b.get("batch_no", ""),
+                        raw_weight=float(upd.get("raw_weight", b.get("raw_weight", 0))),
+                        bags=int(upd.get("bags", b.get("bags") or 0)),
+                        arrival_time=upd.get("arrival_date") or b.get("arrival_date") or b.get("created_at"),
+                        language_code=cust.get("preferred_language") or "en"
                     )
-                    wa_dispatched = True
+                    wa_dispatched = bool(res.get("success"))
+                    if not wa_dispatched:
+                        wa_error = res.get("error", "WhatsApp dispatch failed")
+                        logger.warning(f"send_arrival_receipt on edit failed: {wa_error}")
+                    else:
+                        logger.info(f"WhatsApp arrival receipt successfully dispatched on edit for batch {b.get('batch_no')}: msg_id={res.get('message_id')}")
+                else:
+                    wa_error = "Customer has no mobile number registered"
+            else:
+                wa_error = f"{cust.get('name', 'Customer')} has opted out of WhatsApp receipts"
         except Exception as e:
-            logger.error(f"Failed to auto-dispatch WhatsApp on edit: {e}")
+            logger.error(f"Failed to dispatch WhatsApp on edit: {e}")
+            wa_error = str(e)
 
-    return {"ok": True, "whatsapp_sent": wa_dispatched}
+    return {"ok": True, "whatsapp_sent": wa_dispatched, "whatsapp_error": wa_error}
 
 
 @api.post("/batches/{bid}/send-arrival-whatsapp")

@@ -39,6 +39,7 @@ export default function BatchDetail() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [sendingWa, setSendingWa] = useState(false);
+  const [sendWhatsApp, setSendWhatsApp] = useState(true);
 
   const [editOpen, setEditOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -105,6 +106,7 @@ export default function BatchDetail() {
       setNewRemarks(data.remarks || "");
       setNewMachineId(data.machine_id || "");
       setNewStatus(data.status || "Received");
+      setSendWhatsApp(data.customer?.whatsapp_enabled !== false);
     }
     setEditOpen(true);
   };
@@ -455,7 +457,36 @@ export default function BatchDetail() {
               </View>
             </ScrollView>
 
-            <View style={[styles.modalButtons, { marginTop: spacing.md, gap: 6 }]}>
+            {/* WhatsApp Opt-in Toggle */}
+            {data?.customer?.whatsapp_enabled !== false ? (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setSendWhatsApp(!sendWhatsApp)}
+                style={styles.waCheckboxCard}
+              >
+                <MaterialCommunityIcons
+                  name={sendWhatsApp ? "checkbox-marked" : "checkbox-blank-outline"}
+                  size={22}
+                  color={sendWhatsApp ? "#25D366" : colors.textMuted}
+                />
+                <View style={{ flex: 1, marginLeft: 8 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                    <MaterialCommunityIcons name="whatsapp" size={14} color="#25D366" />
+                    <Text style={styles.waCheckboxTitle}>Send receipt on WhatsApp</Text>
+                  </View>
+                  <Text style={styles.waCheckboxSub}>
+                    {data?.customer?.mobile ? `Deliver updated details to +91 ${data.customer.mobile}` : "Notify customer on WhatsApp"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.waOptOutBox}>
+                <MaterialCommunityIcons name="information-outline" size={16} color={colors.textLight} />
+                <Text style={styles.waOptOutNotice}>Customer has opted out of WhatsApp receipts</Text>
+              </View>
+            )}
+
+            <View style={styles.modalButtons}>
               <TouchableOpacity
                 testID="batch-edit-cancel"
                 style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
@@ -465,33 +496,26 @@ export default function BatchDetail() {
               </TouchableOpacity>
               <TouchableOpacity
                 testID="batch-edit-submit"
-                style={[styles.modalBtn, { backgroundColor: colors.card, borderColor: colors.primary, borderWidth: 1 }]}
-                onPress={() => handleSave(false)}
+                style={[
+                  styles.modalBtn,
+                  { backgroundColor: sendWhatsApp && data?.customer?.whatsapp_enabled !== false ? "#25D366" : colors.primary }
+                ]}
+                onPress={() => handleSave(sendWhatsApp && data?.customer?.whatsapp_enabled !== false)}
                 disabled={updating}
               >
                 {updating ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
+                  <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text style={{ color: colors.primary, fontWeight: "800" }}>Save Only</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    {sendWhatsApp && data?.customer?.whatsapp_enabled !== false && (
+                      <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
+                    )}
+                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 14 }}>
+                      {sendWhatsApp && data?.customer?.whatsapp_enabled !== false ? "Save & Send" : "Save Changes"}
+                    </Text>
+                  </View>
                 )}
               </TouchableOpacity>
-              {data?.customer?.whatsapp_enabled !== false && (
-                <TouchableOpacity
-                  testID="batch-edit-submit-whatsapp"
-                  style={[styles.modalBtn, { backgroundColor: "#25D366" }]}
-                  onPress={() => handleSave(true)}
-                  disabled={updating}
-                >
-                  {updating ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
-                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Save & Send WA</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         </View>
@@ -1019,6 +1043,41 @@ const styles = StyleSheet.create({
   },
   modalLabel: { fontSize: 11, fontWeight: "800", color: colors.textMuted, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" },
   modalInput: { backgroundColor: colors.bg, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: colors.text, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.lg },
+  waCheckboxCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  waCheckboxTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  waCheckboxSub: {
+    fontSize: 11,
+    color: "#15803D",
+    marginTop: 2,
+  },
+  waOptOutBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: `${colors.border}40`,
+    borderRadius: radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: spacing.md,
+  },
+  waOptOutNotice: {
+    fontSize: 12,
+    color: colors.textLight,
+  },
   modalButtons: { flexDirection: "row", gap: spacing.md },
   modalBtn: { flex: 1, paddingVertical: 12, borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
   qrBox: { padding: spacing.md, backgroundColor: "#fff", borderRadius: radius.xl, ...shadow.card },

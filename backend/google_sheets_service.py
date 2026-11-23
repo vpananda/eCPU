@@ -244,6 +244,69 @@ async def sync_arrival_to_sheets(batch: dict, branch_name: str = "", customer: d
     return await append_row_async("Arrivals", row)
 
 
+async def mark_arrival_deleted_in_sheets(batch_no: str, user_name: str = "", deleted_at: str = "") -> bool:
+    """Find row matching batch_no in 'Arrivals' tab and update Status to 'DELETED' (Option A)."""
+    try:
+        sh = get_sheets_client()
+        if not sh:
+            return False
+        
+        headers = TAB_HEADERS.get("Arrivals", [])
+        ws = ensure_worksheet(sh, "Arrivals", headers)
+
+        def _update_sheet():
+            found = False
+            # Find matching cell in Column 4 (Batch No)
+            try:
+                cell = ws.find(batch_no, in_column=4)
+            except Exception:
+                cell = None
+            if not cell:
+                try:
+                    cell = ws.find(batch_no)
+                except Exception:
+                    cell = None
+
+            if cell:
+                # Status is column 13 (M)
+                del_tag = f"DELETED ({user_name})" if user_name else "DELETED"
+                ws.update_cell(cell.row, 13, del_tag)
+                try:
+                    # Strike-through row with subtle red highlight
+                    ws.format(f"A{cell.row}:O{cell.row}", {
+                        "backgroundColor": {"red": 1.0, "green": 0.93, "blue": 0.93},
+                        "textFormat": {"strikethrough": True, "foregroundColor": {"red": 0.7, "green": 0.1, "blue": 0.1}}
+                    })
+                except Exception as fmt_err:
+                    logger.debug(f"Row format skipped: {fmt_err}")
+                logger.info(f"Marked batch {batch_no} as DELETED in Google Sheets Arrivals tab at row {cell.row}")
+                found = True
+
+            # Also check Drying Batches tab if it was loaded
+            try:
+                d_headers = TAB_HEADERS.get("Drying Batches", [])
+                d_ws = ensure_worksheet(sh, "Drying Batches", d_headers)
+                d_cell = d_ws.find(batch_no, in_column=1)
+                if d_cell:
+                    d_ws.update_cell(d_cell.row, 7, f"DELETED ({user_name})" if user_name else "DELETED")
+                    try:
+                        d_ws.format(f"A{d_cell.row}:M{d_cell.row}", {
+                            "backgroundColor": {"red": 1.0, "green": 0.93, "blue": 0.93},
+                            "textFormat": {"strikethrough": True}
+                        })
+                    except Exception:
+                        pass
+            except Exception as d_ex:
+                logger.debug(f"Drying sheet check skipped: {d_ex}")
+
+            return found
+
+        return await asyncio.to_thread(_update_sheet)
+    except Exception as ex:
+        logger.error(f"Failed to mark batch {batch_no} as DELETED in Google Sheets: {ex}")
+        return False
+
+
 async def sync_drying_batch_to_sheets(batch: dict, branch_name: str = "", customer: dict = None, machine_name: str = ""):
     """Sync drying batch processing row to Google Sheets."""
     c_name = (customer or {}).get("name") or batch.get("customer_name") or ""

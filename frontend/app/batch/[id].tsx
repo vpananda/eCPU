@@ -912,6 +912,70 @@ export default function BatchDetail() {
             <Text style={styles.remarks}>{data.remarks}</Text>
           </View>
         ) : null}
+
+        {/* User Activity & Audit History */}
+        <View style={styles.card}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: spacing.md }}>
+            <MaterialCommunityIcons name="history" size={18} color={colors.primary} />
+            <Text style={styles.sectionTitle}>User Activity</Text>
+          </View>
+          
+          <View style={{ gap: 12 }}>
+            {/* Created */}
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+              <View style={[styles.activityDot, { backgroundColor: "#2E7D32" }]}>
+                <MaterialCommunityIcons name="plus" size={12} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: colors.text }}>Created Arrival</Text>
+                <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 1 }}>
+                  By <Text style={{ fontWeight: "700", color: colors.text }}>{data.created_by_user?.name || "System User"}</Text>
+                  {data.created_by_user?.role ? ` (${data.created_by_user.role})` : ""}
+                </Text>
+                <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 2 }}>
+                  {formatActivityDate(data.created_at)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Modified */}
+            {data.updated_at && data.updated_at !== data.created_at && (
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                <View style={[styles.activityDot, { backgroundColor: "#1565C0" }]}>
+                  <MaterialCommunityIcons name="pencil" size={12} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: colors.text }}>Last Modified</Text>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 1 }}>
+                    By <Text style={{ fontWeight: "700", color: colors.text }}>{data.updated_by_user?.name || data.created_by_user?.name || "User"}</Text>
+                    {data.updated_by_user?.role ? ` (${data.updated_by_user.role})` : ""}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 2 }}>
+                    {formatActivityDate(data.updated_at)}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Delivered */}
+            {data.delivered_at && (
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                <View style={[styles.activityDot, { backgroundColor: "#7B1FA2" }]}>
+                  <MaterialCommunityIcons name="truck-check" size={12} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "700", color: colors.text }}>Delivered</Text>
+                  <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 1 }}>
+                    Received by: <Text style={{ fontWeight: "700", color: colors.text }}>{data.received_by || data.delivery?.received_by_phone || data.customer?.name || "Customer"}</Text>
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.textLight, marginTop: 2 }}>
+                    {formatActivityDate(data.delivered_at)}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
       </ScrollView>
 
       {data.status !== "Delivered" ? (
@@ -926,6 +990,23 @@ export default function BatchDetail() {
       ) : null}
     </SafeAreaView>
   );
+}
+
+function formatActivityDate(dtStr?: string) {
+  if (!dtStr) return "";
+  try {
+    const d = new Date(dtStr);
+    return d.toLocaleString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    });
+  } catch {
+    return dtStr;
+  }
 }
 
 function Row({ label, value, sub, bold, accent, onPress }: { label: string; value: string; sub?: string; bold?: boolean; accent?: boolean; onPress?: () => void }) {
@@ -1265,5 +1346,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: "#166534",
+  },
+  activityDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
   },
 });

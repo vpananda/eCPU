@@ -861,6 +861,7 @@ async def audit(action: str, entity: str, entity_id: str, user: dict, before: An
         "entity_id": entity_id,
         "user_id": user.get("id", ""),
         "user_mobile": user.get("mobile", ""),
+        "user_name": user.get("name", ""),
         "user_role": user.get("role", "Admin"),
         "before": clean_for_json(before),
         "after": clean_for_json(after),
@@ -1272,6 +1273,10 @@ async def seed():
         ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS parent_batch_id UUID REFERENCES public.batches(id) ON DELETE SET NULL;
         ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ;
         ALTER TABLE public.batches ADD COLUMN IF NOT EXISTS processing_ended_at TIMESTAMPTZ;
+    """)
+    # Add user_name column to public.audit_logs for clear user activity display
+    await db.execute("""
+        ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS user_name TEXT DEFAULT '';
     """)
     # Create counters table if not exists
     await db.execute("""
@@ -2665,6 +2670,16 @@ async def get_batch(bid: str, user: dict = Depends(get_current_user)):
     b["machine"] = clean(await db.machines.find_one({"id": b["machine_id"]}, {"_id": 0}))
     b["payments"] = await db.payments.find({"batch_id": bid}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
+    # Attach user activity (creator and updater)
+    if b.get("created_by"):
+        cr = await db.users.find_one({"id": str(b["created_by"])}, {"_id": 0, "password": 0})
+        if cr:
+            b["created_by_user"] = {"name": cr.get("name"), "role": cr.get("role"), "mobile": cr.get("mobile")}
+    if b.get("updated_by"):
+        up = await db.users.find_one({"id": str(b["updated_by"])}, {"_id": 0, "password": 0})
+        if up:
+            b["updated_by_user"] = {"name": up.get("name"), "role": up.get("role"), "mobile": up.get("mobile")}
+
     # Attach sibling split batches if this arrival was split across dryers
     parent_id = b.get("parent_batch_id") or b["id"]
     base_bno = b["batch_no"].split("-")[0] if "-" in (b.get("batch_no") or "") else b.get("batch_no")
@@ -3785,7 +3800,18 @@ async def delete_batch(
             )
 
     await db.batches.delete_one({"id": bid})
-    await audit("delete", "batch", bid, user, {"batch_no": b.get("batch_no")}, None)
+    await audit("delete", "batch", bid, user, b, None)
+
+    # Option A: Mark row as DELETED in Google Sheets Arrivals tab
+    batch_no = b.get("batch_no")
+    if batch_no:
+        try:
+            from google_sheets_service import mark_arrival_deleted_in_sheets
+            u_name = user.get("name") or user.get("mobile") or "Admin"
+            asyncio.create_task(mark_arrival_deleted_in_sheets(batch_no, user_name=u_name))
+        except Exception as sheet_err:
+            logger.error(f"Failed to schedule Google Sheets delete update: {sheet_err}")
+
     return {"ok": True}
 
 
@@ -6180,8 +6206,15 @@ async def delete_user(uid: str, user: dict = Depends(require_roles("Admin"))):
 
 
 @api.get("/audit")
-async def audit_logs(user: dict = Depends(require_roles("Admin", "Manager")), limit: int = 100):
-    return await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+async def audit_logs(
+    user: dict = Depends(require_roles("Admin", "Manager")),
+    entity: Optional[str] = None,
+    limit: int = 150
+):
+    query = {}
+    if entity and entity != "all":
+        query["entity"] = entity
+    return await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
 
 
 # -----------------------------------------------------------------------------

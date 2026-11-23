@@ -471,29 +471,41 @@ class UsersCollection(PostgresCollection):
         email = doc.get("email") or f"{doc.get('mobile', uid)}@e3.example.com"
         password = doc.get("password") or "default-password"
         
-        auth_query = """
-            INSERT INTO auth.users (
-                id, email, encrypted_password, email_confirmed_at, 
-                role, aud, created_at, updated_at, raw_app_meta_data, raw_user_meta_data
-            ) VALUES (
-                %s, %s, %s, now(), 
-                'authenticated', 'authenticated', now(), now(), 
-                '{"provider":"local","providers":["local"]}', %s
-            )
-        """
-        import json
-        meta = json.dumps({"name": doc.get("name", "")})
-        await self.db.execute(auth_query, [uid, email, password, meta])
+        # Check if email already exists in auth.users to prevent unique constraint violation
+        auth_existing = await self.db.query("SELECT id::text FROM auth.users WHERE email = %s LIMIT 1", [email])
+        if auth_existing:
+            uid = auth_existing[0]["id"]
+            if password:
+                await self.db.execute("UPDATE auth.users SET encrypted_password = %s WHERE id = %s", [password, uid])
+        else:
+            auth_query = """
+                INSERT INTO auth.users (
+                    id, email, encrypted_password, email_confirmed_at, 
+                    role, aud, created_at, updated_at, raw_app_meta_data, raw_user_meta_data
+                ) VALUES (
+                    %s, %s, %s, now(), 
+                    'authenticated', 'authenticated', now(), now(), 
+                    '{"provider":"local","providers":["local"]}', %s
+                )
+            """
+            import json
+            meta = json.dumps({"name": doc.get("name", "")})
+            await self.db.execute(auth_query, [uid, email, password, meta])
         
         upd_query = """
-            UPDATE public.profiles
-            SET name = %s, mobile = %s, role = %s::user_role, branch_id = %s::uuid
-            WHERE id = %s
+            INSERT INTO public.profiles (id, name, email, mobile, role, branch_id)
+            VALUES (%s::uuid, %s, %s, %s, %s::user_role, %s::uuid)
+            ON CONFLICT (id) DO UPDATE SET 
+                name = EXCLUDED.name, 
+                mobile = EXCLUDED.mobile, 
+                role = EXCLUDED.role, 
+                branch_id = EXCLUDED.branch_id
         """
         bid = doc.get("branch_id")
         if bid in (None, ""):
             bid = None
-        await self.db.execute(upd_query, [doc.get("name"), doc.get("mobile"), doc.get("role", "Store Incharge"), bid, uid])
+        await self.db.execute(upd_query, [uid, doc.get("name"), email, doc.get("mobile"), doc.get("role", "Store Incharge"), bid])
+        doc["id"] = uid
         return doc
 
     async def update_one(self, filter_dict, update_dict, upsert=False):
@@ -1281,18 +1293,21 @@ async def seed():
 
     # 3. Users — seed default users
     for name, mobile, pw, role in DEFAULT_USERS:
-        existing = await db.users.find_one({"mobile": mobile})
-        if not existing:
-            await db.users.insert_one({
-                "id": str(uuid.uuid4()), "name": name, "mobile": mobile,
-                "email": f"{mobile}@e3.example.com",
-                "password": hash_pw(pw), "role": role,
-                "branch_id": default_branch_id,
-                "created_at": now_utc().isoformat(),
-            })
-        elif not existing.get("branch_id"):
-            await db.users.update_one({"id": existing["id"]},
-                                      {"$set": {"branch_id": default_branch_id}})
+        try:
+            existing = await db.users.find_one({"mobile": mobile})
+            if not existing:
+                await db.users.insert_one({
+                    "id": str(uuid.uuid4()), "name": name, "mobile": mobile,
+                    "email": f"{mobile}@e3.example.com",
+                    "password": hash_pw(pw), "role": role,
+                    "branch_id": default_branch_id,
+                    "created_at": now_utc().isoformat(),
+                })
+            elif not existing.get("branch_id"):
+                await db.users.update_one({"id": existing["id"]},
+                                          {"$set": {"branch_id": default_branch_id}})
+        except Exception as seed_user_err:
+            logger.warning(f"Seed user {mobile} handled: {seed_user_err}")
 
     # 4. Products
     for pname, rate in DEFAULT_PRODUCTS:

@@ -6240,19 +6240,27 @@ async def whatsapp_send_test(body: WhatsAppTestReq, user: dict = Depends(get_cur
 
 @api.post("/whatsapp/send-arrival")
 async def whatsapp_send_arrival(body: WhatsAppArrivalReq, user: dict = Depends(get_current_user)):
-    """Send stock arrival receipt notification via Meta Cloud API"""
-    params = [
-        body.customer_name,
-        body.branch_name,
-        body.batch_no,
-        f"{body.weight:,.1f}",
-        str(body.bags)
-    ]
-    res = await send_whatsapp_template(
+    """Send stock arrival receipt notification via Meta Cloud API using the latest multilingual disclaimer template"""
+    # Look up customer preferred language if registered
+    lang = "en"
+    cust = await db.customers.find_one({"mobile": body.phone}, {"_id": 0})
+    if not cust:
+        # Also try digits matching
+        digits = re.sub(r"\D", "", body.phone)
+        if len(digits) >= 10:
+            cust = await db.customers.find_one({"mobile": digits[-10:]}, {"_id": 0})
+    if cust and cust.get("preferred_language"):
+        lang = cust.get("preferred_language")
+
+    res = await send_arrival_receipt(
         to_phone=body.phone,
-        template_name="e3_arrival_alert",
-        parameters=params,
-        language_code="en"
+        customer_name=body.customer_name,
+        product_name="Cardamom",
+        branch_name=body.branch_name,
+        batch_no=body.batch_no,
+        raw_weight=body.weight,
+        bags=body.bags,
+        language_code=lang
     )
     return res
 

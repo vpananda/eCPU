@@ -14,6 +14,7 @@ import { api } from "@/src/api";
 import { useToast } from "@/src/components/Toast";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { openWhatsApp } from "@/src/utils/notifications";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface BatchItem {
   sl_no: number;
@@ -62,6 +63,7 @@ export default function CustomerWeeklyStatementModal({
   branchName,
 }: CustomerWeeklyStatementModalProps) {
   const toast = useToast();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sendingServer, setSendingServer] = useState(false);
@@ -169,9 +171,22 @@ export default function CustomerWeeklyStatementModal({
                 {custName} · {custPhone || "No Mobile"} · {bName}
               </Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {data && (
+                <TouchableOpacity
+                  onPress={handleSendWhatsApp}
+                  style={styles.headerWaBtn}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="whatsapp" size={16} color="#fff" />
+                  <Text style={styles.headerWaBtnText}>Send</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <MaterialCommunityIcons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Scope Filter Tabs */}
@@ -329,7 +344,17 @@ export default function CustomerWeeklyStatementModal({
           )}
 
           {/* Action Footer */}
-          <View style={styles.footer}>
+          <View
+            style={[
+              styles.footer,
+              {
+                paddingBottom: Math.max(
+                  Platform.OS === "android" ? 36 : 16,
+                  (insets.bottom || 0) + 16
+                ),
+              },
+            ]}
+          >
             <TouchableOpacity
               style={styles.whatsAppBtn}
               onPress={handleSendWhatsApp}
@@ -386,6 +411,20 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 16, fontWeight: "800", color: colors.text },
   headerSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  headerWaBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#25D366",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.md,
+  },
+  headerWaBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#fff",
+  },
   closeBtn: {
     width: 32,
     height: 32,

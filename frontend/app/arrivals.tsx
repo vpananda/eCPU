@@ -6,6 +6,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { colors, radius, shadow, spacing } from "@/src/theme";
 import { openWhatsApp, buildArrivalMessage } from "@/src/utils/notifications";
+import { useToast } from "@/src/components/Toast";
 import Calendar from "@/src/components/Calendar";
 import { storage } from "@/src/utils/storage";
 import { useSyncRefresh } from "@/src/sync";
@@ -56,6 +57,7 @@ type Row = {
   other_lots_summary?: string;
   machine_total_weight?: number;
   machine_batch_count?: number;
+  whatsapp_enabled?: boolean;
 };
 
 type ProcessingMachine = {
@@ -135,6 +137,7 @@ let cachedMemoryArrivals: Payload | null = null;
 export default function ArrivalsScreen() {
   const { selectedBranchId } = useAuth();
   const router = useRouter();
+  const toast = useToast();
   const params = useLocalSearchParams<{ start?: string; end?: string; tab?: string; q?: string; preset?: string }>();
   const [data, setData] = useState<Payload | null>(cachedMemoryArrivals);
   const [loading, setLoading] = useState(!cachedMemoryArrivals);
@@ -348,6 +351,10 @@ export default function ArrivalsScreen() {
   }, [load, start, end]));
 
     const shareArrivalWhatsApp = async (r: Row) => {
+    if (r.whatsapp_enabled === false) {
+      toast.show(`${r.customer_name} has opted out of WhatsApp`, "info");
+      return;
+    }
     const msg = buildArrivalMessage({
       companyName: "E3 AGRO",
       branchName: r.branch_name || "Factory",
@@ -408,10 +415,23 @@ export default function ArrivalsScreen() {
               </View>
               <Text style={styles.batchTag}>#{r.batch_no}</Text>
               {r.customer_mobile ? (
-                <View style={styles.phoneWrap}>
-                  <MaterialCommunityIcons name="phone" size={10} color={colors.textLight} />
-                  <Text style={styles.phoneText}>{r.customer_mobile}</Text>
-                </View>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    shareArrivalWhatsApp(r);
+                  }}
+                  style={[styles.phoneWrap, { backgroundColor: r.whatsapp_enabled === false ? `${colors.textLight}18` : "#25D36618", paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill }]}
+                >
+                  <MaterialCommunityIcons
+                    name={r.whatsapp_enabled === false ? "phone" : "whatsapp"}
+                    size={11}
+                    color={r.whatsapp_enabled === false ? colors.textLight : "#25D366"}
+                  />
+                  <Text style={[styles.phoneText, r.whatsapp_enabled !== false && { color: "#128C7E", fontWeight: "700" }]}>
+                    {r.customer_mobile}
+                  </Text>
+                </TouchableOpacity>
               ) : null}
             </View>
           </View>

@@ -1087,6 +1087,7 @@ class BatchUpdate(BaseModel):
     received_from: Optional[str] = None
     machine_id: Optional[str] = None
     status: Optional[str] = None
+    send_whatsapp: Optional[bool] = False
 
 
 class SplitLotAdjustment(BaseModel):
@@ -1094,6 +1095,7 @@ class SplitLotAdjustment(BaseModel):
     raw_weight: float
     machine_id: Optional[str] = None
     status: Optional[str] = None
+    send_whatsapp: Optional[bool] = False
     remarks: Optional[str] = None
 
 
@@ -3597,7 +3599,86 @@ async def update_batch_fields(
     await db.batches.update_one({"id": bid}, {"$set": upd})
     fast_cache.clear()
     await audit("update_batch", "batch", bid, user, b, upd)
-    return {"ok": True}
+
+    wa_dispatched = False
+    if body.send_whatsapp:
+        try:
+            cust_id = upd.get("customer_id") or b.get("customer_id")
+            cust = await db.customers.find_one({"id": cust_id}, {"_id": 0})
+            if cust and cust.get("whatsapp_enabled", True) is not False:
+                phone = cust.get("mobile") or cust.get("phone")
+                if phone:
+                    prod_id = upd.get("product_id") or b.get("product_id")
+                    prod = await db.products.find_one({"id": prod_id}, {"_id": 0})
+                    br = await db.branches.find_one({"id": b.get("branch_id")}, {"_id": 0})
+                    asyncio.create_task(
+                        send_arrival_receipt(
+                            to_phone=phone,
+                            customer_name=cust.get("name", "Valued Customer"),
+                            product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+                            branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+                            batch_no=b["batch_no"],
+                            raw_weight=float(upd.get("raw_weight", b.get("raw_weight", 0))),
+                            bags=int(upd.get("bags", b.get("bags") or 0)),
+                            arrival_time=upd.get("arrival_date") or b.get("arrival_date") or b.get("created_at"),
+                            language_code=cust.get("preferred_language") or "en"
+                        )
+                    )
+                    wa_dispatched = True
+        except Exception as e:
+            logger.error(f"Failed to auto-dispatch WhatsApp on edit: {e}")
+
+    return {"ok": True, "whatsapp_sent": wa_dispatched}
+
+
+@api.post("/batches/{bid}/send-arrival-whatsapp")
+async def resend_arrival_whatsapp(bid: str, user: dict = Depends(get_current_user)):
+    """Manually dispatch or re-send stock arrival receipt via WhatsApp Cloud API if customer has opted in."""
+    b = await db.batches.find_one({"id": bid}, {"_id": 0})
+    if not b:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    if not can_write_to_branch(user, b.get("branch_id")):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    cust = await db.customers.find_one({"id": b["customer_id"]}, {"_id": 0})
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Strict check: customer must have WhatsApp enabled
+    if cust.get("whatsapp_enabled", True) is False:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{cust.get('name', 'Customer')} has opted out of WhatsApp notifications."
+        )
+
+    phone = (cust.get("mobile") or cust.get("phone"))
+    if not phone:
+        raise HTTPException(status_code=400, detail="Customer does not have a registered mobile number.")
+
+    prod = await db.products.find_one({"id": b["product_id"]}, {"_id": 0})
+    br = await db.branches.find_one({"id": b["branch_id"]}, {"_id": 0})
+
+    res = await send_arrival_receipt(
+        to_phone=phone,
+        customer_name=cust.get("name", "Valued Customer"),
+        product_name=prod.get("name", "Cardamom") if prod else "Cardamom",
+        branch_name=br.get("name", "Main Plant") if br else "Main Plant",
+        batch_no=b["batch_no"],
+        raw_weight=float(b.get("raw_weight", 0)),
+        bags=int(b.get("bags") or 0),
+        arrival_time=b.get("arrival_date") or b.get("created_at"),
+        language_code=cust.get("preferred_language") or "en"
+    )
+    if not res.get("success"):
+        raise HTTPException(status_code=500, detail=res.get("error", "Failed to dispatch WhatsApp receipt"))
+
+    return {
+        "ok": True,
+        "recipient": phone,
+        "message_id": res.get("message_id"),
+        "customer_name": cust.get("name"),
+        "template": res.get("template")
+    }
 
 
 @api.post("/batches/{bid}/adjust-split")

@@ -38,6 +38,7 @@ export default function BatchDetail() {
   const [machines, setMachines] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [sendingWa, setSendingWa] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -158,7 +159,29 @@ export default function BatchDetail() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSendWhatsApp = async () => {
+    if (!data?.customer) return;
+    if (data.customer.whatsapp_enabled === false) {
+      toast.show(`${data.customer.name || "Customer"} has opted out of WhatsApp notifications`, "error");
+      return;
+    }
+    const phone = data.customer.mobile || data.customer.phone;
+    if (!phone) {
+      toast.show("Customer has no mobile number registered", "error");
+      return;
+    }
+    setSendingWa(true);
+    try {
+      await api<any>(`/batches/${id}/send-arrival-whatsapp`, { method: "POST" });
+      toast.show(`WhatsApp receipt sent to ${data.customer.name} (${phone})!`);
+    } catch (e: any) {
+      toast.show(e.message || "Failed to send WhatsApp receipt", "error");
+    } finally {
+      setSendingWa(false);
+    }
+  };
+
+  const handleSave = async (withWhatsApp: boolean = false) => {
     const reg = /^\d{4}-\d{2}-\d{2}$/;
     if (!reg.test(newDate)) {
       toast.show("Arrival date format must be YYYY-MM-DD", "error");
@@ -175,9 +198,14 @@ export default function BatchDetail() {
       return;
     }
 
+    if (withWhatsApp && data?.customer?.whatsapp_enabled === false) {
+      toast.show(`${data.customer.name || "Customer"} has opted out of WhatsApp notifications`, "error");
+      return;
+    }
+
     setUpdating(true);
     try {
-      await api(`/batches/${id}`, {
+      const res = await api<any>(`/batches/${id}`, {
         method: "PUT",
         body: {
           arrival_date: newDate,
@@ -188,9 +216,14 @@ export default function BatchDetail() {
           remarks: newRemarks,
           machine_id: newMachineId || null,
           status: newStatus || undefined,
+          send_whatsapp: withWhatsApp,
         }
       });
-      toast.show("Arrival & dryer details updated successfully");
+      if (withWhatsApp && res?.whatsapp_sent) {
+        toast.show("Arrival updated & WhatsApp receipt sent!");
+      } else {
+        toast.show("Arrival & dryer details updated successfully");
+      }
       setEditOpen(false);
       await load();
     } catch (e: any) {
@@ -256,6 +289,24 @@ export default function BatchDetail() {
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>Batch {data.batch_no}</Text>
         <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={handleSendWhatsApp}
+            testID="batch-whatsapp"
+            style={[
+              styles.headerWhatsAppBtn,
+              data?.customer?.whatsapp_enabled === false && { opacity: 0.5, backgroundColor: colors.textLight }
+            ]}
+            disabled={sendingWa}
+          >
+            {sendingWa ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
+                <Text style={styles.headerWhatsAppText}>WhatsApp</Text>
+              </>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity onPress={openEditModal} testID="batch-edit" style={styles.headerEditBtn}>
             <MaterialCommunityIcons name="pencil-outline" size={16} color={colors.primary} />
             <Text style={styles.headerEditText}>Edit</Text>
@@ -404,7 +455,7 @@ export default function BatchDetail() {
               </View>
             </ScrollView>
 
-            <View style={[styles.modalButtons, { marginTop: spacing.md }]}>
+            <View style={[styles.modalButtons, { marginTop: spacing.md, gap: 6 }]}>
               <TouchableOpacity
                 testID="batch-edit-cancel"
                 style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
@@ -414,16 +465,33 @@ export default function BatchDetail() {
               </TouchableOpacity>
               <TouchableOpacity
                 testID="batch-edit-submit"
-                style={[styles.modalBtn, { backgroundColor: colors.primary }]}
-                onPress={handleSave}
+                style={[styles.modalBtn, { backgroundColor: colors.card, borderColor: colors.primary, borderWidth: 1 }]}
+                onPress={() => handleSave(false)}
                 disabled={updating}
               >
                 {updating ? (
-                  <ActivityIndicator size="small" color="#fff" />
+                  <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
-                  <Text style={{ color: "#fff", fontWeight: "800" }}>Save Changes</Text>
+                  <Text style={{ color: colors.primary, fontWeight: "800" }}>Save Only</Text>
                 )}
               </TouchableOpacity>
+              {data?.customer?.whatsapp_enabled !== false && (
+                <TouchableOpacity
+                  testID="batch-edit-submit-whatsapp"
+                  style={[styles.modalBtn, { backgroundColor: "#25D366" }]}
+                  onPress={() => handleSave(true)}
+                  disabled={updating}
+                >
+                  {updating ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <MaterialCommunityIcons name="whatsapp" size={15} color="#fff" />
+                      <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>Save & Send WA</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -810,7 +878,21 @@ function Row({ label, value, sub, bold, accent, onPress }: { label: string; valu
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.md, gap: spacing.md },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  headerWhatsAppBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#25D366",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+  },
+  headerWhatsAppText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#fff",
+  },
   headerEditBtn: {
     flexDirection: "row",
     alignItems: "center",

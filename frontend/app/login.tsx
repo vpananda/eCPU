@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Image,
+  TouchableOpacity,
+  Keyboard,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
@@ -20,6 +30,22 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [gLoading, setGLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => setKeyboardVisible(true)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setKeyboardVisible(false)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -64,18 +90,41 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <View style={styles.hero}>
-            <View style={styles.logoWrap}>
-              <Image source={LOGO} style={styles.logoImg} resizeMode="contain" />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            {
+              flexGrow: 1,
+              paddingBottom: keyboardVisible ? 260 : spacing.xxl,
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.hero, keyboardVisible && styles.heroCompact]}>
+            <View style={[styles.logoWrap, keyboardVisible && styles.logoWrapCompact]}>
+              <Image
+                source={LOGO}
+                style={[styles.logoImg, keyboardVisible && styles.logoImgCompact]}
+                resizeMode="contain"
+              />
             </View>
-            <Text style={styles.tag}>Energy, Efficient, Environment</Text>
-            <View style={styles.subTagRow}>
-              <View style={styles.subTagLine} />
-              <Text style={styles.subTag}>Post Harvest Processing Unit</Text>
-              <View style={styles.subTagLine} />
-            </View>
+            {!keyboardVisible && (
+              <>
+                <Text style={styles.tag}>Energy, Efficient, Environment</Text>
+                <View style={styles.subTagRow}>
+                  <View style={styles.subTagLine} />
+                  <Text style={styles.subTag}>Post Harvest Processing Unit</Text>
+                  <View style={styles.subTagLine} />
+                </View>
+              </>
+            )}
           </View>
 
           <View style={styles.card}>
@@ -134,9 +183,11 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={{ alignItems: "center", marginTop: spacing.xl }}>
-            <ConnectionBadge showPing={true} />
-          </View>
+          {!keyboardVisible && (
+            <View style={{ alignItems: "center", marginTop: spacing.xl }}>
+              <ConnectionBadge showPing={true} />
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -147,6 +198,10 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: spacing.xl, paddingBottom: spacing.xxl },
   hero: { alignItems: "center", paddingVertical: spacing.xxl, gap: spacing.sm },
+  heroCompact: {
+    paddingVertical: spacing.xs,
+    gap: 2,
+  },
   logoWrap: {
     width: 108, height: 108, borderRadius: 32,
     backgroundColor: "#fff",
@@ -154,7 +209,18 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     shadowColor: "#2E7D32", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 6,
   },
+  logoWrapCompact: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    marginBottom: 0,
+    elevation: 2,
+  },
   logoImg: { width: 78, height: 78 },
+  logoImgCompact: {
+    width: 32,
+    height: 32,
+  },
   brand: {
     fontFamily: "Poppins-Black",
     fontSize: 72,

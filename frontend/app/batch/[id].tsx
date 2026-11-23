@@ -174,7 +174,22 @@ export default function BatchDetail() {
     }
     setSendingWa(true);
     try {
-      await api<any>(`/batches/${id}/send-arrival-whatsapp`, { method: "POST" });
+      try {
+        await api<any>(`/batches/${id}/send-arrival-whatsapp`, { method: "POST" });
+      } catch {
+        // Fallback to active endpoint on current server
+        await api<any>(`/whatsapp/send-arrival`, {
+          method: "POST",
+          body: {
+            phone,
+            customer_name: data.customer.name || "Customer",
+            branch_name: data.branch?.name || "Main Plant",
+            batch_no: data.batch_no,
+            weight: parseFloat(data.raw_weight || 0),
+            bags: parseInt(data.bags || 1, 10),
+          }
+        });
+      }
       toast.show(`WhatsApp receipt sent to ${data.customer.name} (${phone})!`);
     } catch (e: any) {
       toast.show(e.message || "Failed to send WhatsApp receipt", "error");
@@ -221,11 +236,37 @@ export default function BatchDetail() {
           send_whatsapp: withWhatsApp,
         }
       });
+
       if (withWhatsApp) {
         if (res?.whatsapp_sent) {
           toast.show("Arrival updated & WhatsApp receipt sent!");
         } else {
-          toast.show(res?.whatsapp_error || "Arrival updated, but WhatsApp message failed to deliver", "error");
+          // If server hasn't finished new deploy, dispatch directly via active /whatsapp/send-arrival
+          const phone = data?.customer?.mobile || data?.customer?.phone;
+          if (phone) {
+            try {
+              const waRes = await api<any>(`/whatsapp/send-arrival`, {
+                method: "POST",
+                body: {
+                  phone,
+                  customer_name: data.customer?.name || "Customer",
+                  branch_name: data.branch?.name || "Main Plant",
+                  batch_no: data.batch_no,
+                  weight: weightNum,
+                  bags: newBags ? parseInt(newBags, 10) : 1,
+                }
+              });
+              if (waRes?.success) {
+                toast.show("Arrival updated & WhatsApp receipt sent!");
+              } else {
+                toast.show(waRes?.error || "Arrival updated, but WhatsApp message failed to deliver", "error");
+              }
+            } catch (err: any) {
+              toast.show(err.message || "Arrival updated, but WhatsApp message failed to deliver", "error");
+            }
+          } else {
+            toast.show("Arrival updated (no customer phone registered)", "info");
+          }
         }
       } else {
         toast.show("Arrival & dryer details updated successfully");

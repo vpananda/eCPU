@@ -30,27 +30,27 @@ export function formatDisplayPhone(phone?: string | null): string {
 
 export const DISCLAIMERS_BY_LANG: Record<string, { wa: string; sms: string }> = {
   en: {
-    wa: "⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store in-charge immediately.",
+    wa: "> _Disclaimer: For any dispute or missing produce, contact your store in-charge._",
     sms: "Disclaimer: For any dispute or missing, contact your store in-charge.",
   },
   ta: {
-    wa: "⚠️ *Disclaimer / குறிப்பு:* For any dispute or missing produce, contact your store in-charge.\n_(ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உடனடியாக உங்கள் ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்)_",
+    wa: "> _குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உங்கள் ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்._",
     sms: "Disclaimer: ஏதேனும் முரண்பாடு அல்லது விடுபடலுக்கு ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்.",
   },
   ml: {
-    wa: "⚠️ *Disclaimer / നിരാകരണം:* For any dispute or missing produce, contact your store in-charge.\n_(എന്തെങ്കിലും തർക്കമോ കുറവോ ഉണ്ടെങ്കിൽ ഉടൻ തന്നെ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക)_",
+    wa: "> _നിരാകരണം: എന്തെങ്കിലും തർക്കമോ കുറവോ ഉണ്ടെങ്കിൽ ഉടൻ തന്നെ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക._",
     sms: "Disclaimer: തർക്കങ്ങൾക്കോ കുറവുകൾക്കോ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക.",
   },
   kn: {
-    wa: "⚠️ *Disclaimer / ಹಕ್ಕು ನಿರಾಕರಣೆ:* For any dispute or missing produce, contact your store in-charge.\n_(ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆ ಇದ್ದಲ್ಲಿ ತಕ್ಷಣ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ)_",
+    wa: "> _ಹಕ್ಕು ನಿರಾಕರಣೆ: ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆ ಇದ್ದಲ್ಲಿ ತಕ್ಷಣ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ._",
     sms: "Disclaimer: ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆಗೆ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   },
   te: {
-    wa: "⚠️ *Disclaimer / గమనిక:* For any dispute or missing produce, contact your store in-charge.\n_(ఏదైనా వివాదం లేదా సరుకు/బరువు తేడా ఉంటే, దయచేసి వెంటనే మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి)_",
-    sms: "Disclaimer: ఏదైనా వివాదం లేదా కొరతకు మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి.",
+    wa: "> _గమనిక: ఏదైనా వివాదం లేదా సరుకు తేడా ఉంటే, దయచేసి మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి._",
+    sms: "Disclaimer: ఏదైనా వివాదం அல்லது కొరతకు మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి.",
   },
   hi: {
-    wa: "⚠️ *Disclaimer / अस्वीकरण:* For any dispute or missing produce, contact your store in-charge.\n_(किसी भी विवाद, विसंगति या कमी के लिए कृपया तुरंत अपने स्टोर इन-चार्ज से संपर्क करें)_",
+    wa: "> _अस्वीकरण: किसी भी विवाद या कमी के लिए कृपया तुरंत अपने स्टोर इन-चार्ज से संपर्क करें।_",
     sms: "Disclaimer: किसी भी विवाद या कमी के लिए अपने स्टोर इन-चार्ज से संपर्क करें।",
   },
 };

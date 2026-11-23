@@ -133,7 +133,15 @@ WA_DISCLAIMERS = {
 }
 
 def get_whatsapp_disclaimer(lang: str = "en") -> str:
-    return WA_DISCLAIMERS.get((lang or "").lower(), WA_DISCLAIMERS["ta"])
+    disclaimers = {
+        "en": "> _Disclaimer: For any dispute or missing produce, contact your store in-charge._",
+        "ta": "> _குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உங்கள் ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்._",
+        "ml": "> _നിരാകരണം: എന്തെങ്കിലും തർക്കമോ കുറവോ ഉണ്ടെങ്കിൽ ഉടൻ തന്നെ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക._",
+        "kn": "> _ಹಕ್ಕು ನಿರಾಕರಣೆ: ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆ ಇದ್ದಲ್ಲಿ ತಕ್ಷಣ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ._",
+        "te": "> _గమనిక: ఏదైనా వివాదం அல்லது సరుకు తేడా ఉంటే, దయచేసి మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి._",
+        "hi": "> _अस्वीकरण: किसी भी विवाद या कमी के लिए कृपया तुरंत अपने स्टोर इन-चार्ज से संपर्क करें।_",
+    }
+    return disclaimers.get((lang or "").lower(), disclaimers["ta"])
 
 
 async def send_whatsapp_text(to_phone: str, message_text: str, language_code: str = "en") -> Dict[str, Any]:
@@ -236,7 +244,25 @@ async def send_arrival_receipt(
     branch_label = clean_branch_label(branch_name)
     lang = language_code or "en"
 
-    # 1. Try v6 (With Store In-charge Disclaimer, multilingual: en, ta, ml, kn, te, hi)
+    # 1. Try v7 (With Italic Blockquote Disclaimer: > _..._, multilingual: en, ta, ml, kn, te, hi)
+    res_v7 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_arrival_receipt_v7",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            formatted_time,
+            f"{raw_weight:,.1f}",
+            str(bags),
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v7.get("success"):
+        return res_v7
+
+    # 2. Try v6 (With Store In-charge Disclaimer, multilingual: en, ta, ml, kn, te, hi)
     res_v6 = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_arrival_receipt_v6",
@@ -340,7 +366,24 @@ async def send_drying_completed(
     lang = language_code or "en"
     padi_val = float(padi_weight or 0)
 
-    # 1. Try v6 (with Store In-charge Disclaimer and explicit Padi Weight line)
+    # 1. Try v7 (with Italic Blockquote Disclaimer: > _..._, explicit Padi Weight line)
+    res_v7 = await send_whatsapp_template(
+        to_phone=to_phone,
+        template_name="e3_drying_completed_v7",
+        parameters=[
+            customer_name,
+            clean_prod,
+            batch_no,
+            f"{dry_weight:,.2f}",
+            f"{padi_val:,.2f}",
+            branch_label
+        ],
+        language_code=lang
+    )
+    if res_v7.get("success"):
+        return res_v7
+
+    # 2. Try v6 (with Store In-charge Disclaimer and explicit Padi Weight line)
     res_v6 = await send_whatsapp_template(
         to_phone=to_phone,
         template_name="e3_drying_completed_v6",

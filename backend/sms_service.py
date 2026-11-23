@@ -44,7 +44,20 @@ async def check_sms_wallet() -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-async def send_sms(to_phone: str, message: str) -> Dict[str, Any]:
+SMS_DISCLAIMERS = {
+    "en": "Disclaimer: For any dispute or missing, contact your store in-charge.",
+    "ta": "Disclaimer: ஏதேனும் முரண்பாடு அல்லது விடுபடலுக்கு ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்.",
+    "ml": "Disclaimer: തർക്കങ്ങൾക്കോ കുറവുകൾക്കോ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക.",
+    "kn": "Disclaimer: ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆಗೆ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
+    "te": "Disclaimer: ఏదైనా వివాదం లేదా కొరతకు మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి.",
+    "hi": "Disclaimer: किसी भी विवाद या कमी के लिए स्टोर इन-चार्ज से संपर्क करें।",
+}
+
+def get_sms_disclaimer(lang: str = "en") -> str:
+    return SMS_DISCLAIMERS.get((lang or "").lower(), SMS_DISCLAIMERS["en"])
+
+
+async def send_sms(to_phone: str, message: str, language: str = "en") -> Dict[str, Any]:
     """
     Send an SMS via Fast2SMS Quick SMS Route.
     """
@@ -56,10 +69,10 @@ async def send_sms(to_phone: str, message: str) -> Dict[str, Any]:
     if not clean_phone:
         return {"success": False, "error": f"Invalid Indian 10-digit mobile number: '{to_phone}'"}
 
-    # Automatically append store operator disclaimer to every customer SMS if not already present
+    # Automatically append store in-charge disclaimer to every customer SMS if not already present
     sms_text = message.strip()
-    disclaimer = " Disclaimer: For any dispute or missing, contact your store operator."
-    if "dispute" not in sms_text.lower() and "store operator" not in sms_text.lower():
+    disclaimer = f" {get_sms_disclaimer(language)}"
+    if "dispute" not in sms_text.lower() and "in-charge" not in sms_text.lower() and "in charge" not in sms_text.lower():
         sms_text = f"{sms_text}\n{disclaimer}"
 
     payload = {

@@ -28,11 +28,45 @@ export function formatDisplayPhone(phone?: string | null): string {
   return phone;
 }
 
-export const CUSTOMER_DISCLAIMER_TEXT =
-  "⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store operator immediately.\n" +
-  "_(குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உடனடியாக உங்கள் ஸ்டோர் ஆப்பரேட்டரைத் தொடர்பு கொள்ளவும்)_";
+export const DISCLAIMERS_BY_LANG: Record<string, { wa: string; sms: string }> = {
+  en: {
+    wa: "⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store in-charge immediately.",
+    sms: "Disclaimer: For any dispute or missing, contact your store in-charge.",
+  },
+  ta: {
+    wa: "⚠️ *Disclaimer / குறிப்பு:* For any dispute or missing produce, contact your store in-charge.\n_(ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உடனடியாக உங்கள் ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்)_",
+    sms: "Disclaimer: ஏதேனும் முரண்பாடு அல்லது விடுபடலுக்கு ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்.",
+  },
+  ml: {
+    wa: "⚠️ *Disclaimer / നിരാകരണം:* For any dispute or missing produce, contact your store in-charge.\n_(എന്തെങ്കിലും തർക്കമോ കുറവോ ഉണ്ടെങ്കിൽ ഉടൻ തന്നെ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക)_",
+    sms: "Disclaimer: തർക്കങ്ങൾക്കോ കുറവുകൾക്കോ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക.",
+  },
+  kn: {
+    wa: "⚠️ *Disclaimer / ಹಕ್ಕು ನಿರಾಕರಣೆ:* For any dispute or missing produce, contact your store in-charge.\n_(ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆ ಇದ್ದಲ್ಲಿ ತಕ್ಷಣ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ)_",
+    sms: "Disclaimer: ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆಗೆ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ.",
+  },
+  te: {
+    wa: "⚠️ *Disclaimer / గమనిక:* For any dispute or missing produce, contact your store in-charge.\n_(ఏదైనా వివాదం లేదా సరుకు/బరువు తేడా ఉంటే, దయచేసి వెంటనే మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి)_",
+    sms: "Disclaimer: ఏదైనా వివాదం లేదా కొరతకు మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి.",
+  },
+  hi: {
+    wa: "⚠️ *Disclaimer / अस्वीकरण:* For any dispute or missing produce, contact your store in-charge.\n_(किसी भी विवाद, विसंगति या कमी के लिए कृपया तुरंत अपने स्टोर इन-चार्ज से संपर्क करें)_",
+    sms: "Disclaimer: किसी भी विवाद या कमी के लिए अपने स्टोर इन-चार्ज से संपर्क करें।",
+  },
+};
 
-export const SMS_DISCLAIMER_TEXT = "Disclaimer: For any dispute or missing, contact your store operator.";
+export function getCustomerDisclaimer(lang?: string): string {
+  const code = (lang || "").toLowerCase();
+  return (DISCLAIMERS_BY_LANG[code] || DISCLAIMERS_BY_LANG["ta"]).wa;
+}
+
+export function getSmsDisclaimer(lang?: string): string {
+  const code = (lang || "").toLowerCase();
+  return (DISCLAIMERS_BY_LANG[code] || DISCLAIMERS_BY_LANG["en"]).sms;
+}
+
+export const CUSTOMER_DISCLAIMER_TEXT = getCustomerDisclaimer("ta");
+export const SMS_DISCLAIMER_TEXT = getSmsDisclaimer("en");
 
 export async function openWhatsApp(phone: string, text: string): Promise<boolean> {
   const cleanPhone = formatWhatsAppPhone(phone);
@@ -71,11 +105,12 @@ export async function openWhatsApp(phone: string, text: string): Promise<boolean
   }
 }
 
-export async function openSMS(phone: string, text: string): Promise<boolean> {
+export async function openSMS(phone: string, text: string, lang?: string): Promise<boolean> {
   const digits = (phone || "").replace(/[^\d+]/g, "");
   let fullText = text;
-  if (!fullText.toLowerCase().includes("dispute") && !fullText.toLowerCase().includes("store operator")) {
-    fullText = `${fullText.trim()}\n\n${SMS_DISCLAIMER_TEXT}`;
+  const lower = fullText.toLowerCase();
+  if (!lower.includes("dispute") && !lower.includes("in-charge") && !lower.includes("in charge")) {
+    fullText = `${fullText.trim()}\n\n${getSmsDisclaimer(lang)}`;
   }
   const encoded = encodeURIComponent(fullText);
   const separator = Platform.OS === "ios" ? "&" : "?";
@@ -104,6 +139,7 @@ export interface ArrivalNotificationParams {
   bags?: number | string;
   ratePerKg?: number | string;
   receivedFrom?: string;
+  language?: string;
 }
 
 export function buildArrivalMessage(p: ArrivalNotificationParams): string {
@@ -126,7 +162,7 @@ export function buildArrivalMessage(p: ArrivalNotificationParams): string {
     `${recvText}\n` +
     `--------------------------------\n` +
     `_Your produce has been received safely at our factory for drying. We will notify you once processing is complete. Thank you!_\n\n` +
-    `${CUSTOMER_DISCLAIMER_TEXT}`
+    `${getCustomerDisclaimer(p.language)}`
   );
 }
 
@@ -140,6 +176,7 @@ export interface PaymentNotificationParams {
   batchNo?: string;
   remarks?: string;
   balanceDue?: number | string;
+  language?: string;
 }
 
 export function buildPaymentReceiptMessage(p: PaymentNotificationParams): string {
@@ -165,7 +202,7 @@ export function buildPaymentReceiptMessage(p: PaymentNotificationParams): string
     `${balText}\n` +
     `--------------------------------\n` +
     `_Thank you! We have received your payment._\n\n` +
-    `${CUSTOMER_DISCLAIMER_TEXT}`
+    `${getCustomerDisclaimer(p.language)}`
   );
 }
 
@@ -180,6 +217,7 @@ export interface StatementReminderParams {
   balanceDue: number | string;
   frequencyLabel?: string;
   customNote?: string;
+  language?: string;
 }
 
 export function buildStatementReminderMessage(p: StatementReminderParams): string {
@@ -204,7 +242,7 @@ export function buildStatementReminderMessage(p: StatementReminderParams): strin
     `--------------------------------` +
     `${note}` +
     `\n_Kindly review and clear any pending balance at your earliest convenience._\n\n` +
-    `${CUSTOMER_DISCLAIMER_TEXT}`
+    `${getCustomerDisclaimer(p.language)}`
   );
 }
 
@@ -229,6 +267,7 @@ export interface WeeklyStatementParams {
   batches: WeeklyStatementBatchItem[];
   totalPaid?: number;
   customNote?: string;
+  language?: string;
 }
 
 export function buildWeeklyStatementTableMessage(p: WeeklyStatementParams): string {
@@ -328,7 +367,7 @@ export function buildWeeklyStatementTableMessage(p: WeeklyStatementParams): stri
   if (note) lines.push(note.trim());
   lines.push("_Kindly verify your lot weights and settle pending balance._");
   lines.push("");
-  lines.push(CUSTOMER_DISCLAIMER_TEXT);
+  lines.push(getCustomerDisclaimer(p.language));
 
   return lines.join("\n");
 }

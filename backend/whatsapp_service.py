@@ -123,7 +123,20 @@ async def send_whatsapp_template(
         logger.error(f"WhatsApp request failed: {e}")
         return {"success": False, "error": str(e)}
 
-async def send_whatsapp_text(to_phone: str, message_text: str) -> Dict[str, Any]:
+WA_DISCLAIMERS = {
+    "en": "⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store in-charge immediately.",
+    "ta": "⚠️ *Disclaimer / குறிப்பு:* For any dispute or missing produce, contact your store in-charge.\n_(ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உடனடியாக உங்கள் ஸ்டோர் இன்சார்ஜை தொடர்பு கொள்ளவும்)_",
+    "ml": "⚠️ *Disclaimer / നിരാകരണം:* For any dispute or missing produce, contact your store in-charge.\n_(എന്തെങ്കിലും തർക്കമോ കുറവോ ഉണ്ടെങ്കിൽ ഉടൻ തന്നെ നിങ്ങളുടെ സ്റ്റോർ ഇൻ-ചാർജുമായി ബന്ധപ്പെടുക)_",
+    "kn": "⚠️ *Disclaimer / ಹಕ್ಕು ನಿರಾಕರಣೆ:* For any dispute or missing produce, contact your store in-charge.\n_(ಯಾವುದೇ ವಿವಾದ ಅಥವಾ ಕೊರತೆ ಇದ್ದಲ್ಲಿ ತಕ್ಷಣ ನಿಮ್ಮ ಸ್ಟೋರ್ ಇನ್‌ಚಾರ್ಜ್ ಅವರನ್ನು ಸಂಪರ್ಕಿಸಿ)_",
+    "te": "⚠️ *Disclaimer / గమనిక:* For any dispute or missing produce, contact your store in-charge.\n_(ఏదైనా వివాదం లేదా సరుకు/బరువు తేడా ఉంటే, దయచేసి వెంటనే మీ స్టోర్ ఇన్-ఛార్జ్ ను సంప్రదించండి)_",
+    "hi": "⚠️ *Disclaimer / अस्वीकरण:* For any dispute or missing produce, contact your store in-charge.\n_(किसी भी विवाद, विसंगति या कमी के लिए कृपया तुरंत अपने स्टोर इन-चार्ज से संपर्क करें)_",
+}
+
+def get_whatsapp_disclaimer(lang: str = "en") -> str:
+    return WA_DISCLAIMERS.get((lang or "").lower(), WA_DISCLAIMERS["ta"])
+
+
+async def send_whatsapp_text(to_phone: str, message_text: str, language_code: str = "en") -> Dict[str, Any]:
     """
     Send a direct text message via WhatsApp Cloud API.
     (Note: Meta allows freeform text if recipient has messaged your business number in the past 24 hours).
@@ -139,13 +152,10 @@ async def send_whatsapp_text(to_phone: str, message_text: str) -> Dict[str, Any]
     if not clean_to:
         return {"success": False, "error": f"Invalid recipient phone: '{to_phone}'"}
 
-    # Automatically append store operator disclaimer if not already present
+    # Automatically append store in-charge disclaimer if not already present
     body_text = message_text.strip()
-    disclaimer = (
-        "\n\n⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store operator immediately.\n"
-        "_(குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உங்கள் ஸ்டோர் ஆப்பரேட்டரை தொடர்பு கொள்ளவும்)_"
-    )
-    if "dispute" not in body_text.lower() and "store operator" not in body_text.lower():
+    disclaimer = f"\n\n{get_whatsapp_disclaimer(language_code)}"
+    if "dispute" not in body_text.lower() and "in-charge" not in body_text.lower() and "in charge" not in body_text.lower():
         body_text = f"{body_text}{disclaimer}"
 
     payload = {

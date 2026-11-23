@@ -28,6 +28,12 @@ export function formatDisplayPhone(phone?: string | null): string {
   return phone;
 }
 
+export const CUSTOMER_DISCLAIMER_TEXT =
+  "⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store operator immediately.\n" +
+  "_(குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உடனடியாக உங்கள் ஸ்டோர் ஆப்பரேட்டரைத் தொடர்பு கொள்ளவும்)_";
+
+export const SMS_DISCLAIMER_TEXT = "Disclaimer: For any dispute or missing, contact your store operator.";
+
 export async function openWhatsApp(phone: string, text: string): Promise<boolean> {
   const cleanPhone = formatWhatsAppPhone(phone);
   const encoded = encodeURIComponent(text);
@@ -67,7 +73,11 @@ export async function openWhatsApp(phone: string, text: string): Promise<boolean
 
 export async function openSMS(phone: string, text: string): Promise<boolean> {
   const digits = (phone || "").replace(/[^\d+]/g, "");
-  const encoded = encodeURIComponent(text);
+  let fullText = text;
+  if (!fullText.toLowerCase().includes("dispute") && !fullText.toLowerCase().includes("store operator")) {
+    fullText = `${fullText.trim()}\n\n${SMS_DISCLAIMER_TEXT}`;
+  }
+  const encoded = encodeURIComponent(fullText);
   const separator = Platform.OS === "ios" ? "&" : "?";
   const url = digits
     ? `sms:${digits}${separator}body=${encoded}`
@@ -115,7 +125,8 @@ export function buildArrivalMessage(p: ArrivalNotificationParams): string {
     `${rateText}` +
     `${recvText}\n` +
     `--------------------------------\n` +
-    `_Your produce has been received safely at our factory for drying. We will notify you once processing is complete. Thank you!_`
+    `_Your produce has been received safely at our factory for drying. We will notify you once processing is complete. Thank you!_\n\n` +
+    `${CUSTOMER_DISCLAIMER_TEXT}`
   );
 }
 
@@ -153,7 +164,8 @@ export function buildPaymentReceiptMessage(p: PaymentNotificationParams): string
     `${remText}` +
     `${balText}\n` +
     `--------------------------------\n` +
-    `_Thank you! We have received your payment._`
+    `_Thank you! We have received your payment._\n\n` +
+    `${CUSTOMER_DISCLAIMER_TEXT}`
   );
 }
 
@@ -191,7 +203,8 @@ export function buildStatementReminderMessage(p: StatementReminderParams): strin
     `⚖️ *Pending Balance Due: ₹${Number(p.balanceDue).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n` +
     `--------------------------------` +
     `${note}` +
-    `\n_Kindly review and clear any pending balance at your earliest convenience. For queries, please contact our factory incharge. Thank you!_`
+    `\n_Kindly review and clear any pending balance at your earliest convenience._\n\n` +
+    `${CUSTOMER_DISCLAIMER_TEXT}`
   );
 }
 
@@ -313,7 +326,9 @@ export function buildWeeklyStatementTableMessage(p: WeeklyStatementParams): stri
   }
   lines.push("--------------------------------");
   if (note) lines.push(note.trim());
-  lines.push("_Kindly verify your lot weights and settle pending balance. For assistance, contact branch factory._");
+  lines.push("_Kindly verify your lot weights and settle pending balance._");
+  lines.push("");
+  lines.push(CUSTOMER_DISCLAIMER_TEXT);
 
   return lines.join("\n");
 }

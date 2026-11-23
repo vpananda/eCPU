@@ -139,12 +139,21 @@ async def send_whatsapp_text(to_phone: str, message_text: str) -> Dict[str, Any]
     if not clean_to:
         return {"success": False, "error": f"Invalid recipient phone: '{to_phone}'"}
 
+    # Automatically append store operator disclaimer if not already present
+    body_text = message_text.strip()
+    disclaimer = (
+        "\n\n⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store operator immediately.\n"
+        "_(குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உங்கள் ஸ்டோர் ஆப்பரேட்டரை தொடர்பு கொள்ளவும்)_"
+    )
+    if "dispute" not in body_text.lower() and "store operator" not in body_text.lower():
+        body_text = f"{body_text}{disclaimer}"
+
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
         "to": clean_to,
         "type": "text",
-        "text": {"preview_url": False, "body": message_text}
+        "text": {"preview_url": False, "body": body_text}
     }
 
     url = f"https://graph.facebook.com/{API_VERSION}/{phone_id}/messages"

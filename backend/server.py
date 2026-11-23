@@ -4506,7 +4506,8 @@ def _format_whatsapp_weekly_statement(customer_name: str, branch_name: str, batc
     else:
         lines.append("• 🟢 *Balance Due: Fully Settled*")
     lines.append("--------------------------------")
-    lines.append("_Kindly verify your lot weights and settle pending balance. For queries, contact branch factory._")
+    lines.append("⚠️ *Disclaimer:* For any dispute, discrepancy, or missing produce/weight, please contact your store operator immediately.")
+    lines.append("_(குறிப்பு: ஏதேனும் முரண்பாடு அல்லது விடுபட்ட விவரங்களுக்கு உடனடியாக உங்கள் ஸ்டோர் ஆப்பரேட்டரைத் தொடர்பு கொள்ளவும்)_")
     
     return "\n".join(lines)
 

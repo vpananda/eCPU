@@ -56,9 +56,15 @@ async def send_sms(to_phone: str, message: str) -> Dict[str, Any]:
     if not clean_phone:
         return {"success": False, "error": f"Invalid Indian 10-digit mobile number: '{to_phone}'"}
 
+    # Automatically append store operator disclaimer to every customer SMS if not already present
+    sms_text = message.strip()
+    disclaimer = " Disclaimer: For any dispute or missing, contact your store operator."
+    if "dispute" not in sms_text.lower() and "store operator" not in sms_text.lower():
+        sms_text = f"{sms_text}\n{disclaimer}"
+
     payload = {
         "route": "q",
-        "message": message,
+        "message": sms_text,
         "language": "english",
         "flash": 0,
         "numbers": clean_phone

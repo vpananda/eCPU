@@ -158,7 +158,30 @@ def get_sheets_client(service_account_info: Optional[Dict[str, Any]] = None, she
             gc = gspread.service_account(filename=creds_path)
             return gc.open_by_key(target_sheet_id)
 
-        logger.debug("Google service account credentials not found in env or file")
+        # 5. Database fallback: Load credentials securely from public.settings table
+        global _cached_service_account_info
+        if "_cached_service_account_info" in globals() and _cached_service_account_info:
+            gc = gspread.service_account_from_dict(_cached_service_account_info)
+            return gc.open_by_key(target_sheet_id)
+
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            try:
+                import psycopg
+                from psycopg.rows import dict_row
+                with psycopg.connect(db_url, row_factory=dict_row) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT value FROM public.settings WHERE key = 'google_service_account' LIMIT 1")
+                        row = cur.fetchone()
+                        if row and row.get("value"):
+                            info = row["value"] if isinstance(row["value"], dict) else json.loads(row["value"])
+                            _cached_service_account_info = info
+                            gc = gspread.service_account_from_dict(info)
+                            return gc.open_by_key(target_sheet_id)
+            except Exception as db_err:
+                logger.debug(f"Failed to load service account from DB: {db_err}")
+
+        logger.debug("Google service account credentials not found in env, file, or DB settings")
         return None
     except Exception as e:
         logger.error(f"Failed to connect to Google Sheet {target_sheet_id}: {e}")

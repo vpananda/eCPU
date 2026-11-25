@@ -2411,13 +2411,10 @@ async def create_customer(body: CustomerIn, user: dict = Depends(get_current_use
     if not can_write_to_branch(user, target_branch_id):
         raise HTTPException(status_code=403, detail="Cannot create in this branch")
 
-    # Check for duplicate customer
-    mobile = body.mobile.strip() if body.mobile else ""
-    if mobile and not mobile.startswith("90001"):
-        existing_mob = await db.customers.find_one({"mobile": mobile, "is_deleted": {"$ne": True}})
-        if existing_mob:
-            raise HTTPException(status_code=400, detail=f"Customer with mobile {mobile} already exists ({existing_mob.get('name')}, {existing_mob.get('code')})")
-
+    # Check for duplicate customer name in branch
+    # Note: Duplicate phone numbers are explicitly permitted (Option 1) so planters managing
+    # multiple farms/estates can have distinct profiles (e.g., "Murugan (Farm A)" vs "Murugan (Farm B)")
+    # while sharing the same mobile number for WhatsApp alerts and receipts.
     existing_name = await db.customers.find_one({
         "name": body.name.strip(),
         "branch_id": target_branch_id,
@@ -2478,6 +2475,18 @@ async def update_customer(cid: str, body: CustomerIn,
             upd["branch_id"] = before.get("branch_id")
     else:
         upd["branch_id"] = before.get("branch_id")
+
+    target_branch = upd.get("branch_id")
+    if body.name and body.name.strip():
+        existing_name = await db.customers.find_one({
+            "name": body.name.strip(),
+            "branch_id": target_branch,
+            "id": {"$ne": cid},
+            "is_deleted": {"$ne": True}
+        })
+        if existing_name:
+            raise HTTPException(status_code=400, detail=f"Customer '{body.name.strip()}' already exists in this branch ({existing_name.get('code')})")
+
     upd["updated_at"] = now_utc().isoformat()
     upd["updated_by"] = user["id"]
     await db.customers.update_one({"id": cid}, {"$set": upd})

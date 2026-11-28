@@ -4581,10 +4581,11 @@ def _format_whatsapp_weekly_statement(
     lines.append(f"📅 Statement Date: {today_str}")
     lines.append("")
     lines.append("```")
-    lines.append("Sl|Date    |Arrival|Proc  |Padi|Amount ")
-    lines.append("--+--------+-------+------+----+-------")
+    lines.append("Sl|Date  |Wet  |Dry  |Ratio|Padi|Amount")
+    lines.append("--+------+-----+-----+-----+----+------")
     
     tot_arr = 0.0
+    tot_proc_wet = 0.0
     tot_proc = 0.0
     tot_amt = 0.0
     padi_sum = 0.0
@@ -4595,26 +4596,39 @@ def _format_whatsapp_weekly_statement(
     
     for i, b in enumerate(batches, start=1):
         sl = f"{i:02d}"
-        d_str = str(b.get("date_str") or " - ")[:8].ljust(8)
+        d_val = str(b.get("date_str") or " - ")
+        d_str = (d_val[:5] if len(d_val) >= 5 else d_val).ljust(6)
         raw = float(b.get("raw_weight") or 0)
         tot_arr += raw
-        raw_str = (f"{int(raw)}k" if raw < 1000 else f"{int(raw)}").rjust(5) + " "
+        raw_str = (f"{int(raw)}k" if raw < 1000 else f"{int(raw)}").rjust(4) + " "
         
         status = str(b.get("status") or "")
         dry = b.get("actual_dry_weight")
+        ratio_val = b.get("ratio")
+        
         if status in ("In Queue", "Drying", "Received", "Loaded"):
-            proc_str = "Drying"
+            proc_str = "Dryng"
+            ratio_str = "  -  "
             drying_cnt += 1
         elif dry is not None and float(dry) > 0:
             val = float(dry)
             tot_proc += val
-            proc_str = f"{val:6.1f}"
+            tot_proc_wet += raw
+            proc_str = f"{val:4.1f}k" if val < 100 else f"{val:5.1f}"
+            if len(proc_str) > 5:
+                proc_str = f"{val:5.1f}"[:5]
+            
+            # Ratio = Arrival (Wet) vs Dry Process
+            r_num = float(ratio_val) if ratio_val is not None else round(raw / val, 2)
+            ratio_str = f"{r_num:5.2f}"
+            
             if status == "Delivered":
                 deliv_cnt += 1
             else:
                 ready_cnt += 1
         else:
-            proc_str = "  -   "
+            proc_str = "  -  "
+            ratio_str = "  -  "
             
         padi = float(b.get("padi_weight") or 0)
         if padi > 0:
@@ -4626,18 +4640,21 @@ def _format_whatsapp_weekly_statement(
             
         amt = float(b.get("bill_amount") or 0)
         tot_amt += amt
-        amt_str = f"₹{int(amt):,}".rjust(7) if amt > 0 else "   -   "
+        amt_str = f"₹{int(amt):,}".rjust(6) if amt > 0 else "   -  "
         
-        lines.append(f"{sl}|{d_str}|{raw_str}|{proc_str}|{padi_str}|{amt_str}")
+        lines.append(f"{sl}|{d_str}|{raw_str}|{proc_str}|{ratio_str}|{padi_str}|{amt_str}")
     lines.append("```")
     
     bal = max(0.0, round(tot_amt - total_paid, 2))
     avg_padi = round(padi_sum / padi_cnt, 1) if padi_cnt > 0 else 0
+    overall_ratio = round(tot_proc_wet / tot_proc, 2) if tot_proc > 0 else 0.0
     
     lines.append("--------------------------------")
     lines.append("📊 *SUMMARY TOTALS*")
     lines.append(f"• Total Arrival Wet : *{tot_arr:,.1f} kg*")
     lines.append(f"• Processed Dry     : *{tot_proc:,.1f} kg*")
+    if overall_ratio > 0:
+        lines.append(f"• Overall Ratio     : *{overall_ratio:.2f} : 1* (Wet to Dry)")
     if avg_padi > 0:
         lines.append(f"• Average Padi Wt   : *{avg_padi} g/L*")
     if ready_cnt > 0:
@@ -4725,6 +4742,7 @@ async def get_customer_weekly_statement(
 
     batches = []
     tot_wet = 0.0
+    tot_proc_wet = 0.0
     tot_dry = 0.0
     tot_billed = 0.0
     padi_sum = 0.0
@@ -4742,10 +4760,13 @@ async def get_customer_weekly_statement(
 
         tot_wet += raw
         tot_billed += amt
+        ratio = None
         if status in ("In Queue", "Drying", "Received", "Loaded"):
             drying_count += 1
         elif dry > 0:
             tot_dry += dry
+            tot_proc_wet += raw
+            ratio = round(raw / dry, 2)
             if status == "Delivered":
                 delivered_count += 1
             else:
@@ -4763,6 +4784,7 @@ async def get_customer_weekly_statement(
             "arrival_date": r.get("arrival_date"),
             "raw_weight": raw,
             "actual_dry_weight": dry if dry > 0 else None,
+            "ratio": ratio,
             "padi_weight": padi if padi > 0 else None,
             "rate_per_kg": float(r.get("rate_per_kg") or 0),
             "bill_amount": amt,
@@ -4771,6 +4793,7 @@ async def get_customer_weekly_statement(
 
     balance_due = max(0.0, round(tot_billed - total_paid, 2))
     avg_padi = round(padi_sum / padi_count, 1) if padi_count > 0 else 0.0
+    overall_ratio = round(tot_proc_wet / tot_dry, 2) if tot_dry > 0 else 0.0
 
     # Build formatted WhatsApp text
     wa_msg = _format_whatsapp_weekly_statement(
@@ -4797,6 +4820,8 @@ async def get_customer_weekly_statement(
             "total_lots": len(batches),
             "total_wet_arrival": round(tot_wet, 1),
             "total_processed_dry": round(tot_dry, 1),
+            "processed_wet": round(tot_proc_wet, 1),
+            "overall_ratio": overall_ratio,
             "avg_padi_weight": avg_padi,
             "drying_count": drying_count,
             "ready_count": ready_count,

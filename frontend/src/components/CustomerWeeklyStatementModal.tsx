@@ -24,6 +24,7 @@ interface BatchItem {
   arrival_date?: string;
   raw_weight: number;
   actual_dry_weight?: number | null;
+  ratio?: number | null;
   padi_weight?: number | null;
   rate_per_kg: number;
   bill_amount: number;
@@ -34,6 +35,8 @@ interface StatementSummary {
   total_lots: number;
   total_wet_arrival: number;
   total_processed_dry: number;
+  processed_wet?: number;
+  overall_ratio?: number;
   avg_padi_weight: number;
   drying_count: number;
   ready_count: number;
@@ -228,11 +231,12 @@ export default function CustomerWeeklyStatementModal({
               {/* Tabular Column Table */}
               <View style={styles.tableCard}>
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.th, { width: 34 }]}>Sl</Text>
-                  <Text style={[styles.th, { width: 68 }]}>Date</Text>
-                  <Text style={[styles.th, { width: 62, textAlign: "right" }]}>Arrival</Text>
-                  <Text style={[styles.th, { width: 62, textAlign: "right" }]}>Process</Text>
-                  <Text style={[styles.th, { width: 50, textAlign: "right" }]}>Padi</Text>
+                  <Text style={[styles.th, { width: 28 }]}>Sl</Text>
+                  <Text style={[styles.th, { width: 62 }]}>Date</Text>
+                  <Text style={[styles.th, { width: 54, textAlign: "right" }]}>Arrival</Text>
+                  <Text style={[styles.th, { width: 54, textAlign: "right" }]}>Process</Text>
+                  <Text style={[styles.th, { width: 44, textAlign: "right" }]}>Ratio</Text>
+                  <Text style={[styles.th, { width: 40, textAlign: "right" }]}>Padi</Text>
                   <Text style={[styles.th, { flex: 1, textAlign: "right" }]}>Amount</Text>
                 </View>
 
@@ -245,23 +249,29 @@ export default function CustomerWeeklyStatementModal({
                     const isEven = idx % 2 === 0;
                     const isDrying = b.status === "In Queue" || b.status === "Drying" || b.status === "Received" || b.status === "Loaded";
                     const isDelivered = b.status === "Delivered";
+                    const calcRatio =
+                      b.ratio != null
+                        ? Number(b.ratio).toFixed(2)
+                        : b.actual_dry_weight && b.actual_dry_weight > 0 && b.raw_weight > 0
+                        ? (b.raw_weight / b.actual_dry_weight).toFixed(2)
+                        : null;
 
                     return (
                       <View key={b.batch_id || idx} style={[styles.tr, isEven && styles.trEven]}>
-                        <Text style={[styles.td, { width: 34, fontWeight: "700" }]}>
+                        <Text style={[styles.td, { width: 28, fontWeight: "700" }]}>
                           {String(idx + 1).padStart(2, "0")}
                         </Text>
-                        <Text style={[styles.td, { width: 68, fontSize: 11 }]}>
+                        <Text style={[styles.td, { width: 62, fontSize: 11 }]}>
                           {b.date_str || " - "}
                         </Text>
-                        <Text style={[styles.td, { width: 62, textAlign: "right", fontWeight: "700" }]}>
+                        <Text style={[styles.td, { width: 54, textAlign: "right", fontWeight: "700" }]}>
                           {b.raw_weight} <Text style={styles.unit}>kg</Text>
                         </Text>
                         <Text
                           style={[
                             styles.td,
                             {
-                              width: 62,
+                              width: 54,
                               textAlign: "right",
                               color: isDrying ? "#D97706" : colors.primary,
                               fontWeight: "700",
@@ -270,7 +280,20 @@ export default function CustomerWeeklyStatementModal({
                         >
                           {isDrying ? "Drying" : b.actual_dry_weight ? `${b.actual_dry_weight} kg` : "-"}
                         </Text>
-                        <Text style={[styles.td, { width: 50, textAlign: "right", color: colors.textMuted }]}>
+                        <Text
+                          style={[
+                            styles.td,
+                            {
+                              width: 44,
+                              textAlign: "right",
+                              color: calcRatio ? colors.primaryDark : colors.textMuted,
+                              fontWeight: "700",
+                            },
+                          ]}
+                        >
+                          {calcRatio ? calcRatio : "-"}
+                        </Text>
+                        <Text style={[styles.td, { width: 40, textAlign: "right", color: colors.textMuted }]}>
                           {b.padi_weight ? Math.round(b.padi_weight) : "-"}
                         </Text>
                         <Text style={[styles.td, { flex: 1, textAlign: "right", fontWeight: "700" }]}>
@@ -305,7 +328,34 @@ export default function CustomerWeeklyStatementModal({
                     </View>
                   </View>
 
-                  <View style={[styles.summaryRow, { marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: "#E5E7EB" }]}>
+                  {/* Ratio & Quality Metric Row */}
+                  <View style={[styles.summaryRow, { marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: "#BBF7D0" }]}>
+                    <View style={styles.summaryCol}>
+                      <Text style={styles.summaryLabel}>Overall Ratio (Wet:Dry)</Text>
+                      <Text style={[styles.summaryVal, { color: colors.primaryDark }]}>
+                        {(summary.overall_ratio != null && summary.overall_ratio > 0)
+                          ? `${Number(summary.overall_ratio).toFixed(2)} : 1`
+                          : summary.total_processed_dry > 0
+                          ? `${((summary.processed_wet || summary.total_wet_arrival) / summary.total_processed_dry).toFixed(2)} : 1`
+                          : "-"}
+                      </Text>
+                      <Text style={styles.summarySub}>
+                        {summary.processed_wet
+                          ? `${summary.processed_wet.toLocaleString("en-IN", { maximumFractionDigits: 1 })} kg processed`
+                          : `${summary.ready_count} lots dried`}
+                      </Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryCol}>
+                      <Text style={styles.summaryLabel}>Avg Padi Weight</Text>
+                      <Text style={styles.summaryVal}>
+                        {summary.avg_padi_weight ? `${Math.round(summary.avg_padi_weight)} g/L` : "-"}
+                      </Text>
+                      <Text style={styles.summarySub}>Bulk Density</Text>
+                    </View>
+                  </View>
+
+                  <View style={[styles.summaryRow, { marginTop: spacing.md, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: "#BBF7D0" }]}>
                     <View style={styles.summaryCol}>
                       <Text style={styles.summaryLabel}>Total Charges</Text>
                       <Text style={styles.summaryVal}>₹{summary.total_billed.toLocaleString("en-IN")}</Text>
